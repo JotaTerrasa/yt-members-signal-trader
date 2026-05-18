@@ -142,6 +142,7 @@ const appState = {
   simTouched: false,
   trades: [],
   paperTrades: [],
+  exchangePositions: [],
   risk: null,
   logs: []
 };
@@ -391,6 +392,7 @@ async function loadBingx() {
   appState.bingx = response.bingx;
   appState.trades = response.trades || appState.trades;
   appState.paperTrades = response.paperTrades || appState.paperTrades;
+  appState.exchangePositions = response.exchangePositions || appState.exchangePositions;
   appState.risk = response.risk || appState.risk;
   renderBingx(response.bingx);
   if (response.bingx?.apiKeyConfigured && response.bingx?.apiSecretConfigured) {
@@ -625,7 +627,7 @@ function renderPnl() {
   const reference = currentReferenceLedger();
   const rows = pnlRowsWithReferenceLedger(pnlRowsWithLocalTrades(appState.pnl?.months || []), reference);
   const current = summarizePnlRows(rows.filter((row) => row.month === currentMonthKey()));
-  const openPositions = openPaperPositions();
+  const openPositions = openTradingPositions();
   const closedPositions = closedPaperPositions();
   const displayOpenPositions = reference?.positions?.filter((position) => position.status === 'open') || openPositions;
   const displayClosedPositions = reference?.positions?.filter((position) => position.status === 'closed') || closedPositions;
@@ -1234,14 +1236,21 @@ function renderPnlRow(row) {
   `;
 }
 
-function renderOpenPositions(openPositions = openPaperPositions()) {
+function renderOpenPositions(openPositions = openTradingPositions()) {
   elements.openPositionsStatus.textContent = `${openPositions.length} abiertas`;
   elements.openPositionsEmpty.classList.toggle('hidden', openPositions.length > 0);
+  elements.openPositionsEmpty.textContent = exchangePositionMode()
+    ? 'Sin posiciones abiertas en BingX.'
+    : 'Sin posiciones paper abiertas.';
   elements.openPositionsList.innerHTML = openPositions.map(renderOpenPositionCard).join('');
 }
 
 function renderOpenPositionCard(position) {
   const sideClass = escapeAttribute(String(position.direction || '').toLowerCase());
+  const sourceLabel = position.source === 'demo'
+    ? 'Demo VST'
+    : position.source === 'live' ? 'Live real' : 'Paper';
+  const pnl = Number(position.unrealizedPnl ?? position.paperPnl ?? 0);
   return `
     <article class="position-card ${sideClass}">
       <div class="position-card-top">
@@ -1249,7 +1258,7 @@ function renderOpenPositionCard(position) {
           <span class="side ${sideClass}">${escapeHtml(position.direction || '-')}</span>
           <strong>${escapeHtml(position.symbol || '-')}</strong>
         </div>
-        <span class="${amountClass(position.paperPnl)}">${escapeHtml(formatUsdt(position.paperPnl))}</span>
+        <span class="${amountClass(pnl)}">${escapeHtml(formatUsdt(pnl))}</span>
       </div>
       <div class="position-card-grid">
         <div>
@@ -1270,6 +1279,7 @@ function renderOpenPositionCard(position) {
         </div>
       </div>
       <div class="position-card-footer">
+        <span>${escapeHtml(sourceLabel)}</span>
         <span>${escapeHtml(formatLeverage(position.leverage))}</span>
         <span>Margen ${escapeHtml(formatUsdt(position.notional))}</span>
         <span>Exposicion ${escapeHtml(formatUsdt(position.exposure || position.notional))}</span>
@@ -1277,6 +1287,20 @@ function renderOpenPositionCard(position) {
       </div>
     </article>
   `;
+}
+
+function openTradingPositions() {
+  return exchangePositionMode() ? openExchangePositions() : openPaperPositions();
+}
+
+function exchangePositionMode() {
+  return appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'live';
+}
+
+function openExchangePositions() {
+  return (appState.exchangePositions || [])
+    .filter((position) => position.status === 'open')
+    .sort((a, b) => Math.abs(Number(b.unrealizedPnl || b.paperPnl || 0)) - Math.abs(Number(a.unrealizedPnl || a.paperPnl || 0)));
 }
 
 function openPaperPositions() {
@@ -1694,6 +1718,20 @@ function upsertPaperTrade(position) {
 
 function tradeHistoryItems() {
   const paperIds = new Set((appState.paperTrades || []).map((position) => position.id).filter(Boolean));
+  const exchangeItems = (appState.exchangePositions || []).map((position) => ({
+    kind: 'exchange',
+    id: position.id,
+    at: position.openedAt || new Date().toISOString(),
+    symbol: position.symbol,
+    direction: position.direction,
+    statusLabel: position.source === 'demo' ? 'Demo VST abierta' : 'Live abierta',
+    entryPrice: position.entryPrice,
+    stopLoss: position.stopLoss,
+    pnl: position.unrealizedPnl,
+    closeReason: '',
+    reason: '',
+    postUrl: ''
+  }));
   const paperItems = (appState.paperTrades || []).map((position) => ({
     kind: 'paper',
     id: position.id,
@@ -1726,7 +1764,7 @@ function tradeHistoryItems() {
       postUrl: event.postUrl
     }));
 
-  return [...paperItems, ...eventItems]
+  return [...exchangeItems, ...paperItems, ...eventItems]
     .sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0))
     .slice(0, 8);
 }
@@ -1942,7 +1980,11 @@ function formatLeverage(value) {
 }
 
 function formatDuration(startValue, endValue) {
-  const start = Date.parse(startValue || 0);
+  if (!startValue) {
+    return '-';
+  }
+
+  const start = Date.parse(startValue);
   const end = endValue ? Date.parse(endValue) : Date.now();
   if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
     return '-';

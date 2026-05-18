@@ -112,6 +112,87 @@ export class FuturesTrader {
     return summary;
   }
 
+  async getExchangeOpenPositions() {
+    const config = this.configStore.getBingX({ includeSecrets: true });
+    if (!config.enabled || config.mode === 'test' || !config.apiKey || !config.apiSecret) {
+      return [];
+    }
+
+    const client = this.client(config);
+    const response = await client.getPositions();
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const open = rows.filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
+
+    return Promise.all(open.map((position) => this.normalizeExchangePosition(client, position, config).catch((error) => ({
+      id: `exchange_${position.symbol}_${position.positionSide || position.side || 'BOTH'}`,
+      source: config.mode,
+      status: 'open',
+      symbol: position.symbol,
+      direction: normalizePositionSide(position),
+      quantity: Math.abs(Number(position.availableAmt || position.positionAmt || 0)),
+      leverage: Number(position.leverage || 0),
+      error: error.message,
+      raw: position
+    }))));
+  }
+
+  async normalizeExchangePosition(client, position, config) {
+    const symbol = position.symbol;
+    const quantity = Math.abs(Number(position.availableAmt || position.positionAmt || 0));
+    const entryPrice = firstFiniteNumber([
+      position.avgPrice,
+      position.averagePrice,
+      position.entryPrice,
+      position.positionAvgPrice
+    ]);
+    const currentPrice = firstFiniteNumber([
+      position.markPrice,
+      position.lastPrice
+    ]) || await this.fetchMarketPrice(client, symbol).catch(() => entryPrice);
+    const leverage = Number(position.leverage || 0);
+    const exposure = firstFiniteNumber([
+      position.positionValue,
+      position.notional,
+      position.positionNotional,
+      Number.isFinite(currentPrice) ? quantity * currentPrice : NaN
+    ]);
+    const notional = leverage > 0 && Number.isFinite(exposure) ? exposure / leverage : exposure;
+    const unrealizedPnl = firstFiniteNumber([
+      position.unrealizedProfit,
+      position.unrealizedPnl,
+      position.pnl,
+      position.profit
+    ]) || 0;
+
+    return {
+      id: `exchange_${config.mode}_${symbol}_${position.positionId || position.positionSide || position.side || 'BOTH'}`,
+      source: config.mode,
+      status: 'open',
+      symbol,
+      direction: normalizePositionSide(position),
+      quantity,
+      entryPrice,
+      currentPrice,
+      closePrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      leverage,
+      notional,
+      exposure,
+      unrealizedPnl,
+      realizedPnl: 0,
+      paperPnl: unrealizedPnl,
+      openedAt: timestampIso([
+        position.createTime,
+        position.updateTime,
+        position.openTime,
+        position.time
+      ]),
+      closedAt: null,
+      raw: position
+    };
+  }
+
   async processPosts(posts, payload) {
     const results = [];
     for (const post of posts) {
@@ -539,6 +620,36 @@ function normalizeSymbol(value) {
   }
   const compact = text.match(/^([A-Z0-9]{2,12})(USDT|USDC)$/);
   return compact ? `${compact[1]}-${compact[2]}` : text;
+}
+
+function normalizePositionSide(position) {
+  const explicit = String(position.positionSide || '').toUpperCase();
+  if (explicit === 'LONG' || explicit === 'SHORT') {
+    return explicit;
+  }
+  const amount = Number(position.positionAmt || position.availableAmt || 0);
+  return amount < 0 ? 'SHORT' : 'LONG';
+}
+
+function firstFiniteNumber(values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') {
+      continue;
+    }
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      return number;
+    }
+  }
+  return NaN;
+}
+
+function timestampIso(values) {
+  const timestamp = firstFiniteNumber(values);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return null;
+  }
+  return new Date(timestamp).toISOString();
 }
 
 function positiveNumber(value, fallback) {

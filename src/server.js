@@ -292,12 +292,26 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/bingx' && request.method === 'GET') {
+      const exchangePositions = await futuresTrader.getExchangeOpenPositions().catch((error) => {
+        pushLog({
+          level: 'warn',
+          message: `BingX posiciones: ${error.message}`,
+          at: new Date().toISOString()
+        });
+        return [];
+      });
       return sendJson(response, {
         bingx: configStore.getBingX(),
         trades: state.trades,
         paperTrades: paperStore.list(),
+        exchangePositions,
         risk: futuresTrader.riskSnapshot()
       });
+    }
+
+    if (requestUrl.pathname === '/api/bingx/open-positions' && request.method === 'GET') {
+      const positions = await futuresTrader.getExchangeOpenPositions();
+      return sendJson(response, { ok: true, positions });
     }
 
     if (requestUrl.pathname === '/api/bingx' && request.method === 'PUT') {
