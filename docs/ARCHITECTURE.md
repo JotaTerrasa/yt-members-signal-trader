@@ -190,6 +190,7 @@ PUT  /api/bingx
 POST /api/bingx/test-connection
 POST /api/bingx/vst
 POST /api/bingx/probe
+POST /api/bingx/replay-latest-signal
 POST /api/bingx/paper/clear
 GET  /api/bingx/pnl
 POST /api/bingx/parse-test

@@ -132,7 +132,33 @@ Estado actual:
 - En `test`, mueve el stop paper a precio de entrada.
 - En `demo` y `live`, queda registrado como evento detectado. No modifica todavia el stop real en BingX.
 
-## 9. PnL y portfolio
+## 9. Reejecutar una senal fallida
+
+Si una publicacion ya se guardo pero la ejecucion fallo por un error tecnico, el monitor no la reintenta automaticamente porque ya no es una publicacion nueva. Para reejecutar la ultima publicacion con senales:
+
+```bash
+curl -X POST http://localhost:5178/api/bingx/replay-latest-signal \
+  -H 'content-type: application/json' \
+  --data '{}'
+```
+
+Para reejecutar una publicacion concreta:
+
+```bash
+curl -X POST http://localhost:5178/api/bingx/replay-latest-signal \
+  -H 'content-type: application/json' \
+  --data '{"postId":"ID_O_URL_DEL_POST"}'
+```
+
+En modo `live` exige confirmacion explicita:
+
+```json
+{"postId":"ID_O_URL_DEL_POST","confirm":"REPLAY_LIVE"}
+```
+
+Usalo con cuidado: si la orden ya se ejecuto y repites el replay, puedes duplicar posicion.
+
+## 10. PnL y portfolio
 
 La app calcula PnL desde:
 
@@ -154,13 +180,13 @@ La hoja esperada para mayo de 2026 es:
 FUTUROS MAYO 2026
 ```
 
-## 10. Uso desde movil
+## 11. Uso desde movil
 
 En la misma red local puedes abrir el host LAN del ordenador.
 
 Si el movil esta en 5G o fuera de la red local, usa un tunel temporal como Cloudflare Tunnel. No publiques el tunel de forma permanente sin autenticacion, porque la UI permite operar y guardar claves.
 
-## 11. Checklist antes de live
+## 12. Checklist antes de live
 
 Antes de armar live:
 
@@ -174,7 +200,7 @@ Antes de armar live:
 8. Dry-run completado.
 9. Live armado manualmente en la UI.
 
-## 12. Problemas comunes
+## 13. Problemas comunes
 
 `YouTube no muestra posts visibles`
 

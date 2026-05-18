@@ -218,6 +218,25 @@ async function updatePortfolioSource(input) {
   return portfolio;
 }
 
+function findReplayPost(postId) {
+  const posts = store.list();
+  if (postId) {
+    return posts.find((post) => post.id === postId || post.url === postId) || null;
+  }
+
+  return posts.find((post) => futuresTrader.parseAll(post.text || '').some((signal) => signal.isSignal)) || null;
+}
+
+function publicPostSummary(post) {
+  return {
+    id: post.id,
+    url: post.url,
+    publishedText: post.publishedText,
+    firstSeenAt: post.firstSeenAt,
+    text: String(post.text || '').slice(0, 500)
+  };
+}
+
 const server = createServer(async (request, response) => {
   try {
     const requestUrl = new URL(request.url, `http://${request.headers.host}`);
@@ -341,6 +360,28 @@ const server = createServer(async (request, response) => {
       const result = await futuresTrader.executeProbe(body);
       pnlCache = null;
       return sendJson(response, { ok: true, result });
+    }
+
+    if (requestUrl.pathname === '/api/bingx/replay-latest-signal' && request.method === 'POST') {
+      const body = await readJson(request);
+      const bingx = configStore.getBingX();
+      if (bingx.mode === 'live' && body.confirm !== 'REPLAY_LIVE') {
+        return sendJson(response, { error: 'Confirma REPLAY_LIVE para reejecutar una senal en live.' }, 400);
+      }
+
+      const post = findReplayPost(body.postId);
+      if (!post) {
+        return sendJson(response, { error: 'No hay publicaciones con senales para reejecutar.' }, 404);
+      }
+
+      const results = await futuresTrader.processPosts([post], { phase: 'manual_replay' });
+      pnlCache = null;
+      pushLog({
+        level: bingx.mode === 'live' ? 'warn' : 'info',
+        message: `Replay de senal ejecutado: ${results.length} eventos (${post.url}).`,
+        at: new Date().toISOString()
+      });
+      return sendJson(response, { ok: true, post: publicPostSummary(post), results });
     }
 
     if (requestUrl.pathname === '/api/bingx/pnl' && request.method === 'GET') {

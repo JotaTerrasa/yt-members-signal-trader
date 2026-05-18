@@ -70,17 +70,17 @@ export class BingXClient {
       timestamp,
       recvWindow: 5000
     };
-    const query = buildRawQuery(parameters);
+    const encoded = buildEncodedQuery(parameters);
     const signature = crypto
       .createHmac('sha256', this.apiSecret)
-      .update(query)
+      .update(encoded)
       .digest('hex');
-    const encoded = `${buildEncodedQuery(parameters)}&signature=${signature}`;
+    const signedPayload = `${encoded}&signature=${signature}`;
     const urls = API_BASE_URLS[this.environment] || API_BASE_URLS['prod-live'];
 
     let lastNetworkError = null;
     for (const baseUrl of urls) {
-      const url = method === 'POST' ? `${baseUrl}${path}` : `${baseUrl}${path}?${encoded}`;
+      const url = method === 'POST' ? `${baseUrl}${path}` : `${baseUrl}${path}?${signedPayload}`;
       try {
         const response = await fetch(url, {
           method,
@@ -89,7 +89,7 @@ export class BingXClient {
             'X-SOURCE-KEY': 'BX-AI-SKILL',
             ...(method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {})
           },
-          body: method === 'POST' ? encoded : undefined,
+          body: method === 'POST' ? signedPayload : undefined,
           signal: AbortSignal.timeout(10000)
         });
 
@@ -114,14 +114,6 @@ function isNetworkOrTimeout(error) {
   return error instanceof TypeError
     || error?.name === 'AbortError'
     || error?.name === 'TimeoutError';
-}
-
-function buildRawQuery(parameters) {
-  return Object.entries(parameters)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${String(value)}`)
-    .join('&');
 }
 
 function buildEncodedQuery(parameters) {
