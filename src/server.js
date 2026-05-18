@@ -56,6 +56,7 @@ const futuresTrader = new FuturesTrader({
 const clients = new Set();
 let pnlCache = null;
 const lastPriceBroadcast = new Map();
+let exchangeOpenSymbols = new Set();
 
 const state = {
   browserOpen: false,
@@ -300,6 +301,7 @@ const server = createServer(async (request, response) => {
         });
         return [];
       });
+      syncPriceSubscriptions(exchangePositions);
       return sendJson(response, {
         bingx: configStore.getBingX(),
         trades: state.trades,
@@ -311,6 +313,7 @@ const server = createServer(async (request, response) => {
 
     if (requestUrl.pathname === '/api/bingx/open-positions' && request.method === 'GET') {
       const positions = await futuresTrader.getExchangeOpenPositions();
+      syncPriceSubscriptions(positions);
       return sendJson(response, { ok: true, positions });
     }
 
@@ -607,8 +610,11 @@ function currentState() {
   };
 }
 
-function syncPriceSubscriptions() {
-  priceFeed.setSymbols(paperStore.openSymbols());
+function syncPriceSubscriptions(exchangePositionsOrSymbols) {
+  if (Array.isArray(exchangePositionsOrSymbols)) {
+    exchangeOpenSymbols = new Set(exchangePositionsOrSymbols.map(positionSymbol).filter(Boolean));
+  }
+  priceFeed.setSymbols([...paperStore.openSymbols(), ...exchangeOpenSymbols]);
   state.priceFeed = priceFeed.status();
 }
 
@@ -619,13 +625,9 @@ async function handlePriceTick(tick) {
     source: tick.source || 'bingx_ws'
   });
 
-  if (!result.updated.length && !result.closed.length) {
-    return;
-  }
-
   const now = Date.now();
   const last = lastPriceBroadcast.get(tick.symbol) || 0;
-  if (result.closed.length || now - last > 1000) {
+  if (result.closed.length || now - last > 750) {
     lastPriceBroadcast.set(tick.symbol, now);
     broadcast('price', {
       tick,
@@ -674,6 +676,13 @@ async function handlePriceTick(tick) {
 
   syncPriceSubscriptions();
   broadcast('state', state);
+}
+
+function positionSymbol(value) {
+  if (typeof value === 'string') {
+    return value;
+  }
+  return value?.symbol || value?.signal?.symbol || '';
 }
 
 function buildHealth() {

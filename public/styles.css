@@ -1311,6 +1311,20 @@ summary.dashboard-section-title {
   overflow-wrap: anywhere;
 }
 
+.live-price {
+  animation: live-price-pulse 0.7s ease-out;
+}
+
+@keyframes live-price-pulse {
+  0% {
+    color: var(--accent);
+    text-shadow: 0 0 0 rgba(19, 123, 109, 0.35);
+  }
+  100% {
+    text-shadow: 0 0 18px rgba(19, 123, 109, 0);
+  }
+}
+
 .position-card-footer {
   justify-content: flex-start;
   flex-wrap: wrap;

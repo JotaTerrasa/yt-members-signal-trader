@@ -518,13 +518,16 @@ function connectEvents() {
 
   source.addEventListener('price', (event) => {
     const payload = JSON.parse(event.data);
+    const exchangePriceChanged = applyExchangePriceTick(payload.tick);
     for (const position of payload.updatedPaperPositions || []) {
       upsertPaperTrade(position);
     }
     for (const position of payload.closedPaperPositions || []) {
       upsertPaperTrade(position);
     }
-    renderPnl();
+    if (exchangePriceChanged || payload.updatedPaperPositions?.length || payload.closedPaperPositions?.length) {
+      renderPnl();
+    }
   });
 }
 
@@ -1251,6 +1254,7 @@ function renderOpenPositionCard(position) {
     ? 'Demo VST'
     : position.source === 'live' ? 'Live real' : 'Paper';
   const pnl = Number(position.unrealizedPnl ?? position.paperPnl ?? 0);
+  const liveClass = position.liveTickAt ? ' live-price' : '';
   return `
     <article class="position-card ${sideClass}">
       <div class="position-card-top">
@@ -1258,7 +1262,7 @@ function renderOpenPositionCard(position) {
           <span class="side ${sideClass}">${escapeHtml(position.direction || '-')}</span>
           <strong>${escapeHtml(position.symbol || '-')}</strong>
         </div>
-        <span class="${amountClass(pnl)}">${escapeHtml(formatUsdt(pnl))}</span>
+        <span class="${amountClass(pnl)}${liveClass}">${escapeHtml(formatUsdt(pnl))}</span>
       </div>
       <div class="position-card-grid">
         <div>
@@ -1267,7 +1271,7 @@ function renderOpenPositionCard(position) {
         </div>
         <div>
           <span>Actual</span>
-          <strong>${escapeHtml(formatPrice(position.currentPrice))}</strong>
+          <strong class="${liveClass.trim()}">${escapeHtml(formatPrice(position.currentPrice))}</strong>
         </div>
         <div>
           <span>Stop</span>
@@ -1714,6 +1718,63 @@ function upsertPaperTrade(position) {
   } else {
     appState.paperTrades.unshift(position);
   }
+}
+
+function applyExchangePriceTick(tick) {
+  const symbol = normalizeTradeSymbol(tick?.symbol);
+  const price = Number(tick?.price);
+  if (!symbol || !Number.isFinite(price) || price <= 0) {
+    return false;
+  }
+
+  let changed = false;
+  appState.exchangePositions = (appState.exchangePositions || []).map((position) => {
+    if (position.status !== 'open' || normalizeTradeSymbol(position.symbol) !== symbol) {
+      return position;
+    }
+    changed = true;
+    return recalculateExchangePosition(position, price, tick.at);
+  });
+  return changed;
+}
+
+function recalculateExchangePosition(position, currentPrice, tickAt) {
+  const quantity = Math.abs(Number(position.quantity || position.raw?.availableAmt || position.raw?.positionAmt || 0));
+  const entryPrice = Number(position.entryPrice);
+  const leverage = Number(position.leverage || 0);
+  const exposure = Number.isFinite(quantity) ? roundPnl(quantity * currentPrice) : Number(position.exposure || 0);
+  const notional = leverage > 0 ? roundPnl(exposure / leverage) : exposure;
+  const direction = String(position.direction || '').toUpperCase();
+  const priceMove = direction === 'SHORT'
+    ? entryPrice - currentPrice
+    : currentPrice - entryPrice;
+  const unrealizedPnl = Number.isFinite(priceMove) && Number.isFinite(quantity)
+    ? roundPnl(priceMove * quantity)
+    : Number(position.unrealizedPnl || position.paperPnl || 0);
+
+  return {
+    ...position,
+    currentPrice,
+    exposure,
+    notional,
+    unrealizedPnl,
+    paperPnl: unrealizedPnl,
+    liveTickAt: tickAt || new Date().toISOString()
+  };
+}
+
+function normalizeTradeSymbol(value) {
+  const text = String(value || '').trim().toUpperCase();
+  if (!text) {
+    return '';
+  }
+  if (text.includes('-')) {
+    return text;
+  }
+  if (text.includes('/')) {
+    return text.replace('/', '-');
+  }
+  return text.endsWith('USDT') ? `${text.slice(0, -4)}-USDT` : text;
 }
 
 function tradeHistoryItems() {
