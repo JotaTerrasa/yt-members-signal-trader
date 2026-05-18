@@ -3,6 +3,7 @@ const shortWords = ['SHORT', 'CORTO', 'SELL', 'VENTA', 'VENDER'];
 const directionWords = [...longWords, ...shortWords];
 const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL']);
 const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
+const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 
 export function parseFuturesSignal(text) {
   return parseFuturesSignals(text)[0];
@@ -75,30 +76,64 @@ function parseSingleFuturesSignal(raw) {
 }
 
 function parseCloseSignals(raw) {
-  if (!closeWordsPattern.test(raw)) {
+  const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const closeStart = lines.findIndex(isCloseHeaderLine);
+  if (closeStart < 0) {
     return [];
   }
 
   const closePercent = parseClosePercent(raw);
-  const matches = [...raw.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?))?\b/gi)];
   const signals = [];
-  for (const match of matches) {
-    const baseSymbol = match[1].toUpperCase();
-    if (symbolIgnoreWords.has(baseSymbol) || closeWordsPattern.test(baseSymbol)) {
-      continue;
+  for (const line of lines.slice(closeStart)) {
+    for (const closeTarget of parseCloseTargetsFromLine(line)) {
+      signals.push({
+        isSignal: true,
+        action: 'CLOSE',
+        symbol: `${closeTarget.baseSymbol}-USDT`,
+        closePrice: closeTarget.price,
+        closePercent,
+        rawText: raw
+      });
     }
-
-    signals.push({
-      isSignal: true,
-      action: 'CLOSE',
-      symbol: `${baseSymbol}-USDT`,
-      closePrice: match[2] ? parseNumberToken(match[2]) : null,
-      closePercent,
-      rawText: raw
-    });
   }
 
   return dedupeSignals(signals);
+}
+
+function isCloseHeaderLine(line) {
+  return closeLineStartPattern.test(normalize(line).trim());
+}
+
+function parseCloseTargetsFromLine(line) {
+  const text = String(line || '').trim();
+  if (!text) {
+    return [];
+  }
+
+  const normalized = normalize(text);
+  const headerLine = isCloseHeaderLine(normalized);
+  const body = headerLine
+    ? normalized
+      .replace(closeLineStartPattern, ' ')
+      .replace(/\b(TOTAL|PARCIAL|PARCIALMENTE|PARTIAL|MITAD|HALF)\b/gi, ' ')
+      .replace(/\b\d{1,3}\s*%\b/g, ' ')
+    : text;
+
+  if (!headerLine && !looksLikeCloseTickerLine(text)) {
+    return [];
+  }
+
+  const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?))?\b/gi)];
+  return matches
+    .map((match) => ({
+      baseSymbol: match[1].toUpperCase(),
+      price: match[2] ? parseNumberToken(match[2]) : null
+    }))
+    .filter((target) => !symbolIgnoreWords.has(target.baseSymbol) && !closeWordsPattern.test(target.baseSymbol));
+}
+
+function looksLikeCloseTickerLine(line) {
+  return /^\W*[A-Z]{2,12}(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?\d+(?:[.,]\d+)?\s*[kK]?)?\W*$/i.test(line);
 }
 
 function parseBreakEvenSignals(raw) {
