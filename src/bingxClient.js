@@ -67,14 +67,15 @@ export class BingXClient {
     const timestamp = Date.now();
     const parameters = {
       ...payload,
+      timestamp,
       recvWindow: 5000
     };
-    const query = buildRawQuery(parameters, timestamp);
+    const query = buildRawQuery(parameters);
     const signature = crypto
       .createHmac('sha256', this.apiSecret)
       .update(query)
       .digest('hex');
-    const encoded = `${buildEncodedQuery(parameters, timestamp)}&signature=${signature}`;
+    const encoded = `${buildEncodedQuery(parameters)}&signature=${signature}`;
     const urls = API_BASE_URLS[this.environment] || API_BASE_URLS['prod-live'];
 
     let lastNetworkError = null;
@@ -115,20 +116,18 @@ function isNetworkOrTimeout(error) {
     || error?.name === 'TimeoutError';
 }
 
-function buildRawQuery(parameters, timestamp) {
+function buildRawQuery(parameters) {
   return Object.entries(parameters)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${key}=${String(value)}`)
-    .concat(`timestamp=${timestamp}`)
     .join('&');
 }
 
-function buildEncodedQuery(parameters, timestamp) {
+function buildEncodedQuery(parameters) {
   return Object.entries(parameters)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
-    .concat(`timestamp=${timestamp}`)
     .join('&');
 }

@@ -798,8 +798,8 @@ function liveReadiness() {
   const health = appState.state?.health || {};
   const risk = localRiskSnapshot();
   const maxOpen = Number(bingx.maxOpenPositions || 0);
-  const dailyLimit = Number(bingx.maxDailyLossUSDT || 0);
   const monthlyLimit = Number(bingx.maxMonthlyLossUSDT || 0);
+  const maxSignalLeverage = Number(bingx.maxSignalLeverage || 0);
   const dryRunOk = bingx.dryRunRequired === false
     || Boolean(bingx.dryRunCompletedAt)
     || (appState.paperTrades || []).length > 0;
@@ -827,8 +827,8 @@ function liveReadiness() {
     },
     {
       key: 'risk',
-      label: 'Limites de riesgo activos',
-      ok: maxOpen > 0 && dailyLimit > 0 && monthlyLimit > 0
+      label: 'Riesgo operativo configurado',
+      ok: maxOpen > 0 && maxSignalLeverage > 0
     },
     {
       key: 'dry-run',
@@ -839,7 +839,6 @@ function liveReadiness() {
       key: 'capacity',
       label: 'No hay bloqueo local',
       ok: !(maxOpen > 0 && risk.openPositions >= maxOpen)
-        && !(dailyLimit > 0 && risk.dailyPnl <= -Math.abs(dailyLimit))
         && !(monthlyLimit > 0 && risk.monthlyPnl <= -Math.abs(monthlyLimit))
     }
   ];
