@@ -79,7 +79,8 @@ Configuracion importante:
 - `Stop obligatorio`: bloquea aperturas sin stop.
 - `Max posiciones`: bloquea nuevas aperturas cuando se alcanza el limite local.
 - `Max leverage senal`: bloquea senales con demasiado apalancamiento.
-- `Capital VST por senal %`: en Demo VST usa este porcentaje del capital disponible como margen por senal.
+- `Capital base VST`: base fija usada en Demo VST para calcular el margen por ticker.
+- `Capital VST por senal %`: en Demo VST usa este porcentaje del capital base. Con 1000 VST y 15%, abre 150 VST por ticker.
 
 ## 6. Aperturas
 
@@ -97,7 +98,7 @@ Notas:
 
 - El precio de entrada escrito en la senal se guarda como referencia, pero la entrada real se manda a mercado.
 - Si BingX dice que el contrato no permite ese apalancamiento, la orden se bloquea.
-- En `demo`, el tamano sale del porcentaje de capital VST disponible.
+- En `demo`, el tamano sale del porcentaje sobre el capital base VST fijo, no del saldo disponible completo.
 - En `test`, la posicion se abre en paper local.
 
 ## 7. Cierres

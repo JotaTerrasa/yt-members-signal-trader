@@ -32,7 +32,7 @@ En ejecucion actual:
 
 - La orden de apertura se manda a mercado.
 - El precio de la senal se guarda como referencia.
-- En Demo VST, el tamano real se calcula con el porcentaje de capital VST disponible.
+- En Demo VST, el tamano real usa una base fija de 1000 VST. Con 15%, cada ticker abre 150 VST de margen.
 
 ## Direcciones soportadas
 
@@ -107,7 +107,7 @@ Formatos habituales:
 Uso por modo:
 
 - `test`: usa el notional de la senal o el default.
-- `demo`: ignora el USDT de la senal y usa porcentaje de capital VST disponible.
+- `demo`: ignora el USDT de la senal y usa porcentaje sobre capital base VST fijo.
 - `live`: usa el notional de la senal limitado por `maxNotionalUSDT`.
 
 ## Cierre total

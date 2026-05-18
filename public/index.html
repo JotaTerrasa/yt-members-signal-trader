@@ -6,7 +6,7 @@
     <title>YouTube Posts Scraper</title>
     <link rel="stylesheet" href="/styles.css?v=14">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=38" defer></script>
+    <script src="/app.js?v=39" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -192,12 +192,16 @@
 	              </label>
 	            </div>
 	            <div class="range-grid">
+	              <label for="bingx-vst-base-capital">
+	                <span>Capital base VST</span>
+	                <input id="bingx-vst-base-capital" type="number" min="1" step="1" value="1000">
+	              </label>
 	              <label for="bingx-vst-capital-percent">
 	                <span>Capital VST por señal %</span>
 	                <input id="bingx-vst-capital-percent" type="number" min="1" max="100" step="1" value="15">
 	              </label>
-	              <div class="field-hint">En Demo VST ignora el USDT de la señal y usa este porcentaje del margen disponible.</div>
 	            </div>
+	            <div class="field-hint">En Demo VST ignora el USDT de la señal y usa base fija * porcentaje. Con 1000 VST y 15%, cada ticker abre 150 VST de margen.</div>
 	            <div class="range-grid">
               <label for="bingx-daily-loss">
                 <span>Perdida max dia</span>

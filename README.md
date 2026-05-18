@@ -69,6 +69,7 @@ Primer uso:
 2. BingX:
    - Empieza siempre en `test` o `demo`.
    - Carga saldo VST si vas a probar contra Demo VST.
+   - En Demo VST, usa capital base fijo de 1000 VST y 15% por ticker: 150 VST de margen por operacion.
    - Mantiene `Live real` desarmado hasta validar parser, Telegram, cierres y PnL.
 
 3. Riesgo:

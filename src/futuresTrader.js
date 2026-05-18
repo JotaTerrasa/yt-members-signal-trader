@@ -418,10 +418,15 @@ export class FuturesTrader {
   async resolveOrderSizing({ client, signal, config }) {
     if (config.mode === 'demo') {
       const balance = await this.fetchAccountCapital(client);
+      const baseCapital = positiveNumber(config.vstBaseCapital, 1000);
       const percent = clampNumber(config.vstCapitalPercent, 1, 100, 15);
-      const notional = roundMoney(balance.available * (percent / 100));
+      const notional = roundMoney(baseCapital * (percent / 100));
+      if (balance.available < notional) {
+        throw new Error(`No hay VST disponible suficiente: hacen falta ${notional} ${balance.asset} y hay ${roundMoney(balance.available)} ${balance.asset}.`);
+      }
       return {
-        mode: 'vst_percent_available',
+        mode: 'vst_fixed_base_percent',
+        baseCapital,
         capitalPercent: percent,
         availableCapital: balance.available,
         asset: balance.asset,

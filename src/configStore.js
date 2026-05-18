@@ -37,6 +37,7 @@ const defaultConfig = {
     maxDailyLossUSDT: 100,
     maxMonthlyLossUSDT: 500,
     maxSignalLeverage: 125,
+    vstBaseCapital: 1000,
     vstCapitalPercent: 15
   }
 };
@@ -134,6 +135,7 @@ export class ConfigStore {
       maxDailyLossUSDT: bingx.maxDailyLossUSDT,
       maxMonthlyLossUSDT: bingx.maxMonthlyLossUSDT,
       maxSignalLeverage: bingx.maxSignalLeverage,
+      vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
       apiKeyConfigured: Boolean(bingx.apiKey),
       apiSecretConfigured: Boolean(bingx.apiSecret),
@@ -163,6 +165,7 @@ export class ConfigStore {
       maxDailyLossUSDT: nonNegativeNumber(input.maxDailyLossUSDT, defaultConfig.bingx.maxDailyLossUSDT),
       maxMonthlyLossUSDT: nonNegativeNumber(input.maxMonthlyLossUSDT, defaultConfig.bingx.maxMonthlyLossUSDT),
       maxSignalLeverage: clampInteger(input.maxSignalLeverage, 1, 125, defaultConfig.bingx.maxSignalLeverage),
+      vstBaseCapital: positiveNumber(input.vstBaseCapital, defaultConfig.bingx.vstBaseCapital),
       vstCapitalPercent: clampNumber(input.vstCapitalPercent, 1, 100, defaultConfig.bingx.vstCapitalPercent)
     };
 

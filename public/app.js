@@ -107,6 +107,7 @@ const elements = {
   bingxRequireSl: document.querySelector('#bingx-require-sl'),
   bingxMaxOpen: document.querySelector('#bingx-max-open'),
   bingxMaxSignalLeverage: document.querySelector('#bingx-max-signal-leverage'),
+  bingxVstBaseCapital: document.querySelector('#bingx-vst-base-capital'),
   bingxVstCapitalPercent: document.querySelector('#bingx-vst-capital-percent'),
   bingxDailyLoss: document.querySelector('#bingx-daily-loss'),
   bingxMonthlyLoss: document.querySelector('#bingx-monthly-loss'),
@@ -1666,6 +1667,7 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxRequireSl.checked = Boolean(bingx.requireStopLoss);
   elements.bingxMaxOpen.value = bingx.maxOpenPositions || 5;
   elements.bingxMaxSignalLeverage.value = bingx.maxSignalLeverage || 125;
+  elements.bingxVstBaseCapital.value = bingx.vstBaseCapital || 1000;
   elements.bingxVstCapitalPercent.value = bingx.vstCapitalPercent || 15;
   elements.bingxDailyLoss.value = bingx.maxDailyLossUSDT ?? 100;
   elements.bingxMonthlyLoss.value = bingx.maxMonthlyLossUSDT ?? 500;
@@ -1692,6 +1694,7 @@ async function saveBingxConfig() {
     requireStopLoss: elements.bingxRequireSl.checked,
     maxOpenPositions: Number(elements.bingxMaxOpen.value),
     maxSignalLeverage: Number(elements.bingxMaxSignalLeverage.value),
+    vstBaseCapital: Number(elements.bingxVstBaseCapital.value),
     vstCapitalPercent: Number(elements.bingxVstCapitalPercent.value),
     maxDailyLossUSDT: Number(elements.bingxDailyLoss.value),
     maxMonthlyLossUSDT: Number(elements.bingxMonthlyLoss.value),
