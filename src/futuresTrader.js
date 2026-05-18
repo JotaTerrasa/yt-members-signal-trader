@@ -119,11 +119,18 @@ export class FuturesTrader {
     }
 
     const client = this.client(config);
-    const response = await client.getPositions();
+    const [response, ordersResponse] = await Promise.all([
+      client.getPositions(),
+      client.getOpenOrders().catch((error) => {
+        this.log(`BingX openOrders: ${error.message}`, 'warn');
+        return null;
+      })
+    ]);
     const rows = Array.isArray(response.data) ? response.data : [];
     const open = rows.filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
+    const openOrders = extractOpenOrders(ordersResponse);
 
-    return Promise.all(open.map((position) => this.normalizeExchangePosition(client, position, config).catch((error) => ({
+    return Promise.all(open.map((position) => this.normalizeExchangePosition(client, position, config, openOrders).catch((error) => ({
       id: `exchange_${position.symbol}_${position.positionSide || position.side || 'BOTH'}`,
       source: config.mode,
       status: 'open',
@@ -136,9 +143,10 @@ export class FuturesTrader {
     }))));
   }
 
-  async normalizeExchangePosition(client, position, config) {
+  async normalizeExchangePosition(client, position, config, openOrders = []) {
     const symbol = position.symbol;
     const quantity = Math.abs(Number(position.availableAmt || position.positionAmt || 0));
+    const protectiveOrders = protectiveOrdersForPosition(position, openOrders);
     const entryPrice = firstFiniteNumber([
       position.avgPrice,
       position.averagePrice,
@@ -174,8 +182,8 @@ export class FuturesTrader {
       entryPrice,
       currentPrice,
       closePrice: null,
-      stopLoss: null,
-      takeProfit: null,
+      stopLoss: protectiveOrders.stopLoss,
+      takeProfit: protectiveOrders.takeProfit,
       leverage,
       notional,
       exposure,
@@ -189,6 +197,7 @@ export class FuturesTrader {
         position.time
       ]),
       closedAt: null,
+      protectiveOrders: protectiveOrders.orders,
       raw: position
     };
   }
@@ -634,6 +643,58 @@ function normalizePositionSide(position) {
   }
   const amount = Number(position.positionAmt || position.availableAmt || 0);
   return amount < 0 ? 'SHORT' : 'LONG';
+}
+
+function extractOpenOrders(response) {
+  const rows = response?.data?.orders ?? response?.data ?? [];
+  return Array.isArray(rows) ? rows : [];
+}
+
+function protectiveOrdersForPosition(position, openOrders = []) {
+  const symbol = normalizeSymbol(position.symbol);
+  const positionSide = normalizePositionSide(position);
+  const orders = openOrders.filter((order) => (
+    normalizeSymbol(order.symbol) === symbol
+    && (!order.positionSide || String(order.positionSide).toUpperCase() === positionSide)
+    && ['NEW', 'PARTIALLY_FILLED'].includes(String(order.status || 'NEW').toUpperCase())
+  ));
+  const stopLossOrder = orders.find((order) => isStopLossOrder(order));
+  const takeProfitOrder = orders.find((order) => isTakeProfitOrder(order));
+
+  return {
+    stopLoss: orderStopPrice(stopLossOrder),
+    takeProfit: orderStopPrice(takeProfitOrder),
+    orders: orders.map((order) => ({
+      orderId: order.orderId,
+      symbol: order.symbol,
+      side: order.side,
+      positionSide: order.positionSide,
+      type: order.type,
+      stopPrice: orderStopPrice(order),
+      status: order.status
+    }))
+  };
+}
+
+function isStopLossOrder(order = {}) {
+  const type = String(order.type || order.stopLoss?.type || '').toUpperCase();
+  return type.includes('STOP') && !type.includes('TAKE_PROFIT');
+}
+
+function isTakeProfitOrder(order = {}) {
+  const type = String(order.type || order.takeProfit?.type || '').toUpperCase();
+  return type.includes('TAKE_PROFIT');
+}
+
+function orderStopPrice(order = {}) {
+  const value = firstFiniteNumber([
+    order.stopPrice,
+    order.stopLoss?.stopPrice,
+    order.takeProfit?.stopPrice,
+    order.stopLossEntrustPrice,
+    order.takeProfitEntrustPrice
+  ]);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function firstFiniteNumber(values) {

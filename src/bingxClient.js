@@ -32,6 +32,10 @@ export class BingXClient {
     return this.request('GET', '/openApi/swap/v2/user/positions', symbol ? { symbol } : {});
   }
 
+  async getOpenOrders(symbol) {
+    return this.request('GET', '/openApi/swap/v2/trade/openOrders', symbol ? { symbol } : {});
+  }
+
   async setLeverage({ symbol, side, leverage }) {
     return this.request('POST', '/openApi/swap/v2/trade/leverage', {
       symbol,
