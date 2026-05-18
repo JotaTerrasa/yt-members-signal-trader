@@ -2113,6 +2113,7 @@ function tradeStatusLabel(value) {
     live_close_no_position: 'live sin posicion',
     live_sl_be_detected: 'SL BE live detectado',
     exchange_stop_closed: 'stop BingX cerrado',
+    exchange_signal_closed: 'cierre BingX ejecutado',
     exchange_position_closed: 'posicion BingX cerrada',
     paper_close_sent: 'cierre paper',
     paper_price_close: 'cierre por precio',

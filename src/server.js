@@ -49,7 +49,7 @@ const futuresTrader = new FuturesTrader({
     state.trades.unshift(event);
     state.trades = state.trades.slice(0, 200);
     broadcast('trade', event);
-    syncExchangePositions({ reason: 'trade' }).catch((error) => {
+    syncExchangePositions({ reason: event.status || 'trade' }).catch((error) => {
       pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
       syncPriceSubscriptions();
     });
@@ -691,7 +691,7 @@ function exchangePositionKey(position) {
 function handleExchangeClosedPosition(position, reason) {
   const event = {
     at: new Date().toISOString(),
-    status: exchangeCloseStatus(position),
+    status: exchangeCloseStatus(position, reason),
     reason,
     signal: {
       symbol: position.symbol,
@@ -711,7 +711,7 @@ function handleExchangeClosedPosition(position, reason) {
     at: event.at
   });
   telegramNotifier.sendAlert(
-    event.status === 'exchange_stop_closed' ? 'Stop cerrado en BingX' : 'Posicion cerrada en BingX',
+    exchangeCloseTitle(event.status),
     [
       `${position.symbol} ${position.direction || ''}`.trim(),
       `Entrada: ${formatSigned(position.entryPrice || 0).replace('+', '')}`,
@@ -724,9 +724,9 @@ function handleExchangeClosedPosition(position, reason) {
   });
 }
 
-function exchangeCloseStatus(position) {
-  if (Number(position.stopLoss) > 0) {
-    return 'exchange_stop_closed';
+function exchangeCloseStatus(position, reason) {
+  if (String(reason || '').includes('close')) {
+    return 'exchange_signal_closed';
   }
   const price = Number(position.currentPrice);
   const stop = Number(position.stopLoss);
@@ -737,6 +737,14 @@ function exchangeCloseStatus(position) {
     return price >= stop ? 'exchange_stop_closed' : 'exchange_position_closed';
   }
   return price <= stop ? 'exchange_stop_closed' : 'exchange_position_closed';
+}
+
+function exchangeCloseTitle(status) {
+  return {
+    exchange_stop_closed: 'Stop cerrado en BingX',
+    exchange_signal_closed: 'Cierre ejecutado en BingX',
+    exchange_position_closed: 'Posicion cerrada en BingX'
+  }[status] || 'Posicion cerrada en BingX';
 }
 
 async function handlePriceTick(tick) {
