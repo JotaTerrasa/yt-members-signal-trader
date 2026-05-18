@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube Posts Scraper</title>
+    <link rel="stylesheet" href="/styles.css?v=13">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/app.js?v=35" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Monitor local</p>
+          <h1>YouTube Posts Scraper</h1>
+        </div>
+        <div class="status-pill" id="status-pill">
+          <span class="dot"></span>
+          <span id="status-text">Inactivo</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="tool-panel" aria-label="Configuracion de scrapeo">
+          <div class="field">
+            <label for="channel-url">Canal o pestana de publicaciones</label>
+            <input id="channel-url" type="url" placeholder="https://www.youtube.com/@canal/posts">
+          </div>
+
+          <div class="button-row">
+            <button id="open-browser" class="button secondary" type="button">
+              <i data-lucide="log-in"></i>
+              <span>Abrir sesion</span>
+            </button>
+            <button id="start-scrape" class="button primary" type="button">
+              <i data-lucide="play"></i>
+              <span>Iniciar</span>
+            </button>
+            <button id="stop-scrape" class="button danger" type="button" disabled>
+              <i data-lucide="square"></i>
+              <span>Parar</span>
+            </button>
+          </div>
+
+          <div class="options-grid">
+            <label class="check-option">
+              <input id="backfill-enabled" type="checkbox" checked>
+              <span>Posts pasados</span>
+            </label>
+            <label class="check-option">
+              <input id="live-enabled" type="checkbox" checked>
+              <span>Monitor continuo</span>
+            </label>
+          </div>
+
+          <div class="range-grid">
+            <label for="poll-interval">
+              <span>Intervalo</span>
+              <select id="poll-interval">
+                <option value="15">15 s</option>
+                <option value="30" selected>30 s</option>
+                <option value="60">1 min</option>
+                <option value="300">5 min</option>
+              </select>
+            </label>
+            <label for="max-scrolls">
+              <span>Scrolls max.</span>
+              <input id="max-scrolls" type="number" min="1" max="500" value="120">
+            </label>
+          </div>
+
+          <p class="notice">
+            La sesion vive en Chromium local. Usa esta herramienta solo con canales a los que tu cuenta tenga acceso.
+          </p>
+
+          <details class="panel-section compact-fold" aria-label="Alertas Telegram">
+            <summary class="section-title">
+              <i data-lucide="send"></i>
+              <span>Telegram</span>
+            </summary>
+            <div class="fold-body">
+            <label class="check-option">
+              <input id="telegram-enabled" type="checkbox">
+              <span>Alertas nuevas</span>
+            </label>
+            <div class="field">
+              <label for="telegram-token">Bot token</label>
+              <input id="telegram-token" type="password" autocomplete="off" placeholder="123456:ABC...">
+            </div>
+            <div class="field">
+              <label for="telegram-chat-id">Chat ID</label>
+              <input id="telegram-chat-id" type="text" autocomplete="off" placeholder="123456789">
+            </div>
+            <label class="check-option">
+              <input id="telegram-backfill" type="checkbox">
+              <span>Incluir historico</span>
+            </label>
+            <label class="check-option">
+              <input id="telegram-health" type="checkbox" checked>
+              <span>Alertas de salud</span>
+            </label>
+            <div class="field">
+              <label for="telegram-health-minutes">Avisar si no lee en minutos</label>
+              <input id="telegram-health-minutes" type="number" min="1" max="60" step="1" value="3">
+            </div>
+            <div class="telegram-actions">
+              <button id="save-telegram" class="button secondary" type="button">
+                <i data-lucide="save"></i>
+                <span>Guardar</span>
+              </button>
+              <button id="detect-telegram" class="button secondary" type="button">
+                <i data-lucide="search"></i>
+                <span>Detectar chat</span>
+              </button>
+              <button id="test-telegram" class="button secondary" type="button">
+                <i data-lucide="radio"></i>
+                <span>Probar</span>
+              </button>
+            </div>
+            <p class="status-line" id="telegram-status">Sin configurar</p>
+            </div>
+          </details>
+
+          <details class="panel-section compact-fold" aria-label="Trading BingX">
+            <summary class="section-title">
+              <i data-lucide="candlestick-chart"></i>
+              <span>BingX Futures</span>
+            </summary>
+            <div class="fold-body">
+            <label class="check-option">
+              <input id="bingx-enabled" type="checkbox">
+              <span>Auto-operar senales</span>
+            </label>
+            <div class="range-grid">
+              <label for="bingx-mode">
+                <span>Modo</span>
+	                <select id="bingx-mode">
+	                  <option value="test" selected>Test order</option>
+	                  <option value="demo">Demo VST</option>
+	                  <option value="live">Live real</option>
+	                </select>
+              </label>
+              <label for="bingx-margin">
+                <span>Margen</span>
+                <select id="bingx-margin">
+                  <option value="ISOLATED" selected>Isolated</option>
+                  <option value="CROSSED">Cross</option>
+                </select>
+              </label>
+            </div>
+            <div class="field">
+              <label for="bingx-api-key">API key</label>
+              <input id="bingx-api-key" type="password" autocomplete="off" placeholder="BingX API key">
+            </div>
+            <div class="field">
+              <label for="bingx-api-secret">API secret</label>
+              <input id="bingx-api-secret" type="password" autocomplete="off" placeholder="BingX API secret">
+            </div>
+            <div class="range-grid">
+              <label for="bingx-notional">
+                <span>USDT por trade</span>
+                <input id="bingx-notional" type="number" min="2" step="1" value="10">
+              </label>
+              <label for="bingx-max-notional">
+                <span>Max USDT</span>
+                <input id="bingx-max-notional" type="number" min="2" step="1" value="25">
+              </label>
+            </div>
+            <div class="range-grid">
+              <label for="bingx-max-leverage">
+                <span>Leverage si falta</span>
+                <input id="bingx-max-leverage" type="number" min="1" max="125" step="1" value="5">
+              </label>
+              <label for="bingx-symbols">
+                <span>Allowlist opcional</span>
+                <input id="bingx-symbols" type="text" placeholder="Vacio = cualquier ticker">
+              </label>
+            </div>
+            <label class="check-option">
+              <input id="bingx-require-sl" type="checkbox" checked>
+              <span>Exigir stop loss</span>
+            </label>
+            <div class="range-grid">
+              <label for="bingx-max-open">
+                <span>Max abiertas</span>
+                <input id="bingx-max-open" type="number" min="1" max="100" step="1" value="5">
+              </label>
+	              <label for="bingx-max-signal-leverage">
+	                <span>Leverage max señal</span>
+	                <input id="bingx-max-signal-leverage" type="number" min="1" max="125" step="1" value="125">
+	              </label>
+	            </div>
+	            <div class="range-grid">
+	              <label for="bingx-vst-capital-percent">
+	                <span>Capital VST por señal %</span>
+	                <input id="bingx-vst-capital-percent" type="number" min="1" max="100" step="1" value="15">
+	              </label>
+	              <div class="field-hint">En Demo VST ignora el USDT de la señal y usa este porcentaje del margen disponible.</div>
+	            </div>
+	            <div class="range-grid">
+              <label for="bingx-daily-loss">
+                <span>Perdida max dia</span>
+                <input id="bingx-daily-loss" type="number" min="0" step="1" value="100">
+              </label>
+              <label for="bingx-monthly-loss">
+                <span>Perdida max mes</span>
+                <input id="bingx-monthly-loss" type="number" min="0" step="1" value="500">
+              </label>
+            </div>
+            <label class="check-option">
+              <input id="bingx-dry-run-required" type="checkbox" checked>
+              <span>Exigir dry-run antes de live</span>
+            </label>
+            <label class="check-option live-confirm hidden" id="bingx-live-confirm-row">
+              <input id="bingx-live-confirm" type="checkbox">
+              <span>Entiendo que Live envia ordenes reales</span>
+            </label>
+            <div class="telegram-actions">
+              <button id="save-bingx" class="button secondary" type="button">
+                <i data-lucide="save"></i>
+                <span>Guardar</span>
+              </button>
+              <button id="test-bingx" class="button secondary" type="button">
+                <i data-lucide="shield-check"></i>
+                <span>Probar API</span>
+              </button>
+	              <button id="parse-bingx" class="button secondary" type="button">
+	                <i data-lucide="scan-text"></i>
+	                <span>Probar parser</span>
+	              </button>
+	            </div>
+	            <div class="manual-probe">
+	              <strong>Prueba controlada</strong>
+	              <div class="range-grid">
+	                <label for="bingx-probe-symbol">
+	                  <span>Par</span>
+	                  <input id="bingx-probe-symbol" type="text" value="BTC-USDT">
+	                </label>
+	                <label for="bingx-probe-side">
+	                  <span>Lado</span>
+	                  <select id="bingx-probe-side">
+	                    <option value="LONG" selected>Long</option>
+	                    <option value="SHORT">Short</option>
+	                  </select>
+	                </label>
+	              </div>
+	              <div class="range-grid">
+	                <label for="bingx-probe-notional">
+	                  <span>USDT</span>
+	                  <input id="bingx-probe-notional" type="number" min="2" step="1" value="10">
+	                </label>
+	                <label for="bingx-probe-leverage">
+	                  <span>Leverage</span>
+	                  <input id="bingx-probe-leverage" type="number" min="1" max="125" step="1" value="1">
+	                </label>
+	              </div>
+	              <div class="range-grid">
+	                <label for="bingx-probe-sl">
+	                  <span>SL %</span>
+	                  <input id="bingx-probe-sl" type="number" min="0.05" max="5" step="0.05" value="0.35">
+	                </label>
+	                <label for="bingx-probe-tp">
+	                  <span>TP %</span>
+	                  <input id="bingx-probe-tp" type="number" min="0.05" max="10" step="0.05" value="0.70">
+	                </label>
+	              </div>
+	              <div class="probe-actions">
+	                <button id="vst-bingx" class="button secondary" type="button">
+	                  <i data-lucide="wallet"></i>
+	                  <span>VST</span>
+	                </button>
+	                <button id="probe-bingx" class="button danger" type="button">
+	                  <i data-lucide="send"></i>
+	                  <span>Enviar prueba</span>
+	                </button>
+	              </div>
+	            </div>
+	            <textarea id="bingx-parser-text" class="parser-box" rows="4" placeholder="Pega aqui una senal para probar el parser"></textarea>
+            <p class="status-line" id="bingx-status">Test order desactivado</p>
+            </div>
+          </details>
+          <p class="client-error hidden" id="client-error" role="alert"></p>
+        </section>
+
+        <section class="content-panel" aria-label="Resultados">
+          <div class="metrics">
+            <div>
+              <span class="metric-label">Guardados</span>
+              <strong id="metric-total">0</strong>
+            </div>
+            <div>
+              <span class="metric-label">Visibles</span>
+              <strong id="metric-visible">0</strong>
+            </div>
+            <div>
+              <span class="metric-label">Ultima lectura</span>
+              <strong id="metric-last">-</strong>
+            </div>
+          </div>
+
+          <div class="content-toolbar">
+            <div class="tabs" role="tablist" aria-label="Vistas">
+              <button class="tab active" id="posts-tab" type="button">Posts</button>
+              <button class="tab" id="logs-tab" type="button">Eventos</button>
+              <button class="tab" id="pnl-tab" type="button">PnL</button>
+            </div>
+            <div class="actions">
+              <input id="search" type="search" placeholder="Filtrar posts">
+              <a class="icon-link" href="/api/export.json" title="Exportar JSON">
+                <i data-lucide="braces"></i>
+                <span>JSON</span>
+              </a>
+              <a class="icon-link" href="/api/export.csv" title="Exportar CSV">
+                <i data-lucide="table"></i>
+                <span>CSV</span>
+              </a>
+              <button id="clear-posts" class="icon-button" type="button" title="Vaciar archivo local">
+                <i data-lucide="trash-2"></i>
+              </button>
+            </div>
+          </div>
+
+          <div id="posts-view" class="view">
+            <div id="empty-posts" class="empty-state">
+              Pega la URL del canal, abre sesion y lanza el scrapeo.
+            </div>
+            <div id="posts-list" class="posts-list"></div>
+          </div>
+
+          <div id="logs-view" class="view hidden">
+            <div id="logs-list" class="logs-list"></div>
+          </div>
+
+	          <div id="pnl-view" class="view hidden">
+            <div class="pnl-header">
+              <div>
+                <h2>Operativa</h2>
+                <p id="pnl-status">Leyendo BingX...</p>
+              </div>
+              <button id="refresh-pnl" class="button secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                <span>Actualizar</span>
+              </button>
+            </div>
+
+            <div class="pnl-hero" aria-label="Resumen principal de PnL">
+              <div class="pnl-hero-main">
+                <span id="pnl-month-label">Mes actual</span>
+                <strong id="pnl-total-month">0.00 USDT</strong>
+                <p>
+                  <span id="pnl-realized-month">0.00 USDT</span> realizado ·
+                  <span id="pnl-floating-month">0.00 USDT</span> flotante
+                </p>
+              </div>
+              <div class="pnl-hero-side">
+                <div>
+                  <span>Modo</span>
+                  <strong id="pnl-mode-label">Test</strong>
+                </div>
+                <div>
+                  <span>Win rate</span>
+                  <strong id="pnl-win-rate">-</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="pnl-summary" aria-label="Resumen mensual de PnL">
+              <div class="pnl-card">
+                <span>Resultado mes</span>
+                <strong id="pnl-paper-month">0.00 USDT</strong>
+              </div>
+              <div class="pnl-card">
+                <span>Exposicion abierta</span>
+                <strong id="pnl-open-exposure">0.00 USDT</strong>
+              </div>
+              <div class="pnl-card secondary-metric">
+                <span>Fees</span>
+                <strong id="pnl-fees-month">0.00 USDT</strong>
+              </div>
+              <div class="pnl-card secondary-metric">
+                <span>Funding</span>
+                <strong id="pnl-funding-month">0.00 USDT</strong>
+              </div>
+              <div class="pnl-card">
+                <span>Ordenes test</span>
+                <strong id="pnl-test-orders">0</strong>
+              </div>
+              <div class="pnl-card">
+                <span>Cierres</span>
+                <strong id="pnl-closed-trades">0</strong>
+              </div>
+            </div>
+
+            <p class="pnl-note" id="pnl-note">
+              Modo test: el neto superior suma paper local. Las posiciones abiertas se actualizan con BingX Futuros Perpetuo USDⓈ.
+            </p>
+
+	            <div id="pnl-empty" class="empty-state hidden">
+              Configura BingX para leer el PnL mensual.
+            </div>
+
+            <div class="ops-grid ops-grid-three">
+              <div class="ops-panel live-readiness-panel" id="live-readiness-panel">
+                <div class="trade-section-header">
+                  <h3>Preparado para live</h3>
+                  <span id="live-readiness-status">Revisando</span>
+                </div>
+                <div class="live-checklist" id="live-readiness-list"></div>
+                <div class="live-actions">
+                  <button id="arm-live" class="button danger" type="button" disabled>
+                    <i data-lucide="radio-tower"></i>
+                    <span>Armar live</span>
+                  </button>
+                  <button id="disarm-live" class="button secondary" type="button">
+                    <i data-lucide="shield"></i>
+                    <span>Volver a test</span>
+                  </button>
+                </div>
+              </div>
+              <div class="ops-panel" id="health-panel">
+                <div class="trade-section-header">
+                  <h3>Salud del monitor</h3>
+                  <span id="health-status">Sin datos</span>
+                </div>
+                <div class="ops-metrics" id="health-metrics"></div>
+              </div>
+              <div class="ops-panel" id="risk-panel">
+                <div class="trade-section-header">
+                  <h3>Riesgo operativo local</h3>
+                  <span id="risk-status">Sin datos</span>
+                </div>
+                <div class="ops-metrics" id="risk-metrics"></div>
+              </div>
+            </div>
+
+            <div class="dashboard-section">
+              <div class="dashboard-section-title">
+                <span>Señales y posiciones</span>
+              </div>
+              <div class="trade-section">
+                <div class="trade-section-header">
+                  <h3>Posiciones abiertas</h3>
+                  <span id="open-positions-status">0 abiertas</span>
+                </div>
+                <div id="open-positions-empty" class="empty-state compact hidden">
+                  Sin posiciones paper abiertas.
+                </div>
+                <div class="position-grid" id="open-positions-list"></div>
+              </div>
+
+              <div class="trade-section">
+                <div class="trade-section-header">
+                  <h3>Historial de señales</h3>
+                  <span id="trade-history-status">0 eventos</span>
+                </div>
+                <div class="audit-actions">
+                  <a class="icon-link" href="/api/trades.csv" title="Exportar operaciones CSV">
+                    <i data-lucide="download"></i>
+                    <span>Trades CSV</span>
+                  </a>
+                  <a class="icon-link" href="/api/audit" title="Ver auditoria JSON" target="_blank" rel="noreferrer">
+                    <i data-lucide="shield-check"></i>
+                    <span>Auditoria</span>
+                  </a>
+                </div>
+                <div id="trade-history-empty" class="empty-state compact hidden">
+                  Todavia no hay señales operadas.
+                </div>
+                <div class="trade-history" id="trade-history-list"></div>
+              </div>
+            </div>
+
+            <details class="dashboard-section compact-fold performance-fold">
+              <summary class="dashboard-section-title">
+                <span>Rendimiento</span>
+              </summary>
+              <div class="fold-body">
+
+            <div class="pnl-insight-grid">
+              <div class="pnl-chart-section">
+                <div class="trade-section-header">
+                  <h3>Curva PnL</h3>
+                  <span id="pnl-curve-status">0 puntos</span>
+                </div>
+                <div class="pnl-curve" id="pnl-curve"></div>
+              </div>
+
+              <div class="simulation-panel">
+                <div class="trade-section-header">
+                  <h3>Simulacion</h3>
+                  <span id="pnl-sim-source">Mayo 2026</span>
+                </div>
+                <label class="simulation-control" for="pnl-sim-notional">
+                  <span>USDT por orden</span>
+                  <input id="pnl-sim-notional" type="number" min="1" step="1" inputmode="decimal">
+                </label>
+                <div class="simulation-filters">
+                  <label for="pnl-sim-symbol">
+                    <span>Ticker</span>
+                    <select id="pnl-sim-symbol">
+                      <option value="ALL">Todos</option>
+                    </select>
+                  </label>
+                  <label for="pnl-sim-side">
+                    <span>Lado</span>
+                    <select id="pnl-sim-side">
+                      <option value="ALL">Todos</option>
+                      <option value="LONG">Long</option>
+                      <option value="SHORT">Short</option>
+                    </select>
+                  </label>
+                  <label for="pnl-sim-outcome">
+                    <span>Resultado</span>
+                    <select id="pnl-sim-outcome">
+                      <option value="ALL">Todas</option>
+                      <option value="WIN">Ganadoras</option>
+                      <option value="LOSS">Perdedoras</option>
+                      <option value="OPEN">Abiertas</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="simulation-filters">
+                  <label for="pnl-sim-leverage">
+                    <span>Leverage sim.</span>
+                    <input id="pnl-sim-leverage" type="number" min="1" max="125" step="1" inputmode="numeric" placeholder="Original">
+                  </label>
+                  <label for="pnl-sim-fee">
+                    <span>Fee total %</span>
+                    <input id="pnl-sim-fee" type="number" min="0" step="0.01" inputmode="decimal" value="0">
+                  </label>
+                  <label for="pnl-sim-capital">
+                    <span>Capital inicial</span>
+                    <input id="pnl-sim-capital" type="number" min="1" step="100" inputmode="decimal" value="10000">
+                  </label>
+                </div>
+                <div class="simulation-summary">
+                  <div>
+                    <span>Neto</span>
+                    <strong id="pnl-sim-total">0.00 USDT</strong>
+                  </div>
+                  <div>
+                    <span>Realizado</span>
+                    <strong id="pnl-sim-realized">0.00 USDT</strong>
+                  </div>
+                  <div>
+                    <span>Flotante</span>
+                    <strong id="pnl-sim-floating">0.00 USDT</strong>
+                  </div>
+                  <div>
+                    <span>Exposicion</span>
+                    <strong id="pnl-sim-exposure">0.00 USDT</strong>
+                  </div>
+                </div>
+                <div class="simulation-metrics" id="pnl-sim-metrics"></div>
+                <div class="simulation-list" id="pnl-sim-list"></div>
+              </div>
+            </div>
+
+            <div class="pnl-chart-section">
+              <div class="trade-section-header">
+                <h3>Evolucion mensual</h3>
+                <span id="pnl-chart-status">3 meses</span>
+              </div>
+              <div class="pnl-chart" id="pnl-chart"></div>
+            </div>
+
+            <div class="ops-grid">
+              <div class="ops-panel">
+                <div class="trade-section-header">
+                  <h3>PnL por ticker</h3>
+                  <span id="ticker-pnl-status">0 tickers</span>
+                </div>
+                <div class="pnl-chart" id="ticker-pnl-chart"></div>
+              </div>
+              <div class="ops-panel">
+                <div class="trade-section-header">
+                  <h3>Calendario diario</h3>
+                  <span id="daily-pnl-status">0 dias</span>
+                </div>
+                <div class="daily-pnl-grid" id="daily-pnl-grid"></div>
+              </div>
+            </div>
+
+            <div class="historical-panel">
+              <div class="trade-section-header">
+                <h3>Historico YouTube: mayo 2026</h3>
+                <span id="historical-pnl-status">Calculando...</span>
+              </div>
+              <div class="historical-summary">
+                <div>
+                  <span>Total historico</span>
+                  <strong id="historical-pnl-total">0.00 USDT</strong>
+                </div>
+                <div>
+                  <span>Cierres simulados</span>
+                  <strong id="historical-pnl-closed">0</strong>
+                </div>
+                <div>
+                  <span>Operaciones</span>
+                  <strong id="historical-pnl-open-signals">0</strong>
+                </div>
+                <div>
+                  <span>Mes</span>
+                  <strong id="historical-pnl-months">0</strong>
+                </div>
+              </div>
+              <div class="pnl-chart" id="historical-pnl-chart"></div>
+              <div class="pnl-table-wrap compact-table">
+                <table class="pnl-table">
+                  <thead>
+                    <tr>
+                      <th>Mes</th>
+                      <th>Neto</th>
+                      <th>Cierres</th>
+                      <th>Ops.</th>
+                    </tr>
+                  </thead>
+                  <tbody id="historical-pnl-table"></tbody>
+                </table>
+              </div>
+              <div class="historical-signals">
+                <div class="trade-section-header">
+                  <h3>Señales de mayo</h3>
+                  <span id="historical-signal-status">0 señales</span>
+                </div>
+                <div class="trade-history" id="historical-signal-list"></div>
+              </div>
+            </div>
+
+            <div class="pnl-table-wrap">
+              <table class="pnl-table">
+                <thead>
+                  <tr>
+                    <th>Mes</th>
+                    <th>Neto</th>
+                    <th>Realizado</th>
+                    <th>Paper</th>
+                    <th>Fees</th>
+                    <th>Funding</th>
+                    <th>Ajustes</th>
+                    <th>Cierres</th>
+                    <th>Test</th>
+                  </tr>
+                </thead>
+                <tbody id="pnl-table"></tbody>
+              </table>
+            </div>
+              </div>
+            </details>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

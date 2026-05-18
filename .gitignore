@@ -1,0 +1,8 @@
+node_modules/
+.data/
+.yt-profile/
+tmp/
+.env
+.env.*
+.DS_Store
+npm-debug.log*
