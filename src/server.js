@@ -49,7 +49,10 @@ const futuresTrader = new FuturesTrader({
     state.trades.unshift(event);
     state.trades = state.trades.slice(0, 200);
     broadcast('trade', event);
-    syncPriceSubscriptions();
+    syncExchangePositions({ reason: 'trade' }).catch((error) => {
+      pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
+      syncPriceSubscriptions();
+    });
     broadcast('state', state);
   }
 });
@@ -57,6 +60,8 @@ const clients = new Set();
 let pnlCache = null;
 const lastPriceBroadcast = new Map();
 let exchangeOpenSymbols = new Set();
+let exchangePositionsCache = [];
+let exchangeSyncInFlight = false;
 
 const state = {
   browserOpen: false,
@@ -293,15 +298,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/bingx' && request.method === 'GET') {
-      const exchangePositions = await futuresTrader.getExchangeOpenPositions().catch((error) => {
-        pushLog({
-          level: 'warn',
-          message: `BingX posiciones: ${error.message}`,
-          at: new Date().toISOString()
-        });
-        return [];
+      const exchangePositions = await syncExchangePositions({ reason: 'api' }).catch((error) => {
+        pushLog({ level: 'warn', message: `BingX posiciones: ${error.message}`, at: new Date().toISOString() });
+        return exchangePositionsCache;
       });
-      syncPriceSubscriptions(exchangePositions);
       return sendJson(response, {
         bingx: configStore.getBingX(),
         trades: state.trades,
@@ -312,8 +312,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/bingx/open-positions' && request.method === 'GET') {
-      const positions = await futuresTrader.getExchangeOpenPositions();
-      syncPriceSubscriptions(positions);
+      const positions = await syncExchangePositions({ reason: 'api' });
       return sendJson(response, { ok: true, positions });
     }
 
@@ -586,7 +585,10 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`YouTube Posts Scraper disponible en http://localhost:${port}`);
-  syncPriceSubscriptions();
+  syncExchangePositions({ reason: 'startup' }).catch((error) => {
+    pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
+    syncPriceSubscriptions();
+  });
 });
 
 setInterval(() => {
@@ -594,6 +596,12 @@ setInterval(() => {
     pushLog({ level: 'error', message: `Health: ${error.message}`, at: new Date().toISOString() });
   });
 }, 30000).unref();
+
+setInterval(() => {
+  syncExchangePositions({ reason: 'poll' }).catch((error) => {
+    pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
+  });
+}, 5000).unref();
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
@@ -616,6 +624,119 @@ function syncPriceSubscriptions(exchangePositionsOrSymbols) {
   }
   priceFeed.setSymbols([...paperStore.openSymbols(), ...exchangeOpenSymbols]);
   state.priceFeed = priceFeed.status();
+}
+
+async function syncExchangePositions({ reason = 'poll' } = {}) {
+  if (exchangeSyncInFlight) {
+    return exchangePositionsCache;
+  }
+
+  const config = configStore.getBingX();
+  if (!config.enabled || config.mode === 'test' || !config.apiKeyConfigured || !config.apiSecretConfigured) {
+    const previous = exchangePositionsCache;
+    exchangePositionsCache = [];
+    syncPriceSubscriptions(exchangePositionsCache);
+    if (previous.length) {
+      broadcast('exchangePositions', { positions: exchangePositionsCache, closedPositions: previous, reason });
+    }
+    return exchangePositionsCache;
+  }
+
+  exchangeSyncInFlight = true;
+  try {
+    const previous = exchangePositionsCache;
+    const next = await futuresTrader.getExchangeOpenPositions();
+    const closedPositions = detectClosedExchangePositions(previous, next);
+    exchangePositionsCache = next;
+    syncPriceSubscriptions(next);
+
+    if (reason !== 'poll' || closedPositions.length || positionsChanged(previous, next)) {
+      broadcast('exchangePositions', { positions: next, closedPositions, reason });
+    }
+
+    for (const position of closedPositions) {
+      handleExchangeClosedPosition(position, reason);
+    }
+
+    return exchangePositionsCache;
+  } finally {
+    exchangeSyncInFlight = false;
+  }
+}
+
+function detectClosedExchangePositions(previous, next) {
+  const openKeys = new Set(next.map(exchangePositionKey));
+  return previous.filter((position) => !openKeys.has(exchangePositionKey(position)));
+}
+
+function positionsChanged(previous, next) {
+  if (previous.length !== next.length) {
+    return true;
+  }
+  const previousKeys = previous.map(exchangePositionKey).sort().join('|');
+  const nextKeys = next.map(exchangePositionKey).sort().join('|');
+  return previousKeys !== nextKeys;
+}
+
+function exchangePositionKey(position) {
+  return [
+    position.id,
+    position.symbol,
+    position.direction,
+    position.raw?.positionId,
+    position.raw?.positionID
+  ].filter(Boolean).join(':');
+}
+
+function handleExchangeClosedPosition(position, reason) {
+  const event = {
+    at: new Date().toISOString(),
+    status: exchangeCloseStatus(position),
+    reason,
+    signal: {
+      symbol: position.symbol,
+      direction: position.direction
+    },
+    exchangePosition: {
+      ...position,
+      status: 'closed'
+    }
+  };
+  state.trades.unshift(event);
+  state.trades = state.trades.slice(0, 200);
+  broadcast('trade', event);
+  pushLog({
+    level: 'warn',
+    message: `BingX cerro ${position.symbol} ${position.direction || ''}.`,
+    at: event.at
+  });
+  telegramNotifier.sendAlert(
+    event.status === 'exchange_stop_closed' ? 'Stop cerrado en BingX' : 'Posicion cerrada en BingX',
+    [
+      `${position.symbol} ${position.direction || ''}`.trim(),
+      `Entrada: ${formatSigned(position.entryPrice || 0).replace('+', '')}`,
+      position.stopLoss ? `Stop: ${position.stopLoss}` : '',
+      position.currentPrice ? `Ultimo precio: ${position.currentPrice}` : '',
+      position.unrealizedPnl ? `PnL previo: ${formatSigned(position.unrealizedPnl)} VST` : ''
+    ].filter(Boolean).join('\n')
+  ).catch((error) => {
+    pushLog({ level: 'error', message: `Telegram BingX close: ${error.message}`, at: new Date().toISOString() });
+  });
+}
+
+function exchangeCloseStatus(position) {
+  if (Number(position.stopLoss) > 0) {
+    return 'exchange_stop_closed';
+  }
+  const price = Number(position.currentPrice);
+  const stop = Number(position.stopLoss);
+  if (!Number.isFinite(price) || !Number.isFinite(stop) || stop <= 0) {
+    return 'exchange_position_closed';
+  }
+  if (position.direction === 'SHORT') {
+    return price >= stop ? 'exchange_stop_closed' : 'exchange_position_closed';
+  }
+  return price <= stop ? 'exchange_stop_closed' : 'exchange_position_closed';
 }
 
 async function handlePriceTick(tick) {

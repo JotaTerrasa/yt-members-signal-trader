@@ -491,6 +491,9 @@ function connectEvents() {
     const payload = JSON.parse(event.data);
     appState.trades.unshift(payload);
     appState.trades = appState.trades.slice(0, 200);
+    if (payload.exchangePosition) {
+      removeExchangePosition(payload.exchangePosition);
+    }
     if (Array.isArray(payload.paperTrades)) {
       appState.paperTrades = payload.paperTrades;
     }
@@ -515,6 +518,12 @@ function connectEvents() {
         renderPnl();
       });
     }
+  });
+
+  source.addEventListener('exchangePositions', (event) => {
+    const payload = JSON.parse(event.data);
+    appState.exchangePositions = payload.positions || [];
+    renderPnl();
   });
 
   source.addEventListener('price', (event) => {
@@ -1723,6 +1732,22 @@ function upsertPaperTrade(position) {
   }
 }
 
+function removeExchangePosition(position) {
+  const key = exchangePositionKey(position);
+  appState.exchangePositions = (appState.exchangePositions || [])
+    .filter((item) => exchangePositionKey(item) !== key);
+}
+
+function exchangePositionKey(position) {
+  return [
+    position?.id,
+    position?.symbol,
+    position?.direction,
+    position?.raw?.positionId,
+    position?.raw?.positionID
+  ].filter(Boolean).join(':');
+}
+
 function applyExchangePriceTick(tick) {
   const symbol = normalizeTradeSymbol(tick?.symbol);
   const price = Number(tick?.price);
@@ -2087,6 +2112,8 @@ function tradeStatusLabel(value) {
     live_close_sent: 'cierre live enviado',
     live_close_no_position: 'live sin posicion',
     live_sl_be_detected: 'SL BE live detectado',
+    exchange_stop_closed: 'stop BingX cerrado',
+    exchange_position_closed: 'posicion BingX cerrada',
     paper_close_sent: 'cierre paper',
     paper_price_close: 'cierre por precio',
     paper_sl_be_sent: 'SL a BE paper',
