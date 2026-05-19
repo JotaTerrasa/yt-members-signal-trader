@@ -207,12 +207,26 @@ export class FuturesTrader {
     for (const post of posts) {
       const signals = parseFuturesSignals(post.text || '').filter((signal) => signal.isSignal);
       for (const signal of signals) {
-        const result = signal.action === 'CLOSE'
-          ? await this.executeCloseSignal(signal, { post, phase: payload.phase })
-          : signal.action === 'MOVE_SL_BE'
-            ? await this.executeMoveStopSignal(signal, { post, phase: payload.phase })
-            : await this.executeSignal(signal, { post, phase: payload.phase });
-        results.push(result);
+        try {
+          const result = signal.action === 'CLOSE'
+            ? await this.executeCloseSignal(signal, { post, phase: payload.phase })
+            : signal.action === 'MOVE_SL_BE'
+              ? await this.executeMoveStopSignal(signal, { post, phase: payload.phase })
+              : await this.executeSignal(signal, { post, phase: payload.phase });
+          results.push(result);
+        } catch (error) {
+          const failed = this.emitTrade({
+            at: new Date().toISOString(),
+            signal,
+            postId: post?.id || null,
+            postUrl: post?.url || null,
+            phase: payload.phase || null,
+            status: 'error',
+            reason: error.message
+          });
+          results.push(failed);
+          this.log(`BingX ${signal.symbol || 'senal'}: ${error.message}`, 'error');
+        }
       }
     }
     return results;
@@ -350,6 +364,17 @@ export class FuturesTrader {
 
     const referenceEntryPrice = signal.entry?.price ? Number(signal.entry.price) : null;
     const entryPrice = await this.fetchMarketPrice(client, signal.symbol);
+    const stopValidation = validateStopLossAgainstMarket(signal, entryPrice);
+    if (!stopValidation.ok) {
+      return this.emitTrade({
+        ...baseEvent,
+        status: 'blocked',
+        reason: stopValidation.reason,
+        marketPrice: entryPrice,
+        referenceEntryPrice
+      });
+    }
+
     const sizing = await this.resolveOrderSizing({ client, signal, config });
     const notional = sizing.notional;
     const exposure = notional * leverage;
@@ -594,6 +619,28 @@ function validateSignal(signal, config) {
 
   if (config.requireStopLoss && !signal.stopLoss) {
     return { ok: false, reason: 'missing_stop_loss' };
+  }
+
+  return { ok: true };
+}
+
+function validateStopLossAgainstMarket(signal, marketPrice) {
+  if (!signal.stopLoss) {
+    return { ok: true };
+  }
+
+  const stopLoss = Number(signal.stopLoss);
+  const price = Number(marketPrice);
+  if (!Number.isFinite(stopLoss) || !Number.isFinite(price) || price <= 0) {
+    return { ok: false, reason: `invalid_stop_loss:${signal.stopLoss}` };
+  }
+
+  if (signal.direction === 'LONG' && stopLoss >= price) {
+    return { ok: false, reason: `invalid_long_stop_loss:${stopLoss}>=${price}` };
+  }
+
+  if (signal.direction === 'SHORT' && stopLoss <= price) {
+    return { ok: false, reason: `invalid_short_stop_loss:${stopLoss}<=${price}` };
   }
 
   return { ok: true };

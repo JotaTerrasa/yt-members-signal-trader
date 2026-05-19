@@ -164,9 +164,10 @@ async function handlePosts(payload) {
       .then((tradeResults) => {
         const accepted = tradeResults.filter((result) => result.status.endsWith('_order_sent'));
         if (accepted.length) {
+          const executionMode = accepted[0].status.replace(/_order_sent$/, '');
           pushLog({
             level: 'warn',
-            message: `${accepted.length} senales enviadas a BingX (${accepted[0].status.startsWith('test') ? 'test' : 'live'}).`,
+            message: `${accepted.length} senales enviadas a BingX (${executionMode}).`,
             at: new Date().toISOString()
           });
         }
