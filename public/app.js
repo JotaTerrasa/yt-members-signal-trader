@@ -23,6 +23,7 @@ const elements = {
   logsList: document.querySelector('#logs-list'),
   refreshPnl: document.querySelector('#refresh-pnl'),
   pnlStatus: document.querySelector('#pnl-status'),
+  pnlSourceGrid: document.querySelector('#pnl-source-grid'),
   pnlMonthLabel: document.querySelector('#pnl-month-label'),
   pnlTotalMonth: document.querySelector('#pnl-total-month'),
   pnlRealizedMonth: document.querySelector('#pnl-realized-month'),
@@ -138,6 +139,8 @@ const appState = {
   telegram: null,
   bingx: null,
   pnl: null,
+  pnlSources: null,
+  pnlSource: '',
   pnlLoading: false,
   pnlError: '',
   simTouched: false,
@@ -212,6 +215,14 @@ function bindEvents() {
     await runAction(async () => {
       await loadPnl();
     });
+  });
+  elements.pnlSourceGrid.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-pnl-source]');
+    if (!button) {
+      return;
+    }
+    appState.pnlSource = button.dataset.pnlSource;
+    renderPnl();
   });
   elements.armLive.addEventListener('click', async () => {
     await runAction(async () => {
@@ -413,8 +424,17 @@ async function loadPnl() {
   renderPnl();
 
   try {
-    const historicalResponse = await fetchJson('/api/historical-pnl?months=72');
+    const [historicalResponse, sourcesResponse] = await Promise.all([
+      fetchJson('/api/historical-pnl?months=72'),
+      fetchJson('/api/bingx/pnl-sources').catch((error) => ({
+        ok: false,
+        error: error.message,
+        sources: {},
+        positions: {}
+      }))
+    ]);
     const historical = historicalResponse.historical;
+    appState.pnlSources = sourcesResponse;
     appState.pnl = {
       ...(appState.pnl || {}),
       months: appState.pnl?.months || [],
@@ -639,13 +659,13 @@ function renderPnl() {
   const configured = Boolean(appState.bingx?.apiKeyConfigured && appState.bingx?.apiSecretConfigured);
   const reference = currentReferenceLedger();
   const rows = pnlRowsWithReferenceLedger(pnlRowsWithLocalTrades(appState.pnl?.months || []), reference);
-  const current = summarizePnlRows(rows.filter((row) => row.month === currentMonthKey()));
   const openPositions = openTradingPositions();
   const closedPositions = closedPaperPositions();
-  const displayOpenPositions = reference?.positions?.filter((position) => position.status === 'open') || openPositions;
-  const displayClosedPositions = reference?.positions?.filter((position) => position.status === 'closed') || closedPositions;
-  const openExposure = displayOpenPositions.reduce((sum, position) => sum + Number(position.exposure || position.notional || 0), 0);
-  const winRate = calculateWinRate(displayClosedPositions);
+  const sources = pnlSourceCards(reference);
+  const selectedSource = selectedPnlSource(sources);
+  const displayPositions = positionsForPnlSource(selectedSource.key, reference);
+  const displayClosedPositions = displayPositions.filter((position) => position.status === 'closed');
+  const winRate = selectedSource.winRate ?? calculateWinRate(displayClosedPositions);
   const hasActivity = rows.some((row) => row.records || row.testOrders || row.liveOrders || row.paperPnl);
   const hasHistorical = Boolean(appState.pnl?.historical);
   const hasReference = Boolean(reference);
@@ -654,19 +674,20 @@ function renderPnl() {
   const hasBingxActivity = rows.some((row) => row.records || row.liveOrders);
 
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
-  elements.pnlMonthLabel.textContent = hasReference ? reference.label : formatMonth(currentMonthKey());
-  elements.pnlTotalMonth.textContent = formatUsdt(current.total);
-  elements.pnlRealizedMonth.textContent = formatUsdt(current.realized);
-  elements.pnlFloatingMonth.textContent = formatUsdt(current.paperUnrealized);
-  elements.pnlPaperMonth.textContent = formatUsdt(current.paperPnl);
-  elements.pnlOpenExposure.textContent = formatUsdt(openExposure);
-  elements.pnlFeesMonth.textContent = formatUsdt(current.fees);
-  elements.pnlFundingMonth.textContent = formatUsdt(current.funding);
-  elements.pnlTestOrders.textContent = String(current.testOrders || 0);
-  elements.pnlClosedTrades.textContent = String(current.closedTrades || current.closedPaperTrades || closedPositions.length);
-  elements.pnlModeLabel.textContent = hasReference ? 'Excel ref.' : appState.bingx?.mode === 'live' ? 'Live real' : 'Test paper';
+  renderPnlSourceGrid(sources, selectedSource.key);
+  elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
+  elements.pnlTotalMonth.textContent = formatUsdt(selectedSource.total);
+  elements.pnlRealizedMonth.textContent = formatUsdt(selectedSource.realized);
+  elements.pnlFloatingMonth.textContent = formatUsdt(selectedSource.floating);
+  elements.pnlPaperMonth.textContent = formatUsdt(selectedSource.total);
+  elements.pnlOpenExposure.textContent = formatUsdt(selectedSource.exposure);
+  elements.pnlFeesMonth.textContent = formatUsdt(selectedSource.fees);
+  elements.pnlFundingMonth.textContent = formatUsdt(selectedSource.funding);
+  elements.pnlTestOrders.textContent = String(selectedSource.openPositions || 0);
+  elements.pnlClosedTrades.textContent = String(selectedSource.closedTrades || closedPositions.length);
+  elements.pnlModeLabel.textContent = selectedSource.modeLabel;
   elements.pnlWinRate.textContent = formatPercent(winRate);
-  elements.pnlNote.textContent = pnlNoteText({ hasPaperActivity, hasBingxActivity, hasReference });
+  elements.pnlNote.textContent = sourceNoteText(selectedSource);
 
   if (!configured) {
     elements.pnlStatus.textContent = 'Configura BingX para leer el PnL mensual.';
@@ -687,7 +708,9 @@ function renderPnl() {
     elements.pnlEmpty.textContent = 'Sin PnL todavia. Las ordenes test apareceran aqui como paper trading.';
     elements.pnlEmpty.classList.remove('hidden');
   } else {
-    elements.pnlStatus.textContent = hasActivity ? pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference }) : 'Sin PnL todavia.';
+    elements.pnlStatus.textContent = hasActivity
+      ? `${selectedSource.label} · ${selectedSource.status || pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference })}`
+      : 'Sin PnL todavia.';
     elements.pnlEmpty.classList.add('hidden');
   }
 
@@ -708,6 +731,150 @@ function renderPnl() {
   window.lucide?.createIcons();
 }
 
+function pnlSourceCards(reference = currentReferenceLedger()) {
+  const sheet = sheetPnlSource(reference);
+  const vstPositions = positionsForPnlSource('vst', reference);
+  const livePositions = positionsForPnlSource('live', reference);
+  const vst = exchangeSourceWithPositions(appState.pnlSources?.sources?.vst, vstPositions, {
+    key: 'vst',
+    label: 'Futuros VST',
+    modeLabel: 'Demo VST',
+    asset: 'VST'
+  });
+  const live = exchangeSourceWithPositions(appState.pnlSources?.sources?.live, livePositions, {
+    key: 'live',
+    label: 'Futuros reales',
+    modeLabel: 'Live real',
+    asset: 'USDT'
+  });
+  return [sheet, vst, live];
+}
+
+function sheetPnlSource(reference = currentReferenceLedger()) {
+  if (!reference?.row) {
+    return emptyClientPnlSource({
+      key: 'sheet',
+      label: 'Google Sheet',
+      modeLabel: 'Excel ref.',
+      asset: 'USDT',
+      status: 'Sin hoja cargada'
+    });
+  }
+
+  const positions = reference.positions || [];
+  const open = positions.filter((position) => position.status === 'open');
+  const closed = positions.filter((position) => position.status === 'closed');
+  const row = reference.row;
+  const floating = Number(row.paperUnrealized || 0);
+  const realized = Number(row.realized || row.paperRealized || 0);
+  const total = Number(row.total || row.paperPnl || realized + floating);
+
+  return {
+    key: 'sheet',
+    label: 'Google Sheet',
+    modeLabel: 'Excel ref.',
+    month: row.month || currentMonthKey(),
+    asset: row.asset || 'USDT',
+    available: true,
+    status: `${positions.length} ops. referencia`,
+    total,
+    realized,
+    floating,
+    fees: 0,
+    funding: 0,
+    exposure: open.reduce((sum, position) => sum + Number(position.exposure || position.notional || 0), 0),
+    openPositions: open.length,
+    closedTrades: Number(row.closedTrades || closed.length),
+    records: positions.length,
+    winRate: calculateWinRate(closed)
+  };
+}
+
+function exchangeSourceWithPositions(source, positions, fallback) {
+  const base = source || emptyClientPnlSource({
+    ...fallback,
+    status: appState.pnlSources?.error || 'No cargado'
+  });
+  const open = positions.filter((position) => position.status === 'open');
+  const floating = roundPnl(open.reduce((sum, position) => (
+    sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
+  ), 0));
+  const exposure = roundPnl(open.reduce((sum, position) => (
+    sum + Number(position.exposure || position.notional || 0)
+  ), 0));
+  const realized = Number(base.realized || 0);
+
+  return {
+    ...base,
+    key: fallback.key,
+    label: fallback.label,
+    modeLabel: fallback.modeLabel,
+    asset: base.asset || fallback.asset,
+    floating,
+    exposure,
+    openPositions: open.length,
+    total: roundPnl(realized + floating)
+  };
+}
+
+function emptyClientPnlSource({ key, label, modeLabel, asset, status = 'No disponible' }) {
+  return {
+    key,
+    label,
+    modeLabel,
+    month: currentMonthKey(),
+    asset,
+    available: false,
+    status,
+    total: 0,
+    realized: 0,
+    floating: 0,
+    fees: 0,
+    funding: 0,
+    exposure: 0,
+    openPositions: 0,
+    closedTrades: 0,
+    records: 0,
+    winRate: null
+  };
+}
+
+function selectedPnlSource(sources = pnlSourceCards()) {
+  const preferred = appState.pnlSource || defaultPnlSourceKey(sources);
+  const selected = sources.find((source) => source.key === preferred) || sources.find((source) => source.available) || sources[0];
+  appState.pnlSource = selected?.key || 'sheet';
+  return selected || emptyClientPnlSource({
+    key: 'sheet',
+    label: 'Google Sheet',
+    modeLabel: 'Excel ref.',
+    asset: 'USDT'
+  });
+}
+
+function defaultPnlSourceKey(sources) {
+  if (appState.bingx?.mode === 'live') {
+    return 'live';
+  }
+  if (appState.bingx?.mode === 'demo') {
+    return 'vst';
+  }
+  return sources.find((source) => source.key === 'sheet' && source.available) ? 'sheet' : 'vst';
+}
+
+function renderPnlSourceGrid(sources, selectedKey) {
+  elements.pnlSourceGrid.innerHTML = sources.map((source) => `
+    <button class="pnl-source-card ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
+      <span>${escapeHtml(source.label)}</span>
+      <strong class="${amountClass(source.total)}">${escapeHtml(formatUsdt(source.total))}</strong>
+      <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(source.status || 'Sin datos')}</small>
+      <div>
+        <span>${escapeHtml(formatUsdt(source.realized))} realizado</span>
+        <span>${escapeHtml(formatUsdt(source.floating))} flotante</span>
+      </div>
+    </button>
+  `).join('');
+}
+
 function pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference }) {
   if (hasReference) {
     return `${currentReferenceLedger()?.label || 'Ledger Excel'} · Google Sheet`;
@@ -720,6 +887,19 @@ function pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference }) {
     return `Paper trading local · ${formatMonth(currentMonthKey())} con precios de BingX`;
   }
   return `PnL real de BingX · ultimos ${range} meses`;
+}
+
+function sourceNoteText(source) {
+  if (source.key === 'sheet') {
+    return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
+  }
+  if (source.key === 'vst') {
+    return 'Futuros VST lee la cuenta demo de BingX. Incluye PnL realizado de BingX y flotante de las posiciones VST abiertas.';
+  }
+  if (source.key === 'live') {
+    return 'Futuros reales lee la cuenta real de BingX. Mantenlo separado de VST antes de armar live.';
+  }
+  return 'Cada tarjeta separa una fuente de PnL para evitar mezclar referencia, demo y real.';
 }
 
 function pnlNoteText({ hasPaperActivity, hasBingxActivity, hasReference }) {
@@ -997,21 +1177,17 @@ function renderAmountBars(rows, metaFactory = () => '') {
 
 function dashboardPositions() {
   const reference = currentReferenceLedger();
-  if (reference?.positions?.length) {
+  const source = selectedPnlSource(pnlSourceCards(reference));
+  const positions = positionsForPnlSource(source.key, reference);
+  if (positions.length) {
     return {
-      label: reference.label,
-      positions: reference.positions
+      label: source.label,
+      positions
     };
   }
-  if ((appState.paperTrades || []).length) {
-    return {
-      label: 'Paper actual',
-      positions: appState.paperTrades || []
-    };
-  }
-  const sourceLabel = appState.pnl?.historical?.source?.referenceLedger?.label || 'Mayo 2026';
+
   return {
-    label: sourceLabel,
+    label: source.label,
     positions: simulationBaseSourcePositions().positions
   };
 }
@@ -1252,9 +1428,7 @@ function renderPnlRow(row) {
 function renderOpenPositions(openPositions = openTradingPositions()) {
   elements.openPositionsStatus.textContent = `${openPositions.length} abiertas`;
   elements.openPositionsEmpty.classList.toggle('hidden', openPositions.length > 0);
-  elements.openPositionsEmpty.textContent = exchangePositionMode()
-    ? 'Sin posiciones abiertas en BingX.'
-    : 'Sin posiciones paper abiertas.';
+  elements.openPositionsEmpty.textContent = `Sin posiciones abiertas en ${selectedPnlSource().label}.`;
   elements.openPositionsList.innerHTML = openPositions.map(renderOpenPositionCard).join('');
 }
 
@@ -1304,11 +1478,29 @@ function renderOpenPositionCard(position) {
 }
 
 function openTradingPositions() {
-  return exchangePositionMode() ? openExchangePositions() : openPaperPositions();
+  return positionsForPnlSource(selectedPnlSource().key).filter((position) => position.status === 'open');
 }
 
 function exchangePositionMode() {
   return appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'live';
+}
+
+function positionsForPnlSource(key, reference = currentReferenceLedger()) {
+  if (key === 'sheet') {
+    return reference?.positions || [];
+  }
+
+  if (key === 'vst') {
+    const liveCurrent = appState.bingx?.mode === 'demo' ? appState.exchangePositions || [] : [];
+    return liveCurrent.length ? liveCurrent : appState.pnlSources?.positions?.vst || [];
+  }
+
+  if (key === 'live') {
+    const liveCurrent = appState.bingx?.mode === 'live' ? appState.exchangePositions || [] : [];
+    return liveCurrent.length ? liveCurrent : appState.pnlSources?.positions?.live || [];
+  }
+
+  return exchangePositionMode() ? openExchangePositions() : openPaperPositions();
 }
 
 function openExchangePositions() {

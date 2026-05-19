@@ -76,8 +76,11 @@ export class FuturesTrader {
     });
   }
 
-  async getMonthlyPnl({ months = 3 } = {}) {
-    const config = this.configStore.getBingX({ includeSecrets: true });
+  async getMonthlyPnl({ months = 3, mode = null, includePaper = true } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      ...(mode ? { mode } : {})
+    };
     const client = this.client(config);
     const ranges = buildMonthRanges(months);
     const records = [];
@@ -93,7 +96,7 @@ export class FuturesTrader {
     }
 
     const summary = buildPnlSummary(records, ranges);
-    if (this.paperStore) {
+    if (includePaper && this.paperStore) {
       const positions = await this.paperStore.markToMarket((symbol) => this.fetchMarketPrice(client, symbol));
       mergePaperSummary(summary, this.paperStore.monthlySummary(ranges), positions);
     }
@@ -112,9 +115,12 @@ export class FuturesTrader {
     return summary;
   }
 
-  async getExchangeOpenPositions() {
-    const config = this.configStore.getBingX({ includeSecrets: true });
-    if (!config.enabled || config.mode === 'test' || !config.apiKey || !config.apiSecret) {
+  async getExchangeOpenPositions({ mode = null } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      ...(mode ? { mode } : {})
+    };
+    if (config.mode === 'test' || !config.apiKey || !config.apiSecret) {
       return [];
     }
 

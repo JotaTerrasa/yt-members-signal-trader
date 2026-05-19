@@ -46,6 +46,7 @@ const futuresTrader = new FuturesTrader({
   paperStore,
   onLog: (entry) => pushLog(entry),
   onTrade: (event) => {
+    pnlSourcesCache = null;
     state.trades.unshift(event);
     state.trades = state.trades.slice(0, 200);
     broadcast('trade', event);
@@ -58,6 +59,7 @@ const futuresTrader = new FuturesTrader({
 });
 const clients = new Set();
 let pnlCache = null;
+let pnlSourcesCache = null;
 const lastPriceBroadcast = new Map();
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
@@ -321,6 +323,7 @@ const server = createServer(async (request, response) => {
       const body = await readJson(request);
       const bingx = await configStore.updateBingX(body);
       pnlCache = null;
+      pnlSourcesCache = null;
       broadcast('bingx', { bingx });
       return sendJson(response, { ok: true, bingx });
     }
@@ -422,6 +425,50 @@ const server = createServer(async (request, response) => {
         pushLog({ level: 'warn', message: `BingX PnL no disponible, usando paper local: ${error.message}`, at: new Date().toISOString() });
         return sendJson(response, { ok: true, pnl, warning: error.message });
       }
+    }
+
+    if (requestUrl.pathname === '/api/bingx/pnl-sources' && request.method === 'GET') {
+      if (pnlSourcesCache && Date.now() - pnlSourcesCache.at < 45000) {
+        return sendJson(response, { ...pnlSourcesCache.payload, cached: true });
+      }
+
+      const bingx = configStore.getBingX();
+      if (!bingx.apiKeyConfigured || !bingx.apiSecretConfigured) {
+        const payload = {
+          ok: true,
+          month: currentMonthKey(),
+          sources: {
+            vst: emptyPnlSource('vst', 'Futuros VST', 'Demo VST', 'VST', 'Configura API BingX'),
+            live: emptyPnlSource('live', 'Futuros reales', 'Live real', 'USDT', 'Configura API BingX')
+          },
+          positions: {
+            vst: [],
+            live: []
+          }
+        };
+        pnlSourcesCache = { at: Date.now(), payload };
+        return sendJson(response, payload);
+      }
+
+      const [vst, live] = await Promise.all([
+        exchangePnlSource({ key: 'vst', mode: 'demo', label: 'Futuros VST', modeLabel: 'Demo VST', asset: 'VST' }),
+        exchangePnlSource({ key: 'live', mode: 'live', label: 'Futuros reales', modeLabel: 'Live real', asset: 'USDT' })
+      ]);
+
+      const payload = {
+        ok: true,
+        month: currentMonthKey(),
+        sources: {
+          vst: vst.source,
+          live: live.source
+        },
+        positions: {
+          vst: vst.positions,
+          live: live.positions
+        }
+      };
+      pnlSourcesCache = { at: Date.now(), payload };
+      return sendJson(response, payload);
     }
 
     if (requestUrl.pathname === '/api/risk' && request.method === 'GET') {
@@ -948,6 +995,135 @@ function mimeType(extension) {
     '.json': 'application/json; charset=utf-8',
     '.svg': 'image/svg+xml'
   }[extension] || 'application/octet-stream';
+}
+
+async function exchangePnlSource({ key, mode, label, modeLabel, asset }) {
+  const [pnlResult, positionsResult] = await Promise.allSettled([
+    futuresTrader.getMonthlyPnl({ months: 3, mode, includePaper: false }),
+    futuresTrader.getExchangeOpenPositions({ mode })
+  ]);
+  const pnl = pnlResult.status === 'fulfilled' ? pnlResult.value : null;
+  const positions = positionsResult.status === 'fulfilled' ? positionsResult.value : [];
+  const error = [pnlResult, positionsResult]
+    .filter((result) => result.status === 'rejected')
+    .map((result) => result.reason?.message || String(result.reason))
+    .filter(Boolean)
+    .join(' · ');
+
+  if (!pnl && !positions.length) {
+    return {
+      source: emptyPnlSource(key, label, modeLabel, asset, sourceErrorStatus(error)),
+      positions: []
+    };
+  }
+
+  return {
+    source: summarizeExchangePnlSource({ key, label, modeLabel, asset, pnl, positions, error }),
+    positions
+  };
+}
+
+function summarizeExchangePnlSource({ key, label, modeLabel, asset, pnl, positions = [], error = '' }) {
+  const month = currentMonthKey();
+  const rows = (pnl?.months || []).filter((row) => row.month === month);
+  const income = summarizePnlRows(rows);
+  const open = positions.filter((position) => position.status === 'open');
+  const floating = roundMoney(open.reduce((sum, position) => (
+    sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
+  ), 0));
+  const exposure = roundMoney(open.reduce((sum, position) => (
+    sum + Number(position.exposure || position.notional || 0)
+  ), 0));
+  const realizedNet = Number(income.total || 0);
+  const realizedTrades = (pnl?.recent || [])
+    .filter((record) => record.month === month && String(record.incomeType).toUpperCase() === 'REALIZED_PNL');
+  const winners = realizedTrades.filter((record) => Number(record.income || 0) > 0).length;
+
+  return {
+    key,
+    label,
+    modeLabel,
+    month,
+    asset,
+    available: true,
+    status: sourceStatusText({ open, realizedTrades, error }),
+    error: error ? sourceErrorStatus(error) : '',
+    total: roundMoney(realizedNet + floating),
+    realized: roundMoney(realizedNet),
+    grossRealized: roundMoney(income.realized || 0),
+    floating,
+    fees: roundMoney(income.fees || 0),
+    funding: roundMoney(income.funding || 0),
+    exposure,
+    openPositions: open.length,
+    closedTrades: Number(income.closedTrades || 0),
+    records: Number(income.records || 0),
+    winRate: realizedTrades.length ? (winners / realizedTrades.length) * 100 : null
+  };
+}
+
+function sourceStatusText({ open, realizedTrades, error }) {
+  if (error) {
+    const suffix = open.length ? ` · ${open.length} abiertas` : '';
+    return `${sourceErrorStatus(error)}${suffix}`;
+  }
+  if (open.length) {
+    return `${open.length} abiertas`;
+  }
+  return realizedTrades.length ? 'Sin abiertas' : 'Sin operaciones';
+}
+
+function sourceErrorStatus(error = '') {
+  if (/frequency|rate|100410|limit/i.test(error)) {
+    return 'Rate-limit PnL temporal';
+  }
+  return error || 'No disponible';
+}
+
+function emptyPnlSource(key, label, modeLabel, asset, error = '') {
+  return {
+    key,
+    label,
+    modeLabel,
+    month: currentMonthKey(),
+    asset,
+    available: false,
+    status: error || 'No disponible',
+    error,
+    total: 0,
+    realized: 0,
+    grossRealized: 0,
+    floating: 0,
+    fees: 0,
+    funding: 0,
+    exposure: 0,
+    openPositions: 0,
+    closedTrades: 0,
+    records: 0,
+    winRate: null
+  };
+}
+
+function summarizePnlRows(rows = []) {
+  return rows.reduce((summary, row) => ({
+    total: roundMoney(summary.total + Number(row.total || 0)),
+    realized: roundMoney(summary.realized + Number(row.realized || 0)),
+    fees: roundMoney(summary.fees + Number(row.fees || 0)),
+    funding: roundMoney(summary.funding + Number(row.funding || 0)),
+    closedTrades: summary.closedTrades + Number(row.closedTrades || 0),
+    records: summary.records + Number(row.records || 0)
+  }), {
+    total: 0,
+    realized: 0,
+    fees: 0,
+    funding: 0,
+    closedTrades: 0,
+    records: 0
+  });
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100000000) / 100000000;
 }
 
 async function shutdown() {

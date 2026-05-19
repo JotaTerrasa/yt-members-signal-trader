@@ -614,6 +614,63 @@ textarea {
   font-weight: 700;
 }
 
+.pnl-source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.pnl-source-card {
+  display: grid;
+  gap: 6px;
+  min-height: 112px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pnl-source-card.active {
+  border-color: rgba(18, 106, 99, 0.45);
+  box-shadow: inset 0 0 0 2px rgba(18, 106, 99, 0.12);
+}
+
+.pnl-source-card.unavailable {
+  color: var(--muted);
+  background: #f8faf9;
+}
+
+.pnl-source-card > span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pnl-source-card > strong {
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
+.pnl-source-card small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.pnl-source-card div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .pnl-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.65fr);
@@ -1523,6 +1580,10 @@ summary.dashboard-section-title {
   }
 
   .pnl-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .pnl-source-grid {
     grid-template-columns: 1fr;
   }
 
