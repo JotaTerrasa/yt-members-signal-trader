@@ -34,8 +34,8 @@ const defaultConfig = {
     dryRunRequired: true,
     dryRunCompletedAt: null,
     maxOpenPositions: 5,
-    maxDailyLossUSDT: 100,
-    maxMonthlyLossUSDT: 500,
+    maxDailyLossUSDT: 0,
+    maxMonthlyLossUSDT: 0,
     maxSignalLeverage: 125,
     vstBaseCapital: 1000,
     vstCapitalPercent: 15
