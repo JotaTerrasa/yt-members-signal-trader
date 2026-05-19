@@ -24,6 +24,7 @@ const elements = {
   refreshPnl: document.querySelector('#refresh-pnl'),
   pnlStatus: document.querySelector('#pnl-status'),
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
+  performanceSourceGrid: document.querySelector('#performance-source-grid'),
   pnlMonthLabel: document.querySelector('#pnl-month-label'),
   pnlTotalMonth: document.querySelector('#pnl-total-month'),
   pnlHeroDetail: document.querySelector('#pnl-hero-detail'),
@@ -141,6 +142,7 @@ const appState = {
   pnl: null,
   pnlSources: null,
   pnlSource: '',
+  performanceSource: '',
   pnlLoading: false,
   pnlError: '',
   simTouched: false,
@@ -222,7 +224,19 @@ function bindEvents() {
       return;
     }
     appState.pnlSource = button.dataset.pnlSource;
+    appState.performanceSource = button.dataset.pnlSource;
     renderPnl();
+  });
+  elements.performanceSourceGrid.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-performance-source]');
+    if (!button) {
+      return;
+    }
+    appState.performanceSource = button.dataset.performanceSource;
+    renderPerformanceSourceGrid(pnlSourceCards(currentReferenceLedger()), appState.performanceSource);
+    renderPnlCurve();
+    renderSimulation();
+    renderPnlChart(performanceMonthlyRows());
   });
   elements.armLive.addEventListener('click', async () => {
     await runAction(async () => {
@@ -675,6 +689,7 @@ function renderPnl() {
 
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
   renderPnlSourceGrid(sources, selectedSource.key);
+  renderPerformanceSourceGrid(sources, selectedPerformanceSource(sources).key);
   elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
   elements.pnlTotalMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
   elements.pnlHeroDetail.textContent = sourceHeroDetail(selectedSource);
@@ -718,7 +733,7 @@ function renderPnl() {
   elements.pnlTable.innerHTML = rows.map(renderPnlRow).join('');
   renderPnlCurve();
   renderSimulation();
-  renderPnlChart(rows);
+  renderPnlChart(performanceMonthlyRows(rows));
   renderLiveReadiness();
   renderHealthPanel();
   renderRiskPanel(openPositions, closedPositions);
@@ -879,6 +894,30 @@ function renderPnlSourceGrid(sources, selectedKey) {
   }).join('');
 }
 
+function selectedPerformanceSource(sources = pnlSourceCards()) {
+  const preferred = appState.performanceSource || appState.pnlSource || defaultPnlSourceKey(sources);
+  const selected = sources.find((source) => source.key === preferred) || sources[0];
+  appState.performanceSource = selected?.key || 'sheet';
+  return selected || emptyClientPnlSource({
+    key: 'sheet',
+    label: 'Google Sheet',
+    modeLabel: 'Excel ref.',
+    asset: 'USDT'
+  });
+}
+
+function renderPerformanceSourceGrid(sources, selectedKey) {
+  elements.performanceSourceGrid.innerHTML = sources.map((source) => {
+    const count = performanceSourcePositions(source.key, currentReferenceLedger(), source).positions.length;
+    return `
+      <button class="performance-source-button ${source.key === selectedKey ? 'active' : ''} ${count ? '' : 'empty'}" type="button" data-performance-source="${escapeAttribute(source.key)}">
+        <span>${escapeHtml(source.label)}</span>
+        <strong>${escapeHtml(String(count))}</strong>
+      </button>
+    `;
+  }).join('');
+}
+
 function sourcePrimaryValue(source) {
   if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
     return Number(source.balance.equity);
@@ -986,19 +1025,19 @@ function renderPnlCurve() {
     <div class="curve-stats">
       <div>
         <span>Neto</span>
-        <strong class="${amountClass(finalValue)}">${escapeHtml(formatUsdt(finalValue))}</strong>
+        <strong class="${amountClass(finalValue)}">${escapeHtml(formatMoney(finalValue, source.asset))}</strong>
       </div>
       <div>
         <span>Maximo</span>
-        <strong class="${amountClass(maxValue)}">${escapeHtml(formatUsdt(maxValue))}</strong>
+        <strong class="${amountClass(maxValue)}">${escapeHtml(formatMoney(maxValue, source.asset))}</strong>
       </div>
       <div>
         <span>Minimo</span>
-        <strong class="${amountClass(minValue)}">${escapeHtml(formatUsdt(minValue))}</strong>
+        <strong class="${amountClass(minValue)}">${escapeHtml(formatMoney(minValue, source.asset))}</strong>
       </div>
       <div>
         <span>Drawdown</span>
-        <strong class="${amountClass(-drawdown)}">${escapeHtml(formatUsdt(-drawdown))}</strong>
+        <strong class="${amountClass(-drawdown)}">${escapeHtml(formatMoney(-drawdown, source.asset))}</strong>
       </div>
     </div>
   `;
@@ -1231,6 +1270,78 @@ function dashboardPositions() {
     label: source.label,
     positions: simulationBaseSourcePositions().positions
   };
+}
+
+function performanceSourcePositions(key, reference = currentReferenceLedger(), source = null) {
+  const resolvedSource = source || pnlSourceCards(reference).find((item) => item.key === key);
+  const label = resolvedSource?.label || 'Rendimiento';
+  const asset = resolvedSource?.asset || 'USDT';
+
+  if (key === 'sheet') {
+    const targetMonth = currentMonthKey();
+    const historicalPositions = (appState.pnl?.historical?.positions || [])
+      .filter((position) => monthKeyFromValue(position.closedAt || position.openedAt) === targetMonth && position.referenceLedger);
+    return {
+      key,
+      label: reference?.label || appState.pnl?.historical?.source?.referenceLedger?.label || label,
+      asset,
+      positions: reference?.positions?.length ? reference.positions : historicalPositions
+    };
+  }
+
+  return {
+    key,
+    label,
+    asset,
+    positions: positionsForPnlSource(key, reference)
+  };
+}
+
+function performanceMonthlyRows(fallbackRows = []) {
+  const reference = currentReferenceLedger();
+  const source = selectedPerformanceSource(pnlSourceCards(reference));
+  if (source.key === 'sheet') {
+    return reference?.row ? [reference.row] : fallbackRows.filter((row) => row.month === currentMonthKey());
+  }
+
+  const positions = performanceSourcePositions(source.key, reference, source).positions;
+  const byMonth = new Map();
+  for (const position of positions) {
+    const month = monthKeyFromValue(position.closedAt || position.openedAt) || currentMonthKey();
+    const row = byMonth.get(month) || createPnlRow(month, source.asset || 'USDT', {});
+    const pnl = Number(position.paperPnl ?? position.unrealizedPnl ?? position.realizedPnl ?? 0);
+    row.total = roundPnl(row.total + pnl);
+    row.paperPnl = roundPnl(row.paperPnl + pnl);
+    if (position.status === 'closed') {
+      row.realized = roundPnl(row.realized + Number(position.realizedPnl || pnl));
+      row.paperRealized = row.realized;
+      row.closedTrades += 1;
+      row.closedPaperTrades += 1;
+    } else {
+      row.paperUnrealized = roundPnl(row.paperUnrealized + Number(position.unrealizedPnl ?? pnl));
+      row.openPaperTrades += 1;
+    }
+    row.testOrders += 1;
+    byMonth.set(month, row);
+  }
+
+  if (byMonth.size) {
+    return [...byMonth.values()].sort((a, b) => b.month.localeCompare(a.month));
+  }
+
+  if (source.month) {
+    return [createPnlRow(source.month, source.asset || 'USDT', {
+      total: source.total,
+      realized: source.realized,
+      paperPnl: source.total,
+      paperRealized: source.realized,
+      paperUnrealized: source.floating,
+      closedTrades: source.closedTrades,
+      testOrders: source.records || source.openPositions
+    })];
+  }
+
+  return [];
 }
 
 function currentReferenceLedger() {
@@ -1612,16 +1723,17 @@ function renderSimulation() {
     .filter((position) => position.status === 'open')
     .reduce((sum, position) => sum + position.exposure, 0);
   const metrics = calculateSimulationMetrics(positions);
+  const asset = source.asset || 'USDT';
 
   elements.pnlSimSource.textContent = source.label;
-  elements.pnlSimTotal.textContent = formatUsdt(total);
+  elements.pnlSimTotal.textContent = formatMoney(total, asset);
   elements.pnlSimTotal.className = amountClass(total);
-  elements.pnlSimRealized.textContent = formatUsdt(realized);
+  elements.pnlSimRealized.textContent = formatMoney(realized, asset);
   elements.pnlSimRealized.className = amountClass(realized);
-  elements.pnlSimFloating.textContent = formatUsdt(floating);
+  elements.pnlSimFloating.textContent = formatMoney(floating, asset);
   elements.pnlSimFloating.className = amountClass(floating);
-  elements.pnlSimExposure.textContent = formatUsdt(exposure);
-  elements.pnlSimMetrics.innerHTML = renderSimulationMetrics(metrics);
+  elements.pnlSimExposure.textContent = formatMoney(exposure, asset);
+  elements.pnlSimMetrics.innerHTML = renderSimulationMetrics(metrics, asset);
 
   if (!positions.length) {
     elements.pnlSimList.innerHTML = '<div class="simulation-empty">Sin operaciones para simular.</div>';
@@ -1635,16 +1747,17 @@ function renderSimulation() {
       <div class="simulation-row">
         <div>
           <strong>${escapeHtml(position.symbol || '-')}</strong>
-          <span>${escapeHtml(position.status === 'open' ? 'abierta' : closeReasonLabel(position.closeReason))} · ${escapeHtml(formatLeverage(position.leverage))} · fee ${escapeHtml(formatUsdt(position.fee || 0))}</span>
+          <span>${escapeHtml(position.status === 'open' ? 'abierta' : closeReasonLabel(position.closeReason))} · ${escapeHtml(formatLeverage(position.leverage))} · fee ${escapeHtml(formatMoney(position.fee || 0, asset))}</span>
         </div>
-        <span class="${amountClass(position.paperPnl)}">${escapeHtml(formatUsdt(position.paperPnl))}</span>
+        <span class="${amountClass(position.paperPnl)}">${escapeHtml(formatMoney(position.paperPnl, asset))}</span>
       </div>
     `).join('');
 }
 
 function renderSimulationFilters() {
-  const symbols = [...new Set(simulationBaseSourcePositions().positions.map((position) => position.symbol).filter(Boolean))].sort();
-  const signature = symbols.join('|');
+  const base = simulationBaseSourcePositions();
+  const symbols = [...new Set(base.positions.map((position) => position.symbol).filter(Boolean))].sort();
+  const signature = `${base.key || ''}|${symbols.join('|')}`;
   if (elements.pnlSimSymbol.dataset.options === signature) {
     return;
   }
@@ -1659,21 +1772,9 @@ function renderSimulationFilters() {
 }
 
 function simulationBaseSourcePositions() {
-  const targetMonth = '2026-05';
-  const historicalPositions = (appState.pnl?.historical?.positions || [])
-    .filter((position) => monthKeyFromValue(position.closedAt || position.openedAt) === targetMonth);
-  if (historicalPositions.length) {
-    const sourceLabel = appState.pnl?.historical?.source?.referenceLedger?.label || 'Mayo 2026';
-    return {
-      label: sourceLabel,
-      positions: historicalPositions
-    };
-  }
-
-  return {
-    label: 'Paper',
-    positions: appState.paperTrades || []
-  };
+  const reference = currentReferenceLedger();
+  const source = selectedPerformanceSource(pnlSourceCards(reference));
+  return performanceSourcePositions(source.key, reference, source);
 }
 
 function filteredSimulationSource() {
@@ -1707,7 +1808,9 @@ function filteredSimulationSource() {
   ].filter(Boolean);
 
   return {
+    key: base.key,
     label: filterParts.length ? `${base.label} · ${filterParts.join(' · ')}` : base.label,
+    asset: base.asset || 'USDT',
     positions
   };
 }
@@ -1769,15 +1872,15 @@ function calculateSimulationMetrics(positions) {
   };
 }
 
-function renderSimulationMetrics(metrics) {
+function renderSimulationMetrics(metrics, asset = 'USDT') {
   return [
     ['Ops.', String(metrics.operations || 0), ''],
     ['Win rate', formatPercent(metrics.winRate), ''],
     ['Profit factor', formatRatio(metrics.profitFactor), ''],
-    ['Media', formatUsdt(metrics.average), amountClass(metrics.average)],
-    ['Mejor', formatUsdt(metrics.best), amountClass(metrics.best)],
-    ['Peor', formatUsdt(metrics.worst), amountClass(metrics.worst)],
-    ['Drawdown', formatUsdt(-metrics.drawdown), amountClass(-metrics.drawdown)],
+    ['Media', formatMoney(metrics.average, asset), amountClass(metrics.average)],
+    ['Mejor', formatMoney(metrics.best, asset), amountClass(metrics.best)],
+    ['Peor', formatMoney(metrics.worst, asset), amountClass(metrics.worst)],
+    ['Drawdown', formatMoney(-metrics.drawdown, asset), amountClass(-metrics.drawdown)],
     ['ROI', formatPercent(metrics.roi), amountClass(metrics.roi)]
   ].map(([label, value, className]) => `
     <div>

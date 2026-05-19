@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>YouTube Posts Scraper</title>
-    <link rel="stylesheet" href="/styles.css?v=15">
+    <link rel="stylesheet" href="/styles.css?v=16">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=44" defer></script>
+    <script src="/app.js?v=45" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -479,6 +479,7 @@
                 <span>Rendimiento</span>
               </summary>
               <div class="fold-body">
+                <div id="performance-source-grid" class="performance-source-grid" aria-label="Modo de rendimiento"></div>
 
             <div class="pnl-insight-grid">
               <div class="pnl-chart-section">
@@ -495,7 +496,7 @@
                   <span id="pnl-sim-source">Mayo 2026</span>
                 </div>
                 <label class="simulation-control" for="pnl-sim-notional">
-                  <span>USDT por orden</span>
+                  <span>Capital por orden</span>
                   <input id="pnl-sim-notional" type="number" min="1" step="1" inputmode="decimal">
                 </label>
                 <div class="simulation-filters">
