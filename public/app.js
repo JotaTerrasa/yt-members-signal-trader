@@ -28,6 +28,7 @@ const elements = {
   pnlTotalMonth: document.querySelector('#pnl-total-month'),
   pnlRealizedMonth: document.querySelector('#pnl-realized-month'),
   pnlFloatingMonth: document.querySelector('#pnl-floating-month'),
+  pnlResultLabel: document.querySelector('#pnl-result-label'),
   pnlPaperMonth: document.querySelector('#pnl-paper-month'),
   pnlOpenExposure: document.querySelector('#pnl-open-exposure'),
   pnlFeesMonth: document.querySelector('#pnl-fees-month'),
@@ -676,10 +677,11 @@ function renderPnl() {
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
   renderPnlSourceGrid(sources, selectedSource.key);
   elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
-  elements.pnlTotalMonth.textContent = formatSourceMoney(selectedSource.total, selectedSource);
+  elements.pnlTotalMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
   elements.pnlRealizedMonth.textContent = formatSourceMoney(selectedSource.realized, selectedSource);
   elements.pnlFloatingMonth.textContent = formatSourceMoney(selectedSource.floating, selectedSource);
-  elements.pnlPaperMonth.textContent = formatSourceMoney(selectedSource.total, selectedSource);
+  elements.pnlResultLabel.textContent = sourcePrimaryLabel(selectedSource);
+  elements.pnlPaperMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
   elements.pnlOpenExposure.textContent = formatSourceMoney(selectedSource.exposure, selectedSource);
   elements.pnlFeesMonth.textContent = formatSourceMoney(selectedSource.fees, selectedSource);
   elements.pnlFundingMonth.textContent = formatSourceMoney(selectedSource.funding, selectedSource);
@@ -865,14 +867,47 @@ function renderPnlSourceGrid(sources, selectedKey) {
   elements.pnlSourceGrid.innerHTML = sources.map((source) => `
     <button class="pnl-source-card ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
       <span>${escapeHtml(source.label)}</span>
-      <strong class="${amountClass(source.total)}">${escapeHtml(formatSourceMoney(source.total, source))}</strong>
-      <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(source.status || 'Sin datos')}</small>
+      <strong class="${sourcePrimaryClass(source)}">${escapeHtml(formatSourceMoney(sourcePrimaryValue(source), source))}</strong>
+      <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(sourcePrimaryLabel(source))}</small>
       <div>
-        <span>${escapeHtml(formatSourceMoney(source.realized, source))} realizado</span>
-        <span>${escapeHtml(formatSourceMoney(source.floating, source))} flotante</span>
+        ${sourceSecondaryLines(source).map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
       </div>
     </button>
   `).join('');
+}
+
+function sourcePrimaryValue(source) {
+  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
+    return Number(source.balance.equity);
+  }
+  return Number(source.total || 0);
+}
+
+function sourcePrimaryLabel(source) {
+  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
+    return 'Cuenta VST total';
+  }
+  return source.key === 'live' ? 'Resultado real mes' : 'Resultado mes';
+}
+
+function sourcePrimaryClass(source) {
+  return source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))
+    ? 'amount'
+    : amountClass(source.total);
+}
+
+function sourceSecondaryLines(source) {
+  if (source.key === 'vst' && source.balance) {
+    return [
+      `PnL base ${formatSourceMoney(source.total, source)}`,
+      `Disponible ${formatSourceMoney(source.balance.availableMargin, source)}`,
+      source.error ? source.status : ''
+    ].filter(Boolean);
+  }
+  return [
+    `${formatSourceMoney(source.realized, source)} realizado`,
+    `${formatSourceMoney(source.floating, source)} flotante`
+  ];
 }
 
 function pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference }) {
