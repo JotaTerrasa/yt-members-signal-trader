@@ -26,8 +26,7 @@ const elements = {
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
   pnlMonthLabel: document.querySelector('#pnl-month-label'),
   pnlTotalMonth: document.querySelector('#pnl-total-month'),
-  pnlRealizedMonth: document.querySelector('#pnl-realized-month'),
-  pnlFloatingMonth: document.querySelector('#pnl-floating-month'),
+  pnlHeroDetail: document.querySelector('#pnl-hero-detail'),
   pnlResultLabel: document.querySelector('#pnl-result-label'),
   pnlPaperMonth: document.querySelector('#pnl-paper-month'),
   pnlOpenExposure: document.querySelector('#pnl-open-exposure'),
@@ -678,8 +677,7 @@ function renderPnl() {
   renderPnlSourceGrid(sources, selectedSource.key);
   elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
   elements.pnlTotalMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
-  elements.pnlRealizedMonth.textContent = formatSourceMoney(selectedSource.realized, selectedSource);
-  elements.pnlFloatingMonth.textContent = formatSourceMoney(selectedSource.floating, selectedSource);
+  elements.pnlHeroDetail.textContent = sourceHeroDetail(selectedSource);
   elements.pnlResultLabel.textContent = sourcePrimaryLabel(selectedSource);
   elements.pnlPaperMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
   elements.pnlOpenExposure.textContent = formatSourceMoney(selectedSource.exposure, selectedSource);
@@ -864,16 +862,21 @@ function defaultPnlSourceKey(sources) {
 }
 
 function renderPnlSourceGrid(sources, selectedKey) {
-  elements.pnlSourceGrid.innerHTML = sources.map((source) => `
-    <button class="pnl-source-card ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
-      <span>${escapeHtml(source.label)}</span>
-      <strong class="${sourcePrimaryClass(source)}">${escapeHtml(formatSourceMoney(sourcePrimaryValue(source), source))}</strong>
-      <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(sourcePrimaryLabel(source))}</small>
-      <div>
-        ${sourceSecondaryLines(source).map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
-      </div>
-    </button>
-  `).join('');
+  elements.pnlSourceGrid.innerHTML = sources.map((source) => {
+    const lines = sourceSecondaryLines(source);
+    return `
+      <button class="pnl-source-card ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
+        <span>${escapeHtml(source.label)}</span>
+        <strong class="${sourcePrimaryClass(source)}">${escapeHtml(formatSourceMoney(sourcePrimaryValue(source), source))}</strong>
+        <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(sourcePrimaryLabel(source))}</small>
+        ${lines.length ? `
+          <div>
+            ${lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
+          </div>
+        ` : ''}
+      </button>
+    `;
+  }).join('');
 }
 
 function sourcePrimaryValue(source) {
@@ -896,13 +899,16 @@ function sourcePrimaryClass(source) {
     : amountClass(source.total);
 }
 
+function sourceHeroDetail(source) {
+  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
+    return 'Saldo total de la cuenta demo VST';
+  }
+  return `${formatSourceMoney(source.realized, source)} realizado · ${formatSourceMoney(source.floating, source)} flotante`;
+}
+
 function sourceSecondaryLines(source) {
   if (source.key === 'vst' && source.balance) {
-    return [
-      `PnL base ${formatSourceMoney(source.total, source)}`,
-      `Disponible ${formatSourceMoney(source.balance.availableMargin, source)}`,
-      source.error ? source.status : ''
-    ].filter(Boolean);
+    return [];
   }
   return [
     `${formatSourceMoney(source.realized, source)} realizado`,
@@ -929,7 +935,7 @@ function sourceNoteText(source) {
     return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
   }
   if (source.key === 'vst') {
-    return 'Futuros VST lee la cuenta demo de BingX. Si el PnL mensual se rate-limita, usa equity VST contra la base configurada.';
+    return 'Futuros VST muestra solamente el saldo total de la cuenta demo de BingX.';
   }
   if (source.key === 'live') {
     return 'Futuros reales lee la cuenta real de BingX. Mantenlo separado de VST antes de armar live.';
