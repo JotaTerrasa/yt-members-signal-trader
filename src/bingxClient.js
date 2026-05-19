@@ -25,7 +25,7 @@ export class BingXClient {
   }
 
   async getTicker(symbol) {
-    return this.request('GET', '/openApi/swap/v2/quote/ticker', { symbol });
+    return this.publicRequest('/openApi/swap/v2/quote/ticker', { symbol });
   }
 
   async getPositions(symbol) {
@@ -94,6 +94,35 @@ export class BingXClient {
             ...(method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {})
           },
           body: method === 'POST' ? signedPayload : undefined,
+          signal: AbortSignal.timeout(10000)
+        });
+
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body.code !== 0) {
+          throw new Error(body.msg || `BingX devolvio HTTP ${response.status}`);
+        }
+        return body;
+      } catch (error) {
+        if (!isNetworkOrTimeout(error) || baseUrl === urls[urls.length - 1]) {
+          throw error;
+        }
+        lastNetworkError = error;
+      }
+    }
+
+    throw lastNetworkError || new Error('BingX no respondio.');
+  }
+
+  async publicRequest(path, payload = {}) {
+    const encoded = buildEncodedQuery(payload);
+    const urls = API_BASE_URLS[this.environment] || API_BASE_URLS['prod-live'];
+
+    let lastNetworkError = null;
+    for (const baseUrl of urls) {
+      const url = encoded ? `${baseUrl}${path}?${encoded}` : `${baseUrl}${path}`;
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
           signal: AbortSignal.timeout(10000)
         });
 

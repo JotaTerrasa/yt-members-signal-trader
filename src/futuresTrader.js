@@ -39,7 +39,8 @@ export class FuturesTrader {
     const stopLossPercent = clampNumber(input.stopLossPercent, 0.05, 5, 0.35);
     const takeProfitPercent = clampNumber(input.takeProfitPercent, 0.05, 10, stopLossPercent * 2);
     const client = this.client(config);
-    const entryPrice = await this.fetchMarketPrice(client, symbol);
+    const marketClient = this.marketClient(config);
+    const entryPrice = await this.fetchMarketPrice(marketClient, symbol);
     const stopLoss = direction === 'LONG'
       ? entryPrice * (1 - stopLossPercent / 100)
       : entryPrice * (1 + stopLossPercent / 100);
@@ -97,7 +98,8 @@ export class FuturesTrader {
 
     const summary = buildPnlSummary(records, ranges);
     if (includePaper && this.paperStore) {
-      const positions = await this.paperStore.markToMarket((symbol) => this.fetchMarketPrice(client, symbol));
+      const marketClient = this.marketClient(config);
+      const positions = await this.paperStore.markToMarket((symbol) => this.fetchMarketPrice(marketClient, symbol));
       mergePaperSummary(summary, this.paperStore.monthlySummary(ranges), positions);
     }
     return summary;
@@ -193,7 +195,7 @@ export class FuturesTrader {
     const currentPrice = firstFiniteNumber([
       position.markPrice,
       position.lastPrice
-    ]) || await this.fetchMarketPrice(client, symbol).catch(() => entryPrice);
+    ]) || await this.fetchMarketPrice(this.marketClient(config), symbol).catch(() => entryPrice);
     const leverage = Number(position.leverage || 0);
     const exposure = firstFiniteNumber([
       position.positionValue,
@@ -288,7 +290,8 @@ export class FuturesTrader {
     }
 
     const client = this.client(config);
-    const closePrice = Number(signal.closePrice) || await this.fetchMarketPrice(client, signal.symbol);
+    const marketClient = this.marketClient(config);
+    const closePrice = Number(signal.closePrice) || await this.fetchMarketPrice(marketClient, signal.symbol);
     const closePercent = Number(signal.closePercent || 100);
     const closedPaperPositions = config.mode === 'test' && this.paperStore
       ? await this.paperStore.closeBySymbol({ symbol: signal.symbol, price: closePrice, percent: closePercent, reason: 'youtube_close', post, phase })
@@ -378,6 +381,7 @@ export class FuturesTrader {
     }
 
     const client = this.client(config);
+    const marketClient = this.marketClient(config);
     const contract = await this.getContract(client, signal.symbol);
     const leverageResult = resolveLeverage(signal, config, contract);
     if (!leverageResult.ok) {
@@ -400,7 +404,7 @@ export class FuturesTrader {
     }
 
     const referenceEntryPrice = signal.entry?.price ? Number(signal.entry.price) : null;
-    const entryPrice = await this.fetchMarketPrice(client, signal.symbol);
+    const entryPrice = await this.fetchMarketPrice(marketClient, signal.symbol);
     const stopValidation = validateStopLossAgainstMarket(signal, entryPrice);
     if (!stopValidation.ok) {
       return this.emitTrade({
@@ -483,7 +487,21 @@ export class FuturesTrader {
 
   async fetchMarketPrice(client, symbol) {
     const ticker = await client.getTicker(symbol);
-    return Number(ticker.data?.lastPrice || ticker.data?.price || ticker.data?.askPrice || ticker.data?.bidPrice);
+    const data = Array.isArray(ticker.data)
+      ? ticker.data.find((item) => normalizeSymbol(item.symbol) === normalizeSymbol(symbol))
+      : ticker.data?.ticker || ticker.data;
+    const price = firstFiniteNumber([
+      data?.lastPrice,
+      data?.price,
+      data?.markPrice,
+      data?.indexPrice,
+      data?.askPrice,
+      data?.bidPrice
+    ]);
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`no_market_price:${symbol}`);
+    }
+    return price;
   }
 
   async resolveOrderSizing({ client, signal, config }) {
@@ -544,6 +562,14 @@ export class FuturesTrader {
       apiKey: config.apiKey,
       apiSecret: config.apiSecret,
       environment: environmentForMode(config.mode)
+    });
+  }
+
+  marketClient(config) {
+    return new BingXClient({
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+      environment: 'prod-live'
     });
   }
 

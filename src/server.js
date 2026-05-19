@@ -892,6 +892,7 @@ function buildHealth() {
 }
 
 async function checkHealth() {
+  const now = Date.now();
   const health = buildHealth();
   state.health = health;
   broadcast('state', state);

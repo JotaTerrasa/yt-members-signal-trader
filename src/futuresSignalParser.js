@@ -215,7 +215,7 @@ function parseStructuredSignals(raw) {
 }
 
 function parseDirectionLine(line) {
-  const match = String(line || '').match(new RegExp(`\\b(${directionWords.join('|')})\\s+([A-Z]{2,12})(?:\\s+(?:BINGX\\s*)?(\\d+(?:[.,]\\d+)?\\s*[kK]?))?\\b`, 'i'));
+  const match = String(line || '').match(new RegExp(`^\\W*(${directionWords.join('|')})\\s+([A-Z]{2,12})(?:\\s+(?:BINGX\\s*)?(\\d+(?:[.,]\\d+)?\\s*[kK]?))?\\b`, 'i'));
   if (!match) {
     return null;
   }
