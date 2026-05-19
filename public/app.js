@@ -676,13 +676,13 @@ function renderPnl() {
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
   renderPnlSourceGrid(sources, selectedSource.key);
   elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
-  elements.pnlTotalMonth.textContent = formatUsdt(selectedSource.total);
-  elements.pnlRealizedMonth.textContent = formatUsdt(selectedSource.realized);
-  elements.pnlFloatingMonth.textContent = formatUsdt(selectedSource.floating);
-  elements.pnlPaperMonth.textContent = formatUsdt(selectedSource.total);
-  elements.pnlOpenExposure.textContent = formatUsdt(selectedSource.exposure);
-  elements.pnlFeesMonth.textContent = formatUsdt(selectedSource.fees);
-  elements.pnlFundingMonth.textContent = formatUsdt(selectedSource.funding);
+  elements.pnlTotalMonth.textContent = formatSourceMoney(selectedSource.total, selectedSource);
+  elements.pnlRealizedMonth.textContent = formatSourceMoney(selectedSource.realized, selectedSource);
+  elements.pnlFloatingMonth.textContent = formatSourceMoney(selectedSource.floating, selectedSource);
+  elements.pnlPaperMonth.textContent = formatSourceMoney(selectedSource.total, selectedSource);
+  elements.pnlOpenExposure.textContent = formatSourceMoney(selectedSource.exposure, selectedSource);
+  elements.pnlFeesMonth.textContent = formatSourceMoney(selectedSource.fees, selectedSource);
+  elements.pnlFundingMonth.textContent = formatSourceMoney(selectedSource.funding, selectedSource);
   elements.pnlTestOrders.textContent = String(selectedSource.openPositions || 0);
   elements.pnlClosedTrades.textContent = String(selectedSource.closedTrades || closedPositions.length);
   elements.pnlModeLabel.textContent = selectedSource.modeLabel;
@@ -865,11 +865,11 @@ function renderPnlSourceGrid(sources, selectedKey) {
   elements.pnlSourceGrid.innerHTML = sources.map((source) => `
     <button class="pnl-source-card ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
       <span>${escapeHtml(source.label)}</span>
-      <strong class="${amountClass(source.total)}">${escapeHtml(formatUsdt(source.total))}</strong>
+      <strong class="${amountClass(source.total)}">${escapeHtml(formatSourceMoney(source.total, source))}</strong>
       <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(source.status || 'Sin datos')}</small>
       <div>
-        <span>${escapeHtml(formatUsdt(source.realized))} realizado</span>
-        <span>${escapeHtml(formatUsdt(source.floating))} flotante</span>
+        <span>${escapeHtml(formatSourceMoney(source.realized, source))} realizado</span>
+        <span>${escapeHtml(formatSourceMoney(source.floating, source))} flotante</span>
       </div>
     </button>
   `).join('');
@@ -894,7 +894,7 @@ function sourceNoteText(source) {
     return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
   }
   if (source.key === 'vst') {
-    return 'Futuros VST lee la cuenta demo de BingX. Incluye PnL realizado de BingX y flotante de las posiciones VST abiertas.';
+    return 'Futuros VST lee la cuenta demo de BingX. Si el PnL mensual se rate-limita, usa equity VST contra la base configurada.';
   }
   if (source.key === 'live') {
     return 'Futuros reales lee la cuenta real de BingX. Mantenlo separado de VST antes de armar live.';
@@ -2206,11 +2206,19 @@ function formatShortDay(value) {
   }).format(new Date(year, month - 1, day)).replace('.', '');
 }
 
+function formatSourceMoney(value, source) {
+  return formatMoney(value, source?.asset || 'USDT');
+}
+
 function formatUsdt(value) {
+  return formatMoney(value, 'USDT');
+}
+
+function formatMoney(value, asset = 'USDT') {
   return `${Number(value || 0).toLocaleString('es-ES', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 4
-  })} USDT`;
+  })} ${asset || 'USDT'}`;
 }
 
 function formatPercent(value) {

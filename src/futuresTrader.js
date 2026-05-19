@@ -149,6 +149,37 @@ export class FuturesTrader {
     }))));
   }
 
+  async getExchangeBalance({ mode = null } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      ...(mode ? { mode } : {})
+    };
+    if (!config.apiKey || !config.apiSecret) {
+      return null;
+    }
+
+    const client = this.client(config);
+    const response = await client.getBalance();
+    const rows = Array.isArray(response.data) ? response.data : [response.data].filter(Boolean);
+    const targetAsset = config.mode === 'demo' ? 'VST' : 'USDT';
+    const row = rows.find((item) => String(item.asset || '').toUpperCase() === targetAsset) || rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      asset: String(row.asset || targetAsset).toUpperCase(),
+      balance: Number(row.balance || 0),
+      equity: Number(row.equity || row.balance || 0),
+      availableMargin: Number(row.availableMargin || 0),
+      usedMargin: Number(row.usedMargin || 0),
+      frozenMargin: Number(row.frozenMargin || 0),
+      unrealizedProfit: Number(row.unrealizedProfit || 0),
+      realizedProfit: Number(row.realizedProfit || 0),
+      raw: row
+    };
+  }
+
   async normalizeExchangePosition(client, position, config, openOrders = []) {
     const symbol = position.symbol;
     const quantity = Math.abs(Number(position.availableAmt || position.positionAmt || 0));

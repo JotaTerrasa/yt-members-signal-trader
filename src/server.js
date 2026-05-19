@@ -1000,10 +1000,13 @@ function mimeType(extension) {
 async function exchangePnlSource({ key, mode, label, modeLabel, asset }) {
   const [pnlResult, positionsResult] = await Promise.allSettled([
     futuresTrader.getMonthlyPnl({ months: 3, mode, includePaper: false }),
-    futuresTrader.getExchangeOpenPositions({ mode })
+    Promise.all([
+      futuresTrader.getExchangeOpenPositions({ mode }),
+      futuresTrader.getExchangeBalance({ mode })
+    ])
   ]);
   const pnl = pnlResult.status === 'fulfilled' ? pnlResult.value : null;
-  const positions = positionsResult.status === 'fulfilled' ? positionsResult.value : [];
+  const [positions, balance] = positionsResult.status === 'fulfilled' ? positionsResult.value : [[], null];
   const error = [pnlResult, positionsResult]
     .filter((result) => result.status === 'rejected')
     .map((result) => result.reason?.message || String(result.reason))
@@ -1011,6 +1014,13 @@ async function exchangePnlSource({ key, mode, label, modeLabel, asset }) {
     .join(' · ');
 
   if (!pnl && !positions.length) {
+    const fallback = fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, balance, error });
+    if (fallback) {
+      return {
+        source: fallback,
+        positions
+      };
+    }
     return {
       source: emptyPnlSource(key, label, modeLabel, asset, sourceErrorStatus(error)),
       positions: []
@@ -1018,12 +1028,12 @@ async function exchangePnlSource({ key, mode, label, modeLabel, asset }) {
   }
 
   return {
-    source: summarizeExchangePnlSource({ key, label, modeLabel, asset, pnl, positions, error }),
+    source: summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, positions, balance, error }),
     positions
   };
 }
 
-function summarizeExchangePnlSource({ key, label, modeLabel, asset, pnl, positions = [], error = '' }) {
+function summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, positions = [], balance = null, error = '' }) {
   const month = currentMonthKey();
   const rows = (pnl?.months || []).filter((row) => row.month === month);
   const income = summarizePnlRows(rows);
@@ -1058,7 +1068,69 @@ function summarizeExchangePnlSource({ key, label, modeLabel, asset, pnl, positio
     openPositions: open.length,
     closedTrades: Number(income.closedTrades || 0),
     records: Number(income.records || 0),
-    winRate: realizedTrades.length ? (winners / realizedTrades.length) * 100 : null
+    winRate: realizedTrades.length ? (winners / realizedTrades.length) * 100 : null,
+    balance: balanceSummary(balance),
+    baseline: mode === 'demo' ? demoBaseline() : null
+  };
+}
+
+function fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, balance, error = '' }) {
+  if (!balance || !Number.isFinite(Number(balance.equity))) {
+    return null;
+  }
+
+  const baseline = mode === 'demo' ? demoBaseline() : null;
+  const floating = roundMoney(Number(balance.unrealizedProfit || 0));
+  const total = Number.isFinite(baseline)
+    ? roundMoney(Number(balance.equity || 0) - baseline)
+    : floating;
+  const realized = roundMoney(total - floating);
+
+  return {
+    key,
+    label,
+    modeLabel,
+    month: currentMonthKey(),
+    asset: balance.asset || asset,
+    available: true,
+    status: sourceErrorStatus(error) === 'No disponible'
+      ? 'Equity de cuenta'
+      : `${sourceErrorStatus(error)} · equity de cuenta`,
+    error: sourceErrorStatus(error),
+    total,
+    realized,
+    grossRealized: realized,
+    floating,
+    fees: 0,
+    funding: 0,
+    exposure: roundMoney(Number(balance.usedMargin || 0)),
+    openPositions: 0,
+    closedTrades: 0,
+    records: 0,
+    winRate: null,
+    balance: balanceSummary(balance),
+    baseline
+  };
+}
+
+function demoBaseline() {
+  const config = configStore.getBingX();
+  const value = Number(config.vstBaseCapital || 1000);
+  return Number.isFinite(value) && value > 0 ? value : 1000;
+}
+
+function balanceSummary(balance) {
+  if (!balance) {
+    return null;
+  }
+
+  return {
+    asset: balance.asset,
+    balance: roundMoney(balance.balance),
+    equity: roundMoney(balance.equity),
+    availableMargin: roundMoney(balance.availableMargin),
+    usedMargin: roundMoney(balance.usedMargin),
+    unrealizedProfit: roundMoney(balance.unrealizedProfit)
   };
 }
 
