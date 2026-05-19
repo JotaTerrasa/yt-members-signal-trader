@@ -848,6 +848,8 @@ async function checkHealth() {
   state.health = health;
   broadcast('state', state);
   if (health.level !== 'warn') {
+    lastHealthAlertKey = '';
+    lastHealthAlertAt = 0;
     return;
   }
 
@@ -856,8 +858,7 @@ async function checkHealth() {
     health.noVisiblePosts ? 'no_posts' : '',
     health.lastError || ''
   ].filter(Boolean).join('|');
-  const now = Date.now();
-  if (!key || (key === lastHealthAlertKey && now - lastHealthAlertAt < 15 * 60 * 1000)) {
+  if (!key || key === lastHealthAlertKey) {
     return;
   }
 
