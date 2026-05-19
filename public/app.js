@@ -42,12 +42,14 @@ const elements = {
   pnlChartStatus: document.querySelector('#pnl-chart-status'),
   pnlChart: document.querySelector('#pnl-chart'),
   historicalPnlStatus: document.querySelector('#historical-pnl-status'),
+  historicalPnlTitle: document.querySelector('#historical-pnl-title'),
   historicalPnlTotal: document.querySelector('#historical-pnl-total'),
   historicalPnlClosed: document.querySelector('#historical-pnl-closed'),
   historicalPnlOpenSignals: document.querySelector('#historical-pnl-open-signals'),
   historicalPnlMonths: document.querySelector('#historical-pnl-months'),
   historicalPnlChart: document.querySelector('#historical-pnl-chart'),
   historicalPnlTable: document.querySelector('#historical-pnl-table'),
+  historicalSignalTitle: document.querySelector('#historical-signal-title'),
   historicalSignalStatus: document.querySelector('#historical-signal-status'),
   historicalSignalList: document.querySelector('#historical-signal-list'),
   pnlSimNotional: document.querySelector('#pnl-sim-notional'),
@@ -237,6 +239,7 @@ function bindEvents() {
     renderPnlCurve();
     renderSimulation();
     renderPnlChart(performanceMonthlyRows());
+    renderHistoricalPnl();
   });
   elements.armLive.addEventListener('click', async () => {
     await runAction(async () => {
@@ -1418,33 +1421,32 @@ function healthStatusLabel(level) {
 }
 
 function renderHistoricalPnl() {
-  const targetMonth = '2026-05';
-  const historical = appState.pnl?.historical;
-  if (!historical) {
-    elements.historicalPnlStatus.textContent = appState.pnlLoading ? 'Calculando...' : 'Sin historico';
-    elements.historicalPnlTotal.textContent = formatUsdt(0);
-    elements.historicalPnlClosed.textContent = '0';
-    elements.historicalPnlOpenSignals.textContent = '0';
-    elements.historicalPnlMonths.textContent = '0';
-    elements.historicalPnlChart.innerHTML = '<div class="pnl-chart-empty">Sin historico calculado.</div>';
-    elements.historicalPnlTable.innerHTML = '';
-    elements.historicalSignalStatus.textContent = '0 señales';
-    elements.historicalSignalList.innerHTML = '';
-    return;
-  }
+  const targetMonth = currentMonthKey();
+  const reference = currentReferenceLedger();
+  const source = selectedPerformanceSource(pnlSourceCards(reference));
+  const sourcePositions = performanceSourcePositions(source.key, reference, source);
+  const asset = sourcePositions.asset || source.asset || 'USDT';
+  const sourceLabel = sourcePositions.label || source.label || formatMonth(targetMonth);
+  const monthLabel = formatMonth(targetMonth);
+  const positions = (sourcePositions.positions || [])
+    .filter((position) => monthKeyFromValue(position.closedAt || position.openedAt) === targetMonth);
+  const rows = performanceMonthlyRows()
+    .filter((row) => row.month === targetMonth)
+    .map((row) => createPnlRow(row.month, row.asset || asset, row));
+  const activeRows = rows
+    .filter((row) => row.paperPnl || row.total || row.closedTrades || row.testOrders || row.openPaperTrades);
+  const totals = summarizePnlRows(rows);
+  const totalValue = totals.paperPnl || totals.total;
+  const closedCount = positions.filter((position) => position.status === 'closed').length || totals.closedTrades || 0;
+  const operationCount = positions.length || totals.testOrders || totals.records || 0;
 
-  const targetRows = (historical.months || [])
-    .filter((row) => row.month === targetMonth);
-  const activeRows = targetRows
-    .filter((row) => row.paperPnl || row.closedTrades || row.testOrders || row.openPaperTrades);
-  const totals = summarizePnlRows(targetRows.map((row) => createPnlRow(row.month, row.asset, row)));
-
-  const sourceLabel = historical.source?.referenceLedger?.label || formatMonth(targetMonth);
-  elements.historicalPnlStatus.textContent = sourceLabel;
-  elements.historicalPnlTotal.textContent = formatUsdt(totals.paperPnl || totals.total);
-  elements.historicalPnlTotal.className = amountClass(totals.paperPnl || totals.total);
-  elements.historicalPnlClosed.textContent = String(totals.closedTrades || 0);
-  elements.historicalPnlOpenSignals.textContent = String(totals.testOrders || 0);
+  elements.historicalPnlTitle.textContent = `Historico ${source.label}: ${monthLabel}`;
+  elements.historicalSignalTitle.textContent = `Señales ${source.label}`;
+  elements.historicalPnlStatus.textContent = appState.pnlLoading && !activeRows.length ? 'Calculando...' : sourceLabel;
+  elements.historicalPnlTotal.textContent = formatMoney(totalValue, asset);
+  elements.historicalPnlTotal.className = amountClass(totalValue);
+  elements.historicalPnlClosed.textContent = String(closedCount);
+  elements.historicalPnlOpenSignals.textContent = String(operationCount);
   elements.historicalPnlMonths.textContent = activeRows.length ? sourceLabel : '-';
   elements.historicalPnlChart.innerHTML = renderPnlBars(activeRows);
   elements.historicalPnlTable.innerHTML = activeRows.map((row) => `
@@ -1453,29 +1455,29 @@ function renderHistoricalPnl() {
         <strong>${escapeHtml(formatMonth(row.month))}</strong>
         <span>${escapeHtml(row.asset || 'USDT')}</span>
       </td>
-      <td class="${amountClass(row.paperPnl)}">${escapeHtml(formatUsdt(row.paperPnl))}</td>
+      <td class="${amountClass(row.paperPnl || row.total)}">${escapeHtml(formatMoney(row.paperPnl || row.total, row.asset || asset))}</td>
       <td>${escapeHtml(row.closedTrades || 0)}</td>
       <td>${escapeHtml(row.testOrders || 0)}</td>
     </tr>
   `).join('');
-  renderHistoricalSignals(historical.positions || [], targetMonth);
+  renderHistoricalSignals(positions, targetMonth, source.label, asset);
 }
 
-function renderHistoricalSignals(positions, targetMonth) {
+function renderHistoricalSignals(positions, targetMonth, sourceLabel = 'Google Sheet', asset = 'USDT') {
   const items = positions
     .filter((position) => monthKeyFromValue(position.closedAt || position.openedAt) === targetMonth)
     .sort((a, b) => Date.parse(b.closedAt || b.openedAt || 0) - Date.parse(a.closedAt || a.openedAt || 0));
 
   elements.historicalSignalStatus.textContent = `${items.length} señales`;
   if (!items.length) {
-    elements.historicalSignalList.innerHTML = '<div class="empty-state compact">Sin señales simuladas en mayo.</div>';
+    elements.historicalSignalList.innerHTML = `<div class="empty-state compact">Sin señales en ${escapeHtml(sourceLabel)} para ${escapeHtml(formatMonth(targetMonth))}.</div>`;
     return;
   }
 
-  elements.historicalSignalList.innerHTML = items.map(renderHistoricalSignalItem).join('');
+  elements.historicalSignalList.innerHTML = items.map((position) => renderHistoricalSignalItem(position, asset)).join('');
 }
 
-function renderHistoricalSignalItem(position) {
+function renderHistoricalSignalItem(position, asset = 'USDT') {
   const postLink = position.postUrl
     ? `<a href="${escapeAttribute(position.postUrl)}" target="_blank" rel="noreferrer">Entrada</a>`
     : '';
@@ -1493,14 +1495,14 @@ function renderHistoricalSignalItem(position) {
           <strong>${escapeHtml(position.symbol || '-')}</strong>
           <span>${escapeHtml(`${position.direction || '-'} · ${status} · ${formatLeverage(position.leverage)}`)}</span>
         </div>
-        <span class="${amountClass(position.paperPnl)}">${escapeHtml(formatUsdt(position.paperPnl))}</span>
+        <span class="${amountClass(position.paperPnl)}">${escapeHtml(formatMoney(position.paperPnl, asset))}</span>
       </div>
       <div class="trade-history-meta">
         <span>${escapeHtml(formatDateTime(position.closedAt || position.openedAt))}</span>
         <span>Entrada ${escapeHtml(formatPrice(position.entryPrice))}</span>
         <span>Cierre ${escapeHtml(formatPrice(position.closePrice))}</span>
         <span>SL ${escapeHtml(formatPrice(position.stopLoss))}</span>
-        <span>${escapeHtml(formatUsdt(position.notional))}</span>
+        <span>${escapeHtml(formatMoney(position.notional, asset))}</span>
         ${postLink}
         ${closeLink}
       </div>
@@ -1524,7 +1526,7 @@ function renderPnlBars(rows) {
         <div class="pnl-bar-track" aria-hidden="true">
           <div class="pnl-bar ${amountTone(value)}" style="width: ${escapeAttribute(width)}%"></div>
         </div>
-        <strong class="${amountClass(value)}">${escapeHtml(formatUsdt(value))}</strong>
+        <strong class="${amountClass(value)}">${escapeHtml(formatMoney(value, row.asset || 'USDT'))}</strong>
       </div>
     `;
   }).join('');
