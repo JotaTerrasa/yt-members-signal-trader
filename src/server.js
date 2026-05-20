@@ -52,6 +52,7 @@ const futuresTrader = new FuturesTrader({
     state.trades.unshift(event);
     state.trades = state.trades.slice(0, 200);
     broadcast('trade', event);
+    notifyTradeExecutionError(event);
     syncExchangePositions({ reason: event.status || 'trade' }).catch((error) => {
       pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
       syncPriceSubscriptions();
@@ -857,6 +858,34 @@ function usesLiveMode(mode) {
   return mode === 'live' || mode === 'dual';
 }
 
+function notifyTradeExecutionError(event) {
+  if (event?.status !== 'error') {
+    return;
+  }
+
+  const mode = event.executionMode === 'demo'
+    ? 'VST demo'
+    : event.executionMode === 'live'
+      ? 'Real'
+      : event.executionMode || 'BingX';
+  const details = [
+    `${mode} ${event.signal?.symbol || 'senal'}`.trim(),
+    event.signal?.direction ? `Lado: ${event.signal.direction}` : '',
+    event.reason ? `Error: ${event.reason}` : '',
+    event.postUrl ? `Post: ${event.postUrl}` : ''
+  ].filter(Boolean).join('\n');
+
+  telegramNotifier.sendAlert('Error orden BingX', details)
+    .then((result) => {
+      if (result.sent) {
+        pushLog({ level: 'warn', message: 'Error de orden BingX enviado por Telegram.', at: new Date().toISOString() });
+      }
+    })
+    .catch((error) => {
+      pushLog({ level: 'error', message: `Telegram BingX order error: ${error.message}`, at: new Date().toISOString() });
+    });
+}
+
 function handleExchangeClosedPosition(position, reason) {
   const asset = position.source === 'demo' ? 'VST' : 'USDT';
   const event = {
@@ -991,15 +1020,7 @@ function buildHealth() {
   const ageMs = Number.isFinite(lastRunTime) && lastRunTime > 0 ? Date.now() - lastRunTime : null;
   const stale = scraper.running && state.phase === 'live' && ageMs !== null && ageMs > staleMs;
   const noVisiblePosts = scraper.running && state.phase === 'live' && Number(state.visiblePosts || 0) === 0;
-  const recentError = state.logs.find((log) => {
-    const errorTime = Date.parse(log.at || 0);
-    return (
-      log.level === 'error'
-      && Date.now() - errorTime < 15 * 60 * 1000
-      && (!Number.isFinite(lastRunTime) || errorTime > lastRunTime)
-    );
-  });
-  const lastError = state.lastError || recentError?.message || null;
+  const lastError = state.lastError || null;
   const level = stale || noVisiblePosts || lastError ? 'warn' : scraper.running ? 'ok' : 'idle';
 
   return {
