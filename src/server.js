@@ -20,6 +20,8 @@ const publicDir = join(rootDir, 'public');
 const dataDir = join(rootDir, '.data');
 const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
+const EXCHANGE_SYNC_POLL_MS = 30_000;
+const EXCHANGE_SYNC_MIN_INTERVAL_MS = 10_000;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -64,6 +66,7 @@ const lastPriceBroadcast = new Map();
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
 let exchangeSyncInFlight = false;
+let lastExchangeSyncAt = 0;
 const pendingExchangeClosures = new Map();
 
 const state = {
@@ -651,7 +654,7 @@ setInterval(() => {
   syncExchangePositions({ reason: 'poll' }).catch((error) => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
   });
-}, 5000).unref();
+}, EXCHANGE_SYNC_POLL_MS).unref();
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
@@ -681,6 +684,14 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
     return exchangePositionsCache;
   }
 
+  if (
+    ['api', 'poll'].includes(reason)
+    && lastExchangeSyncAt
+    && Date.now() - lastExchangeSyncAt < EXCHANGE_SYNC_MIN_INTERVAL_MS
+  ) {
+    return exchangePositionsCache;
+  }
+
   const config = configStore.getBingX();
   if (!config.enabled || config.mode === 'test' || !config.apiKeyConfigured || !config.apiSecretConfigured) {
     const previous = exchangePositionsCache;
@@ -701,6 +712,7 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
       pendingExchangeClosures.clear();
     }
     const next = await futuresTrader.getExchangeOpenPositions();
+    lastExchangeSyncAt = Date.now();
     const closedCandidates = sourceChanged ? [] : detectClosedExchangePositions(previous, next);
     const closedPositions = confirmClosedExchangePositions(closedCandidates, next, reason);
     const visibleNext = mergeUnconfirmedExchangePositions(next, closedCandidates, closedPositions, reason);

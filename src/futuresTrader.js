@@ -1,6 +1,10 @@
 import { BingXClient } from './bingxClient.js';
 import { parseFuturesSignal, parseFuturesSignals } from './futuresSignalParser.js';
 
+const OPEN_ORDERS_CACHE_MS = 60_000;
+const OPEN_ORDERS_ERROR_LOG_MS = 60_000;
+const OPEN_ORDERS_DEFAULT_BACKOFF_MS = 60_000;
+
 export class FuturesTrader {
   constructor({ configStore, paperStore, onLog, onTrade }) {
     this.configStore = configStore;
@@ -8,6 +12,7 @@ export class FuturesTrader {
     this.onLog = onLog;
     this.onTrade = onTrade;
     this.contractCache = new Map();
+    this.openOrdersCache = new Map();
   }
 
   parse(text) {
@@ -135,16 +140,12 @@ export class FuturesTrader {
     }
 
     const client = this.client(config);
-    const [response, ordersResponse] = await Promise.all([
+    const [response, openOrders] = await Promise.all([
       client.getPositions(),
-      client.getOpenOrders().catch((error) => {
-        this.log(`BingX openOrders: ${error.message}`, 'warn');
-        return null;
-      })
+      this.getCachedOpenOrders(client, config)
     ]);
     const rows = Array.isArray(response.data) ? response.data : [];
     const open = rows.filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
-    const openOrders = extractOpenOrders(ordersResponse);
 
     return Promise.all(open.map((position) => this.normalizeExchangePosition(client, position, config, openOrders).catch((error) => ({
       id: `exchange_${position.symbol}_${position.positionSide || position.side || 'BOTH'}`,
@@ -157,6 +158,45 @@ export class FuturesTrader {
       error: error.message,
       raw: position
     }))));
+  }
+
+  async getCachedOpenOrders(client, config) {
+    const key = `${config.mode}:${environmentForMode(config.mode)}`;
+    const now = Date.now();
+    const cached = this.openOrdersCache.get(key);
+    if (cached?.blockedUntil && now < cached.blockedUntil) {
+      return cached.orders || [];
+    }
+
+    if (cached?.orders && now - Number(cached.fetchedAt || 0) < OPEN_ORDERS_CACHE_MS) {
+      return cached.orders;
+    }
+
+    try {
+      const response = await client.getOpenOrders();
+      const orders = extractOpenOrders(response);
+      this.openOrdersCache.set(key, {
+        orders,
+        fetchedAt: now,
+        blockedUntil: 0,
+        lastLoggedAt: cached?.lastLoggedAt || 0
+      });
+      return orders;
+    } catch (error) {
+      const message = conciseError(error);
+      const blockedUntil = rateLimitBlockedUntil(message) || now + OPEN_ORDERS_DEFAULT_BACKOFF_MS;
+      const shouldLog = now - Number(cached?.lastLoggedAt || 0) > OPEN_ORDERS_ERROR_LOG_MS;
+      this.openOrdersCache.set(key, {
+        orders: cached?.orders || [],
+        fetchedAt: cached?.fetchedAt || 0,
+        blockedUntil,
+        lastLoggedAt: shouldLog ? now : cached?.lastLoggedAt || 0
+      });
+      if (shouldLog) {
+        this.log(`BingX openOrders ${config.mode}: ${openOrdersBackoffMessage(message, blockedUntil)}`, 'warn');
+      }
+      return cached?.orders || [];
+    }
   }
 
   async getExchangeBalance({ mode = null } = {}) {
@@ -821,6 +861,31 @@ function modePrefix(config) {
 
 function environmentForMode(mode) {
   return mode === 'demo' ? 'prod-vst' : 'prod-live';
+}
+
+function rateLimitBlockedUntil(message) {
+  const match = String(message || '').match(/unblocked after\s+(\d{10,})/i);
+  if (!match) {
+    return null;
+  }
+  const timestamp = Number(match[1]);
+  return Number.isFinite(timestamp) && timestamp > Date.now() ? timestamp : null;
+}
+
+function openOrdersBackoffMessage(message, blockedUntil) {
+  const lower = String(message || '').toLowerCase();
+  const isRateLimited = lower.includes('100410') || lower.includes('rate limit') || lower.includes('frequency limit');
+  if (isRateLimited && blockedUntil) {
+    return `rate-limit, pausado hasta ${new Date(blockedUntil).toLocaleTimeString('es-ES')}`;
+  }
+  return `${message}; se usara cache durante ${Math.round(OPEN_ORDERS_DEFAULT_BACKOFF_MS / 1000)}s`;
+}
+
+function conciseError(error) {
+  return String(error?.message || error || '')
+    .split('\n')[0]
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function executionConfigs(config) {
