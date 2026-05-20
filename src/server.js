@@ -167,7 +167,8 @@ async function handlePosts(payload) {
       .then((tradeResults) => {
         const accepted = tradeResults.filter((result) => result.status.endsWith('_order_sent'));
         if (accepted.length) {
-          const executionMode = accepted[0].status.replace(/_order_sent$/, '');
+          const modes = [...new Set(accepted.map((result) => result.status.replace(/_order_sent$/, '')))];
+          const executionMode = modes.join('+');
           pushLog({
             level: 'warn',
             message: `${accepted.length} senales enviadas a BingX (${executionMode}).`,
@@ -375,7 +376,7 @@ const server = createServer(async (request, response) => {
     if (requestUrl.pathname === '/api/bingx/probe' && request.method === 'POST') {
       const body = await readJson(request);
       const bingx = configStore.getBingX();
-      if (bingx.mode === 'live' && body.confirm !== 'LIVE_MINIMA') {
+      if (usesLiveMode(bingx.mode) && body.confirm !== 'LIVE_MINIMA') {
         return sendJson(response, { error: 'Confirma LIVE_MINIMA para enviar una prueba real.' }, 400);
       }
       const result = await futuresTrader.executeProbe(body);
@@ -386,7 +387,7 @@ const server = createServer(async (request, response) => {
     if (requestUrl.pathname === '/api/bingx/replay-latest-signal' && request.method === 'POST') {
       const body = await readJson(request);
       const bingx = configStore.getBingX();
-      if (bingx.mode === 'live' && body.confirm !== 'REPLAY_LIVE') {
+      if (usesLiveMode(bingx.mode) && body.confirm !== 'REPLAY_LIVE') {
         return sendJson(response, { error: 'Confirma REPLAY_LIVE para reejecutar una senal en live.' }, 400);
       }
 
@@ -398,7 +399,7 @@ const server = createServer(async (request, response) => {
       const results = await futuresTrader.processPosts([post], { phase: 'manual_replay' });
       pnlCache = null;
       pushLog({
-        level: bingx.mode === 'live' ? 'warn' : 'info',
+        level: usesLiveMode(bingx.mode) ? 'warn' : 'info',
         message: `Replay de senal ejecutado: ${results.length} eventos (${post.url}).`,
         at: new Date().toISOString()
       });
@@ -693,9 +694,9 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
 
   exchangeSyncInFlight = true;
   try {
-    const expectedSource = exchangeSourceForMode(config.mode);
-    const previous = exchangePositionsCache.filter((position) => position.source === expectedSource);
-    const sourceChanged = exchangePositionsCache.some((position) => position.source && position.source !== expectedSource);
+    const expectedSources = new Set(exchangeSourcesForMode(config.mode));
+    const previous = exchangePositionsCache.filter((position) => expectedSources.has(position.source));
+    const sourceChanged = exchangePositionsCache.some((position) => position.source && !expectedSources.has(position.source));
     if (sourceChanged) {
       pendingExchangeClosures.clear();
     }
@@ -833,11 +834,19 @@ function exchangePositionIdentityKey(position) {
   ].filter(Boolean).join(':');
 }
 
-function exchangeSourceForMode(mode) {
-  return mode === 'demo' ? 'demo' : 'live';
+function exchangeSourcesForMode(mode) {
+  if (mode === 'dual') {
+    return ['demo', 'live'];
+  }
+  return [mode === 'demo' ? 'demo' : 'live'];
+}
+
+function usesLiveMode(mode) {
+  return mode === 'live' || mode === 'dual';
 }
 
 function handleExchangeClosedPosition(position, reason) {
+  const asset = position.source === 'demo' ? 'VST' : 'USDT';
   const event = {
     at: new Date().toISOString(),
     status: exchangeCloseStatus(position, reason),
@@ -866,7 +875,7 @@ function handleExchangeClosedPosition(position, reason) {
       `Entrada: ${formatSigned(position.entryPrice || 0).replace('+', '')}`,
       position.stopLoss ? `Stop: ${position.stopLoss}` : '',
       position.currentPrice ? `Ultimo precio: ${position.currentPrice}` : '',
-      position.unrealizedPnl ? `PnL previo: ${formatSigned(position.unrealizedPnl)} VST` : ''
+      position.unrealizedPnl ? `PnL previo: ${formatSigned(position.unrealizedPnl)} ${asset}` : ''
     ].filter(Boolean).join('\n')
   ).catch((error) => {
     pushLog({ level: 'error', message: `Telegram BingX close: ${error.message}`, at: new Date().toISOString() });

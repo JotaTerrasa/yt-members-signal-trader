@@ -248,12 +248,12 @@ function bindEvents() {
         renderLiveReadiness(readiness);
         throw new Error('Live aun no esta preparado. Revisa el checklist.');
       }
-      const confirmed = confirm('Vas a armar LIVE REAL. Las proximas señales validas podran enviar ordenes reales a BingX. Continuar?');
+      const confirmed = confirm('Vas a armar VST + LIVE REAL. Las proximas señales validas podran enviar ordenes demo VST y ordenes reales a BingX. Continuar?');
       if (!confirmed) {
         return;
       }
       elements.bingxEnabled.checked = true;
-      elements.bingxMode.value = 'live';
+      elements.bingxMode.value = 'dual';
       elements.bingxLiveConfirm.checked = true;
       const bingx = await saveBingxConfig();
       renderBingx(bingx, 'Live armado');
@@ -318,7 +318,7 @@ function bindEvents() {
   });
 
   elements.bingxMode.addEventListener('change', () => {
-    elements.bingxLiveConfirmRow.classList.toggle('hidden', elements.bingxMode.value !== 'live');
+    elements.bingxLiveConfirmRow.classList.toggle('hidden', !usesLiveMode(elements.bingxMode.value));
   });
 
   elements.saveBingx.addEventListener('click', async () => {
@@ -870,7 +870,7 @@ function selectedPnlSource(sources = pnlSourceCards()) {
 }
 
 function defaultPnlSourceKey(sources) {
-  if (appState.bingx?.mode === 'live') {
+  if (appState.bingx?.mode === 'live' || appState.bingx?.mode === 'dual') {
     return 'live';
   }
   if (appState.bingx?.mode === 'demo') {
@@ -1124,7 +1124,7 @@ function liveReadiness() {
   return {
     items,
     ready: items.every((item) => item.ok),
-    live: bingx.mode === 'live' && bingx.liveConfirmed
+    live: usesLiveMode(bingx.mode) && bingx.liveConfirmed
   };
 }
 
@@ -1135,7 +1135,7 @@ function renderLiveReadiness(readiness = liveReadiness()) {
     : readiness.ready ? 'Listo' : `${missing} pendientes`;
   elements.liveReadinessStatus.className = amountClass(readiness.live || readiness.ready ? 1 : -1);
   elements.armLive.disabled = !readiness.ready || readiness.live;
-  elements.disarmLive.disabled = !readiness.live && appState.bingx?.mode !== 'live';
+  elements.disarmLive.disabled = !readiness.live && !usesLiveMode(appState.bingx?.mode);
   elements.liveReadinessList.innerHTML = readiness.items.map((item) => `
     <div class="live-check ${item.ok ? 'ok' : 'missing'}">
       <i data-lucide="${item.ok ? 'check' : 'x'}"></i>
@@ -1669,7 +1669,7 @@ function openTradingPositions() {
 }
 
 function exchangePositionMode() {
-  return appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'live';
+  return appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'live' || appState.bingx?.mode === 'dual';
 }
 
 function positionsForPnlSource(key, reference = currentReferenceLedger()) {
@@ -1678,12 +1678,16 @@ function positionsForPnlSource(key, reference = currentReferenceLedger()) {
   }
 
   if (key === 'vst') {
-    const liveCurrent = appState.bingx?.mode === 'demo' ? appState.exchangePositions || [] : [];
+    const liveCurrent = (appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'dual')
+      ? (appState.exchangePositions || []).filter((position) => position.source === 'demo')
+      : [];
     return liveCurrent.length ? liveCurrent : appState.pnlSources?.positions?.vst || [];
   }
 
   if (key === 'live') {
-    const liveCurrent = appState.bingx?.mode === 'live' ? appState.exchangePositions || [] : [];
+    const liveCurrent = (appState.bingx?.mode === 'live' || appState.bingx?.mode === 'dual')
+      ? (appState.exchangePositions || []).filter((position) => position.source === 'live')
+      : [];
     return liveCurrent.length ? liveCurrent : appState.pnlSources?.positions?.live || [];
   }
 
@@ -2053,13 +2057,13 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxMonthlyLoss.value = bingx.maxMonthlyLossUSDT ?? 500;
   elements.bingxDryRunRequired.checked = bingx.dryRunRequired !== false;
   elements.bingxLiveConfirm.checked = Boolean(bingx.liveConfirmed);
-  elements.bingxLiveConfirmRow.classList.toggle('hidden', elements.bingxMode.value !== 'live');
+  elements.bingxLiveConfirmRow.classList.toggle('hidden', !usesLiveMode(elements.bingxMode.value));
 
-  const ready = bingx.enabled && bingx.apiKeyConfigured && bingx.apiSecretConfigured && (bingx.mode !== 'live' || bingx.liveConfirmed);
+  const ready = bingx.enabled && bingx.apiKeyConfigured && bingx.apiSecretConfigured && (!usesLiveMode(bingx.mode) || bingx.liveConfirmed);
   const modeLabel = bingxModeLabel(bingx.mode);
   elements.bingxStatus.textContent = message || (ready ? `${modeLabel} activo` : `${modeLabel} desactivado`);
-  elements.bingxStatus.classList.toggle('ok', Boolean(message) || Boolean(ready && bingx.mode !== 'live'));
-  elements.bingxStatus.classList.toggle('warn', bingx.mode === 'live' && (ready || bingx.enabled));
+  elements.bingxStatus.classList.toggle('ok', Boolean(message) || Boolean(ready && !usesLiveMode(bingx.mode)));
+  elements.bingxStatus.classList.toggle('warn', usesLiveMode(bingx.mode) && (ready || bingx.enabled));
 }
 
 async function saveBingxConfig() {
@@ -2519,8 +2523,13 @@ function bingxModeLabel(value) {
   return {
     test: 'Test order',
     demo: 'Demo VST',
-    live: 'Live real'
+    live: 'Live real',
+    dual: 'VST + Live real'
   }[value] || 'Test order';
+}
+
+function usesLiveMode(value) {
+  return value === 'live' || value === 'dual';
 }
 
 function outcomeLabel(value) {

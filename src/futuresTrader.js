@@ -122,6 +122,14 @@ export class FuturesTrader {
       ...this.configStore.getBingX({ includeSecrets: true }),
       ...(mode ? { mode } : {})
     };
+    if (config.mode === 'dual') {
+      const [demo, live] = await Promise.all([
+        this.getExchangeOpenPositions({ mode: 'demo' }),
+        this.getExchangeOpenPositions({ mode: 'live' })
+      ]);
+      return [...demo, ...live];
+    }
+
     if (config.mode === 'test' || !config.apiKey || !config.apiSecret) {
       return [];
     }
@@ -252,7 +260,7 @@ export class FuturesTrader {
             : signal.action === 'MOVE_SL_BE'
               ? await this.executeMoveStopSignal(signal, { post, phase: payload.phase })
               : await this.executeSignal(signal, { post, phase: payload.phase });
-          results.push(result);
+          results.push(...asArray(result));
         } catch (error) {
           const failed = this.emitTrade({
             at: new Date().toISOString(),
@@ -273,12 +281,29 @@ export class FuturesTrader {
 
   async executeCloseSignal(signal, { post, phase } = {}) {
     const config = this.configStore.getBingX({ includeSecrets: true });
+    if (config.mode === 'dual') {
+      const results = [];
+      for (const targetConfig of executionConfigs(config)) {
+        try {
+          results.push(await this.executeCloseSignalWithConfig(signal, { post, phase }, targetConfig));
+        } catch (error) {
+          results.push(this.executionError(signal, { post, phase }, targetConfig, error));
+        }
+      }
+      return results;
+    }
+
+    return this.executeCloseSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeCloseSignalWithConfig(signal, { post, phase } = {}, config) {
     const baseEvent = {
       at: new Date().toISOString(),
       signal,
       postId: post?.id || null,
       postUrl: post?.url || null,
-      phase: phase || null
+      phase: phase || null,
+      executionMode: config.mode
     };
 
     if (!config.enabled) {
@@ -322,12 +347,29 @@ export class FuturesTrader {
 
   async executeMoveStopSignal(signal, { post, phase } = {}) {
     const config = this.configStore.getBingX({ includeSecrets: true });
+    if (config.mode === 'dual') {
+      const results = [];
+      for (const targetConfig of executionConfigs(config)) {
+        try {
+          results.push(await this.executeMoveStopSignalWithConfig(signal, { post, phase }, targetConfig));
+        } catch (error) {
+          results.push(this.executionError(signal, { post, phase }, targetConfig, error));
+        }
+      }
+      return results;
+    }
+
+    return this.executeMoveStopSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeMoveStopSignalWithConfig(signal, { post, phase } = {}, config) {
     const baseEvent = {
       at: new Date().toISOString(),
       signal,
       postId: post?.id || null,
       postUrl: post?.url || null,
-      phase: phase || null
+      phase: phase || null,
+      executionMode: config.mode
     };
 
     if (!config.enabled) {
@@ -355,12 +397,29 @@ export class FuturesTrader {
 
   async executeSignal(signal, { post, phase } = {}) {
     const config = this.configStore.getBingX({ includeSecrets: true });
+    if (config.mode === 'dual') {
+      const results = [];
+      for (const targetConfig of executionConfigs(config)) {
+        try {
+          results.push(await this.executeSignalWithConfig(signal, { post, phase }, targetConfig));
+        } catch (error) {
+          results.push(this.executionError(signal, { post, phase }, targetConfig, error));
+        }
+      }
+      return results;
+    }
+
+    return this.executeSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeSignalWithConfig(signal, { post, phase } = {}, config) {
     const baseEvent = {
       at: new Date().toISOString(),
       signal,
       postId: post?.id || null,
       postUrl: post?.url || null,
-      phase: phase || null
+      phase: phase || null,
+      executionMode: config.mode
     };
 
     if (!config.enabled) {
@@ -672,6 +731,21 @@ export class FuturesTrader {
     };
   }
 
+  executionError(signal, { post, phase } = {}, config, error) {
+    const failed = this.emitTrade({
+      at: new Date().toISOString(),
+      signal,
+      postId: post?.id || null,
+      postUrl: post?.url || null,
+      phase: phase || null,
+      executionMode: config.mode,
+      status: 'error',
+      reason: error.message
+    });
+    this.log(`BingX ${modePrefix(config)} ${signal.symbol || 'senal'}: ${error.message}`, 'error');
+    return failed;
+  }
+
   emitTrade(event) {
     this.onTrade?.(event);
     return event;
@@ -747,6 +821,20 @@ function modePrefix(config) {
 
 function environmentForMode(mode) {
   return mode === 'demo' ? 'prod-vst' : 'prod-live';
+}
+
+function executionConfigs(config) {
+  if (config.mode !== 'dual') {
+    return [config];
+  }
+  return [
+    { ...config, mode: 'demo' },
+    { ...config, mode: 'live' }
+  ];
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [value].filter(Boolean);
 }
 
 function normalizeSymbol(value) {

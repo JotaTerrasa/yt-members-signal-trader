@@ -158,7 +158,7 @@ export class ConfigStore {
       marginType: clean(input.marginType).toUpperCase() === 'CROSSED' ? 'CROSSED' : 'ISOLATED',
       requireStopLoss: Boolean(input.requireStopLoss),
       allowedSymbols: clean(input.allowedSymbols),
-      liveConfirmed: mode === 'live' && Boolean(input.liveConfirmed),
+      liveConfirmed: (mode === 'live' || mode === 'dual') && Boolean(input.liveConfirmed),
       dryRunRequired: input.dryRunRequired !== false,
       dryRunCompletedAt: current.dryRunCompletedAt || null,
       maxOpenPositions: clampInteger(input.maxOpenPositions, 1, 100, defaultConfig.bingx.maxOpenPositions),
@@ -239,10 +239,13 @@ function clean(value) {
 
 function normalizeBingXMode(value) {
   const mode = clean(value).toLowerCase();
-  return ['test', 'demo', 'live'].includes(mode) ? mode : 'test';
+  return ['test', 'demo', 'live', 'dual'].includes(mode) ? mode : 'test';
 }
 
 function environmentForMode(mode) {
+  if (mode === 'dual') {
+    return 'prod-vst+prod-live';
+  }
   return mode === 'demo' ? 'prod-vst' : 'prod-live';
 }
 
