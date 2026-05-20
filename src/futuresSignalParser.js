@@ -2,6 +2,20 @@ const longWords = ['LONG', 'LARGO', 'BUY', 'COMPRA', 'COMPRAR'];
 const shortWords = ['SHORT', 'CORTO', 'SELL', 'VENTA', 'VENDER'];
 const directionWords = [...longWords, ...shortWords];
 const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL']);
+const baseSymbolAliases = new Map([
+  ['BITCOIN', 'BTC'],
+  ['ETHEREUM', 'ETH'],
+  ['ETHER', 'ETH'],
+  ['SOLANA', 'SOL'],
+  ['RIPPLE', 'XRP'],
+  ['CARDANO', 'ADA'],
+  ['POLKADOT', 'DOT'],
+  ['CHAINLINK', 'LINK'],
+  ['AVALANCHE', 'AVAX'],
+  ['DOGECOIN', 'DOGE'],
+  ['DOGE', 'DOGE'],
+  ['BNB', 'BNB']
+]);
 const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 
@@ -126,7 +140,7 @@ function parseCloseTargetsFromLine(line) {
   const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?))?\b/gi)];
   return matches
     .map((match) => ({
-      baseSymbol: match[1].toUpperCase(),
+      baseSymbol: normalizeBaseSymbol(match[1]),
       price: match[2] ? parseNumberToken(match[2]) : null
     }))
     .filter((target) => !symbolIgnoreWords.has(target.baseSymbol) && !closeWordsPattern.test(target.baseSymbol));
@@ -147,7 +161,7 @@ function parseBreakEvenSignals(raw) {
   const matches = [...text.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\b/gi)];
   const signals = [];
   for (const match of matches) {
-    const baseSymbol = match[1].toUpperCase();
+    const baseSymbol = normalizeBaseSymbol(match[1]);
     if (symbolIgnoreWords.has(baseSymbol) || baseSymbol === 'BE' || baseSymbol === 'BREAK' || baseSymbol === 'EVEN') {
       continue;
     }
@@ -195,8 +209,8 @@ function parseStructuredSignals(raw) {
   return directionLines.map((item, itemIndex) => {
     const next = directionLines[itemIndex + 1]?.index ?? lines.length;
     const block = lines.slice(item.index, next).join('\n');
-    const stopLoss = parseSymbolStopLoss(block, item.baseSymbol) ?? (directionLines.length === 1 ? parseStopLoss(raw) : null);
-    const takeProfits = parseSymbolTakeProfits(block, item.baseSymbol);
+    const stopLoss = parseSymbolStopLoss(block, item.baseSymbol, item.rawBaseSymbol) ?? (directionLines.length === 1 ? parseStopLoss(raw) : null);
+    const takeProfits = parseSymbolTakeProfits(block, item.baseSymbol, item.rawBaseSymbol);
     const leverage = parseLeverage(block) ?? parseLeverage(raw);
     const notionalUSDT = parseNotionalUSDT(block);
 
@@ -220,7 +234,8 @@ function parseDirectionLine(line) {
     return null;
   }
 
-  const baseSymbol = match[2].toUpperCase();
+  const rawBaseSymbol = match[2].toUpperCase();
+  const baseSymbol = normalizeBaseSymbol(rawBaseSymbol);
   if (symbolIgnoreWords.has(baseSymbol)) {
     return null;
   }
@@ -231,6 +246,7 @@ function parseDirectionLine(line) {
 
   return {
     baseSymbol,
+    rawBaseSymbol,
     direction,
     price: Number.isFinite(price) && price > 0 ? price : null
   };
@@ -239,12 +255,12 @@ function parseDirectionLine(line) {
 function parseSymbol(raw, normalized) {
   const pair = raw.match(/\b([A-Z0-9]{2,12})\s*[-/]\s*(USDT|USDC)\b/i);
   if (pair) {
-    return `${pair[1].toUpperCase()}-${pair[2].toUpperCase()}`;
+    return `${normalizeBaseSymbol(pair[1])}-${pair[2].toUpperCase()}`;
   }
 
   const compact = raw.match(/\b([A-Z][A-Z0-9]{1,11})(USDT|USDC)\b/i);
   if (compact) {
-    return `${compact[1].toUpperCase()}-${compact[2].toUpperCase()}`;
+    return `${normalizeBaseSymbol(compact[1])}-${compact[2].toUpperCase()}`;
   }
 
   const directional = parseDirectionLine(raw);
@@ -254,7 +270,7 @@ function parseSymbol(raw, normalized) {
 
   const cashtag = raw.match(/\$([A-Z]{2,12})\b/);
   if (cashtag && hasDirectionContext(normalized)) {
-    return `${cashtag[1].toUpperCase()}-USDT`;
+    return `${normalizeBaseSymbol(cashtag[1])}-USDT`;
   }
 
   return null;
@@ -303,18 +319,20 @@ function parseTakeProfits(raw) {
   return uniqueNumbers(lines.flatMap(extractNumbers)).slice(0, 6);
 }
 
-function parseSymbolStopLoss(raw, baseSymbol) {
+function parseSymbolStopLoss(raw, baseSymbol, rawBaseSymbol = baseSymbol) {
+  const pattern = baseSymbolPattern(baseSymbol, rawBaseSymbol);
   const line = raw.split(/\n+/).find((item) => (
-    new RegExp(`\\b${baseSymbol}\\b`, 'i').test(item)
+    pattern.test(item)
     && /\b(SL|STOP|STOPLOSS|STOP LOSS|INVALIDATION|INVALIDACION)\b/i.test(item)
   ));
   const numbers = extractNumbers(line || '');
   return numbers[0] || null;
 }
 
-function parseSymbolTakeProfits(raw, baseSymbol) {
+function parseSymbolTakeProfits(raw, baseSymbol, rawBaseSymbol = baseSymbol) {
+  const pattern = baseSymbolPattern(baseSymbol, rawBaseSymbol);
   const lines = raw.split(/\n+/).filter((item) => (
-    new RegExp(`\\b${baseSymbol}\\b`, 'i').test(item)
+    pattern.test(item)
     && /\b(TP\d*|TAKE PROFIT|TARGET|OBJETIVO)\b/i.test(item)
   ));
   return uniqueNumbers(lines.flatMap(extractNumbers)).slice(0, 6);
@@ -348,6 +366,19 @@ function parseNumberToken(value) {
   const normalized = text.replace(/[kK]\s*$/, '').replace(',', '.').trim();
   const number = Number(normalized);
   return Number.isFinite(number) ? number * multiplier : NaN;
+}
+
+function normalizeBaseSymbol(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return baseSymbolAliases.get(normalized) || normalized;
+}
+
+function baseSymbolPattern(baseSymbol, rawBaseSymbol = baseSymbol) {
+  const values = [...new Set([
+    normalizeBaseSymbol(baseSymbol),
+    String(rawBaseSymbol || '').trim().toUpperCase()
+  ].filter(Boolean))].map(escapeRegExp);
+  return new RegExp(`\\b(?:${values.join('|')})\\b`, 'i');
 }
 
 function uniqueNumbers(values) {
@@ -422,6 +453,10 @@ function hasDirectionContext(normalized) {
 
 function hasWord(text, word) {
   return new RegExp(`(^|[^A-Z])${word}([^A-Z]|$)`, 'i').test(text);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalize(value) {
