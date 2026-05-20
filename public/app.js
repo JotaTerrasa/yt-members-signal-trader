@@ -76,6 +76,10 @@ const elements = {
   healthMetrics: document.querySelector('#health-metrics'),
   riskStatus: document.querySelector('#risk-status'),
   riskMetrics: document.querySelector('#risk-metrics'),
+  dualOpsPanel: document.querySelector('#dual-ops-panel'),
+  dualOpsStatus: document.querySelector('#dual-ops-status'),
+  dualOpsMetrics: document.querySelector('#dual-ops-metrics'),
+  dualSignalMatrix: document.querySelector('#dual-signal-matrix'),
   tickerPnlStatus: document.querySelector('#ticker-pnl-status'),
   tickerPnlChart: document.querySelector('#ticker-pnl-chart'),
   dailyPnlStatus: document.querySelector('#daily-pnl-status'),
@@ -740,12 +744,13 @@ function renderPnl() {
   renderLiveReadiness();
   renderHealthPanel();
   renderRiskPanel(openPositions, closedPositions);
+  renderDualOpsPanel();
   renderTickerPnl();
   renderDailyPnl();
   renderHistoricalPnl();
   renderOpenPositions(openPositions);
   renderTradeHistory();
-  elements.pnlNote.classList.toggle('warn', appState.bingx?.mode !== 'live');
+  elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
   window.lucide?.createIcons();
 }
 
@@ -977,10 +982,14 @@ function sourceNoteText(source) {
     return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
   }
   if (source.key === 'vst') {
-    return 'Futuros VST muestra solamente el saldo total de la cuenta demo de BingX.';
+    return appState.bingx?.mode === 'dual'
+      ? 'VST demo queda separado de real. Las nuevas señales usan 150 VST por orden.'
+      : 'Futuros VST muestra solamente el saldo total de la cuenta demo de BingX.';
   }
   if (source.key === 'live') {
-    return 'Futuros reales lee la cuenta real de BingX. Mantenlo separado de VST antes de armar live.';
+    return appState.bingx?.mode === 'dual'
+      ? 'Futuros reales queda separado de VST. Las nuevas señales usan 16,55 USDT por orden.'
+      : 'Futuros reales lee la cuenta real de BingX. Mantenlo separado de VST antes de armar live.';
   }
   return 'Cada tarjeta separa una fuente de PnL para evitar mezclar referencia, demo y real.';
 }
@@ -1580,10 +1589,54 @@ function renderPnlRow(row) {
 }
 
 function renderOpenPositions(openPositions = openTradingPositions()) {
+  if (appState.bingx?.mode === 'dual') {
+    const demoPositions = positionsForPnlSource('vst').filter((position) => position.status === 'open');
+    const livePositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
+    const total = demoPositions.length + livePositions.length;
+    elements.openPositionsStatus.textContent = `VST ${demoPositions.length} · Real ${livePositions.length}`;
+    elements.openPositionsEmpty.classList.toggle('hidden', total > 0);
+    elements.openPositionsEmpty.textContent = 'Sin posiciones abiertas en VST ni real.';
+    elements.openPositionsList.classList.add('position-grid-split');
+    elements.openPositionsList.innerHTML = `
+      ${renderPositionColumn({
+        key: 'demo',
+        title: 'Demo VST',
+        subtitle: `${demoPositions.length} abiertas`,
+        positions: demoPositions
+      })}
+      ${renderPositionColumn({
+        key: 'live',
+        title: 'Real USDT',
+        subtitle: `${livePositions.length} abiertas`,
+        positions: livePositions
+      })}
+    `;
+    return;
+  }
+
+  elements.openPositionsList.classList.remove('position-grid-split');
   elements.openPositionsStatus.textContent = `${openPositions.length} abiertas`;
   elements.openPositionsEmpty.classList.toggle('hidden', openPositions.length > 0);
   elements.openPositionsEmpty.textContent = `Sin posiciones abiertas en ${selectedPnlSource().label}.`;
   elements.openPositionsList.innerHTML = openPositions.map(renderOpenPositionCard).join('');
+}
+
+function renderPositionColumn({ key, title, subtitle, positions }) {
+  const content = positions.length
+    ? positions.map(renderOpenPositionCard).join('')
+    : '<div class="empty-state compact">Sin posiciones abiertas.</div>';
+
+  return `
+    <section class="position-column source-${escapeAttribute(key)}">
+      <div class="position-column-header">
+        <div>
+          <span class="source-badge ${escapeAttribute(key)}">${escapeHtml(title)}</span>
+          <strong>${escapeHtml(subtitle)}</strong>
+        </div>
+      </div>
+      <div class="position-column-list">${content}</div>
+    </section>
+  `;
 }
 
 function renderOpenPositionCard(position) {
@@ -1606,13 +1659,14 @@ function renderOpenPositionCard(position) {
     ? `Cantidad ${formatQuantity(quantity)} ${baseAsset}`
     : null;
   return `
-    <article class="position-card ${sideClass}">
+    <article class="position-card ${sideClass} source-${escapeAttribute(position.source || 'paper')}">
       <div class="position-card-top">
         <div>
+          <span class="source-badge ${escapeAttribute(position.source || 'paper')}">${escapeHtml(sourceLabel)}</span>
           <span class="side ${sideClass}">${escapeHtml(position.direction || '-')}</span>
           <strong>${escapeHtml(position.symbol || '-')}</strong>
         </div>
-        <span class="${amountClass(pnl)}${liveClass}">${escapeHtml(formatUsdt(pnl))}</span>
+        <span class="${amountClass(pnl)}${liveClass}">${escapeHtml(formatPositionMoney(pnl, position))}</span>
       </div>
       <div class="position-card-grid">
         <div>
@@ -1633,11 +1687,10 @@ function renderOpenPositionCard(position) {
         </div>
       </div>
       <div class="position-card-footer">
-        <span>${escapeHtml(sourceLabel)}</span>
         ${quantityText ? `<span>${escapeHtml(quantityText)}</span>` : ''}
         <span>${escapeHtml(formatLeverage(position.leverage))}</span>
-        <span>Margen ${escapeHtml(formatUsdt(position.notional))}</span>
-        <span>Exposicion ${escapeHtml(formatUsdt(position.exposure || position.notional))}</span>
+        <span>Margen ${escapeHtml(formatPositionMoney(position.notional, position))}</span>
+        <span>Exposicion ${escapeHtml(formatPositionMoney(position.exposure || position.notional, position))}</span>
         <span>${escapeHtml(stopSummary)}</span>
         <span>${escapeHtml(formatDuration(position.openedAt, position.closedAt))}</span>
       </div>
@@ -1662,6 +1715,17 @@ function activeStopPrices(position) {
     .map((order) => Number(order.stopPrice))
     .filter((price) => Number.isFinite(price) && price > 0)
     .sort((a, b) => b - a);
+}
+
+function positionAsset(position) {
+  if (position?.source === 'demo') {
+    return 'VST';
+  }
+  return 'USDT';
+}
+
+function formatPositionMoney(value, position) {
+  return formatMoney(value, positionAsset(position));
 }
 
 function openTradingPositions() {
@@ -1958,11 +2022,214 @@ function renderOpenPositionRow(position) {
   `;
 }
 
+function renderDualOpsPanel() {
+  if (!elements.dualOpsPanel) {
+    return;
+  }
+
+  const demoPositions = positionsForPnlSource('vst').filter((position) => position.status === 'open');
+  const livePositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
+  const config = appState.bingx || {};
+  const groups = groupedSignalEvents().slice(0, 4);
+  const vstNotional = Number(config.vstBaseCapital || 1000) * (Number(config.vstCapitalPercent || 15) / 100);
+  const realNotional = Number(config.defaultNotionalUSDT || 0);
+
+  elements.dualOpsPanel.classList.toggle('dual-active', config.mode === 'dual');
+  elements.dualOpsStatus.textContent = config.mode === 'dual'
+    ? `${groups.length} posts recientes · VST + Real`
+    : `${bingxModeLabel(config.mode)} · vista comparativa`;
+  elements.dualOpsMetrics.innerHTML = [
+    ['Modo', bingxModeLabel(config.mode)],
+    ['Proxima VST', formatMoney(vstNotional, 'VST')],
+    ['Proxima real', formatMoney(realNotional, 'USDT')],
+    ['Abiertas VST', String(demoPositions.length)],
+    ['Abiertas real', String(livePositions.length)]
+  ].map(([label, value]) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join('');
+
+  elements.dualSignalMatrix.innerHTML = groups.length
+    ? groups.map(renderSignalGroup).join('')
+    : '<div class="empty-state compact">Las proximas señales apareceran agrupadas aqui con el estado VST y Real por separado.</div>';
+}
+
 function renderTradeHistory() {
+  const groups = groupedSignalEvents();
+  if (groups.length) {
+    elements.tradeHistoryStatus.textContent = `${groups.length} posts`;
+    elements.tradeHistoryEmpty.classList.add('hidden');
+    elements.tradeHistoryList.innerHTML = groups.slice(0, 8).map(renderSignalGroup).join('');
+    return;
+  }
+
   const items = tradeHistoryItems();
   elements.tradeHistoryStatus.textContent = `${items.length} eventos`;
   elements.tradeHistoryEmpty.classList.toggle('hidden', items.length > 0);
   elements.tradeHistoryList.innerHTML = items.map(renderTradeHistoryItem).join('');
+}
+
+function groupedSignalEvents() {
+  const groups = new Map();
+  for (const event of appState.trades || []) {
+    if (!event.signal?.symbol) {
+      continue;
+    }
+
+    const key = event.postId || event.postUrl || event.signal.rawText || `${event.at}:${event.signal.symbol}`;
+    const group = groups.get(key) || {
+      key,
+      at: event.at,
+      postUrl: event.postUrl || '',
+      rows: new Map(),
+      events: []
+    };
+    group.at = newerIso(group.at, event.at);
+    group.postUrl ||= event.postUrl || '';
+    group.events.push(event);
+
+    const symbol = normalizeTradeSymbol(event.signal.symbol);
+    const rowKey = `${symbol}:${event.signal.direction || event.signal.action || ''}`;
+    const row = group.rows.get(rowKey) || {
+      symbol,
+      direction: event.signal.direction || event.signal.action || '',
+      demo: null,
+      live: null,
+      other: []
+    };
+    const account = eventAccountKey(event);
+    if (account === 'demo') {
+      row.demo = event;
+    } else if (account === 'live') {
+      row.live = event;
+    } else {
+      row.other.push(event);
+    }
+    group.rows.set(rowKey, row);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      rows: [...group.rows.values()]
+    }))
+    .sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+}
+
+function renderSignalGroup(group) {
+  const totals = signalGroupTotals(group);
+  const postLink = group.postUrl
+    ? `<a href="${escapeAttribute(group.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    : '';
+
+  return `
+    <article class="signal-group">
+      <div class="signal-group-header">
+        <div>
+          <strong>${escapeHtml(signalGroupTitle(group))}</strong>
+          <span>${escapeHtml(formatDateTime(group.at))}</span>
+        </div>
+        <div class="signal-group-status">
+          <span class="${escapeAttribute(totals.demoClass)}">VST ${escapeHtml(totals.demo)}</span>
+          <span class="${escapeAttribute(totals.liveClass)}">Real ${escapeHtml(totals.live)}</span>
+          ${postLink}
+        </div>
+      </div>
+      <div class="signal-grid">
+        <div class="signal-grid-head">Señal</div>
+        <div class="signal-grid-head">VST Demo</div>
+        <div class="signal-grid-head">Real USDT</div>
+        ${group.rows.map(renderSignalRow).join('')}
+      </div>
+    </article>
+  `;
+}
+
+function renderSignalRow(row) {
+  return `
+    <div class="signal-cell signal-cell-main">
+      <strong>${escapeHtml(row.symbol || '-')}</strong>
+      <span>${escapeHtml(row.direction || '-')}</span>
+    </div>
+    ${renderSignalAccountCell(row.demo, 'demo')}
+    ${renderSignalAccountCell(row.live, 'live')}
+  `;
+}
+
+function renderSignalAccountCell(event, account) {
+  if (!event) {
+    return '<div class="signal-cell muted">Sin evento</div>';
+  }
+
+  const tone = eventTone(event);
+  const amount = eventAmountText(event, account);
+  const detail = event.reason ? reasonLabel(event.reason) : amount;
+  return `
+    <div class="signal-cell ${escapeAttribute(tone)}">
+      <strong>${escapeHtml(tradeStatusLabel(event.status))}</strong>
+      <span>${escapeHtml(detail || amount || '-')}</span>
+    </div>
+  `;
+}
+
+function signalGroupTitle(group) {
+  const symbols = [...new Set(group.rows.map((row) => row.symbol).filter(Boolean))];
+  return symbols.length ? `Orden ${symbols.join(' / ')}` : 'Orden de YouTube';
+}
+
+function signalGroupTotals(group) {
+  const total = group.rows.length || 0;
+  const demoOk = group.rows.filter((row) => row.demo && eventTone(row.demo) !== 'negative').length;
+  const liveOk = group.rows.filter((row) => row.live && eventTone(row.live) !== 'negative').length;
+  return {
+    demo: `${demoOk}/${total}`,
+    live: `${liveOk}/${total}`,
+    demoClass: demoOk === total && total ? 'positive' : demoOk ? 'warn' : 'negative',
+    liveClass: liveOk === total && total ? 'positive' : liveOk ? 'warn' : 'negative'
+  };
+}
+
+function eventAccountKey(event) {
+  const explicit = String(event.executionMode || '').toLowerCase();
+  if (explicit === 'demo' || explicit === 'live') {
+    return explicit;
+  }
+  const status = String(event.status || '').toLowerCase();
+  if (status.startsWith('demo_')) {
+    return 'demo';
+  }
+  if (status.startsWith('live_')) {
+    return 'live';
+  }
+  return event.exchangePosition?.source || event.position?.source || 'other';
+}
+
+function eventTone(event) {
+  const status = String(event.status || '');
+  if (status === 'error' || status === 'blocked' || status.endsWith('_no_position')) {
+    return 'negative';
+  }
+  if (status.endsWith('_order_sent') || status.endsWith('_close_sent') || status.includes('_sl_be_')) {
+    return 'positive';
+  }
+  return 'neutral';
+}
+
+function eventAmountText(event, account) {
+  if (event.sizing?.notional) {
+    return formatMoney(event.sizing.notional, event.sizing.asset || (account === 'demo' ? 'VST' : 'USDT'));
+  }
+  if (event.closePercent) {
+    return `${event.closePercent}% cierre`;
+  }
+  return '';
+}
+
+function newerIso(a, b) {
+  return Date.parse(b || 0) > Date.parse(a || 0) ? b : a;
 }
 
 function renderTradeHistoryItem(item) {
@@ -1978,7 +2245,7 @@ function renderTradeHistoryItem(item) {
           <strong>${escapeHtml(item.symbol || 'Senal')}</strong>
           <span>${escapeHtml(`${item.direction || '-'} · ${item.statusLabel}`)}</span>
         </div>
-        <span class="${amountClass(item.pnl)}">${escapeHtml(formatUsdt(item.pnl))}</span>
+        <span class="${amountClass(item.pnl)}">${escapeHtml(formatMoney(item.pnl, item.asset || 'USDT'))}</span>
       </div>
       <div class="trade-history-meta">
         <span>${escapeHtml(formatDateTime(item.at))}</span>
@@ -2186,6 +2453,8 @@ function tradeHistoryItems() {
     kind: 'exchange',
     id: position.id,
     at: position.openedAt || new Date().toISOString(),
+    source: position.source,
+    asset: positionAsset(position),
     symbol: position.symbol,
     direction: position.direction,
     statusLabel: position.source === 'demo' ? 'Demo VST abierta' : 'Live abierta',
@@ -2200,6 +2469,8 @@ function tradeHistoryItems() {
     kind: 'paper',
     id: position.id,
     at: position.closedAt || position.openedAt,
+    source: 'paper',
+    asset: 'USDT',
     symbol: position.symbol,
     direction: position.direction,
     statusLabel: position.status === 'open' ? 'paper abierta' : `paper ${closeReasonLabel(position.closeReason)}`,
@@ -2217,6 +2488,8 @@ function tradeHistoryItems() {
       kind: 'event',
       id: `${event.at}:${event.signal?.symbol || event.status}`,
       at: event.at,
+      source: eventAccountKey(event),
+      asset: eventAccountKey(event) === 'demo' ? 'VST' : 'USDT',
       symbol: event.signal?.symbol || '',
       direction: event.signal?.direction || '',
       statusLabel: tradeStatusLabel(event.status),
