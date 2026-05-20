@@ -693,15 +693,20 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
 
   exchangeSyncInFlight = true;
   try {
-    const previous = exchangePositionsCache;
+    const expectedSource = exchangeSourceForMode(config.mode);
+    const previous = exchangePositionsCache.filter((position) => position.source === expectedSource);
+    const sourceChanged = exchangePositionsCache.some((position) => position.source && position.source !== expectedSource);
+    if (sourceChanged) {
+      pendingExchangeClosures.clear();
+    }
     const next = await futuresTrader.getExchangeOpenPositions();
-    const closedCandidates = detectClosedExchangePositions(previous, next);
+    const closedCandidates = sourceChanged ? [] : detectClosedExchangePositions(previous, next);
     const closedPositions = confirmClosedExchangePositions(closedCandidates, next, reason);
     const visibleNext = mergeUnconfirmedExchangePositions(next, closedCandidates, closedPositions, reason);
     exchangePositionsCache = visibleNext;
     syncPriceSubscriptions(visibleNext);
 
-    if (reason !== 'poll' || closedPositions.length || positionsChanged(previous, visibleNext)) {
+    if (reason !== 'poll' || sourceChanged || closedPositions.length || positionsChanged(previous, visibleNext)) {
       broadcast('exchangePositions', { positions: visibleNext, closedPositions, reason });
     }
 
@@ -826,6 +831,10 @@ function exchangePositionIdentityKey(position) {
     position.symbol,
     position.direction
   ].filter(Boolean).join(':');
+}
+
+function exchangeSourceForMode(mode) {
+  return mode === 'demo' ? 'demo' : 'live';
 }
 
 function handleExchangeClosedPosition(position, reason) {
