@@ -161,7 +161,7 @@ export class FuturesTrader {
   }
 
   async getCachedOpenOrders(client, config) {
-    const key = `${config.mode}:${environmentForMode(config.mode)}`;
+    const key = openOrdersCacheKey(config);
     const now = Date.now();
     const cached = this.openOrdersCache.get(key);
     if (cached?.blockedUntil && now < cached.blockedUntil) {
@@ -299,7 +299,9 @@ export class FuturesTrader {
             ? await this.executeCloseSignal(signal, { post, phase: payload.phase })
             : signal.action === 'MOVE_SL_BE'
               ? await this.executeMoveStopSignal(signal, { post, phase: payload.phase })
-              : await this.executeSignal(signal, { post, phase: payload.phase });
+              : signal.action === 'SET_TAKE_PROFIT'
+                ? await this.executeTakeProfitSignal(signal, { post, phase: payload.phase })
+                : await this.executeSignal(signal, { post, phase: payload.phase });
           results.push(...asArray(result));
         } catch (error) {
           const failed = this.emitTrade({
@@ -430,6 +432,78 @@ export class FuturesTrader {
       this.log(`PAPER SL BE ${signal.symbol} (${movedPaperPositions.length})`, 'info');
     } else {
       this.log(`SL a BE detectado para ${signal.symbol}, sin posicion paper abierta.`, 'warn');
+    }
+
+    return event;
+  }
+
+  async executeTakeProfitSignal(signal, { post, phase } = {}) {
+    const config = this.configStore.getBingX({ includeSecrets: true });
+    if (config.mode === 'dual') {
+      const results = [];
+      for (const targetConfig of executionConfigs(config)) {
+        try {
+          results.push(await this.executeTakeProfitSignalWithConfig(signal, { post, phase }, targetConfig));
+        } catch (error) {
+          results.push(this.executionError(signal, { post, phase }, targetConfig, error));
+        }
+      }
+      return results;
+    }
+
+    return this.executeTakeProfitSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeTakeProfitSignalWithConfig(signal, { post, phase } = {}, config) {
+    const baseEvent = {
+      at: new Date().toISOString(),
+      signal,
+      postId: post?.id || null,
+      postUrl: post?.url || null,
+      phase: phase || null,
+      executionMode: config.mode
+    };
+
+    if (!config.enabled) {
+      return this.emitTrade({ ...baseEvent, status: 'skipped', reason: 'bingx_disabled' });
+    }
+
+    if (config.mode === 'live' && !config.liveConfirmed) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: 'live_not_confirmed' });
+    }
+
+    const takeProfit = firstFiniteNumber([
+      signal.takeProfit,
+      Array.isArray(signal.takeProfits) ? signal.takeProfits[0] : null
+    ]);
+    if (!Number.isFinite(takeProfit) || takeProfit <= 0) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: `invalid_take_profit:${signal.takeProfit}` });
+    }
+
+    const paperPositions = config.mode === 'test' && this.paperStore
+      ? await this.paperStore.setTakeProfitBySymbol({ symbol: signal.symbol, price: takeProfit, post, phase })
+      : [];
+    const exchangeTakeProfit = config.mode !== 'test'
+      ? await this.setExchangeTakeProfit({ client: this.client(config), marketClient: this.marketClient(config), config, signal, takeProfit })
+      : null;
+
+    const event = this.emitTrade({
+      ...baseEvent,
+      status: takeProfitStatus(config, paperPositions, exchangeTakeProfit),
+      takeProfit,
+      paperPositions,
+      exchangeTakeProfit
+    });
+
+    if (paperPositions.length) {
+      this.log(`PAPER TP ${signal.symbol} @ ${takeProfit} (${paperPositions.length})`, 'info');
+    } else if (exchangeTakeProfit?.orders?.length) {
+      this.log(`${modePrefix(config)} TP ${signal.symbol} @ ${takeProfit} (${exchangeTakeProfit.orders.length})`, config.mode === 'live' ? 'warn' : 'info');
+    } else if (exchangeTakeProfit?.positions?.length) {
+      const reason = exchangeTakeProfit.skipped?.[0]?.reason || 'no_colocado';
+      this.log(`TP detectado para ${signal.symbol}, no colocado: ${reason}.`, 'warn');
+    } else {
+      this.log(`TP detectado para ${signal.symbol}, sin posicion abierta.`, 'warn');
     }
 
     return event;
@@ -737,6 +811,87 @@ export class FuturesTrader {
     return { positions, orders };
   }
 
+  async setExchangeTakeProfit({ client, marketClient, config, signal, takeProfit }) {
+    const response = await client.getPositions(signal.symbol);
+    const positions = (Array.isArray(response.data) ? response.data : [])
+      .filter((position) => position.symbol === signal.symbol)
+      .filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
+
+    if (!positions.length) {
+      return { positions: [], orders: [], canceled: [], skipped: [] };
+    }
+
+    const marketPrice = await this.fetchMarketPrice(marketClient, signal.symbol).catch(() => null);
+    const openOrders = await this.getCachedOpenOrders(client, config);
+    const contract = await this.getContract(client, signal.symbol);
+    const canceled = [];
+    const orders = [];
+    const skipped = [];
+
+    for (const position of positions) {
+      const positionSide = position.positionSide || normalizePositionSide(position);
+      const direction = normalizePositionSide(position);
+      const currentPrice = firstFiniteNumber([
+        position.markPrice,
+        position.lastPrice,
+        marketPrice
+      ]);
+      const validation = validateTakeProfitAgainstMarket({ direction, takeProfit, marketPrice: currentPrice });
+      if (!validation.ok) {
+        skipped.push({ position, reason: validation.reason, marketPrice: currentPrice });
+        continue;
+      }
+
+      for (const existing of takeProfitOrdersForPosition(position, openOrders)) {
+        const orderId = existing.orderId || existing.orderID;
+        if (!orderId) {
+          continue;
+        }
+        try {
+          canceled.push({
+            order: existing,
+            response: await client.cancelOrder({ symbol: signal.symbol, orderId })
+          });
+        } catch (error) {
+          this.log(`BingX TP previo ${signal.symbol}: ${error.message}`, 'warn');
+        }
+      }
+
+      const available = Math.abs(Number(position.availableAmt || position.positionAmt || 0));
+      const quantity = roundDown(available, contract.quantityPrecision);
+      if (quantity <= 0) {
+        skipped.push({ position, reason: `quantity_too_small:${quantity}`, marketPrice: currentPrice });
+        continue;
+      }
+
+      const order = {
+        symbol: signal.symbol,
+        side: direction === 'SHORT' ? 'BUY' : 'SELL',
+        positionSide,
+        type: 'TAKE_PROFIT_MARKET',
+        stopPrice: takeProfit,
+        quantity,
+        workingType: 'MARK_PRICE'
+      };
+
+      if (positionSide === 'BOTH') {
+        order.reduceOnly = 'true';
+      }
+
+      orders.push({
+        position,
+        order,
+        response: await client.placeOrder(order, { test: false })
+      });
+    }
+
+    if (canceled.length || orders.length) {
+      this.openOrdersCache.delete(openOrdersCacheKey(config));
+    }
+
+    return { positions, orders, canceled, skipped };
+  }
+
   validateRisk(signal, config, { leverage }) {
     const snapshot = this.paperStore?.riskSnapshot?.() || {};
     const maxOpenPositions = Number(config.maxOpenPositions || 0);
@@ -852,6 +1007,37 @@ function closeStatus(config, exchangeClose) {
   return `${config.mode}_close_sent`;
 }
 
+function takeProfitStatus(config, paperPositions, exchangeTakeProfit) {
+  if (config.mode === 'test') {
+    return paperPositions.length ? 'paper_tp_sent' : 'paper_tp_no_position';
+  }
+  if (exchangeTakeProfit?.orders?.length) {
+    return `${config.mode}_tp_sent`;
+  }
+  if (exchangeTakeProfit?.positions?.length) {
+    return `${config.mode}_tp_blocked`;
+  }
+  return `${config.mode}_tp_no_position`;
+}
+
+function validateTakeProfitAgainstMarket({ direction, takeProfit, marketPrice }) {
+  const price = Number(marketPrice);
+  const target = Number(takeProfit);
+  if (!Number.isFinite(target) || target <= 0) {
+    return { ok: false, reason: `invalid_take_profit:${takeProfit}` };
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    return { ok: true };
+  }
+  if (direction === 'LONG' && target <= price) {
+    return { ok: false, reason: `invalid_long_take_profit:${target}<=${price}` };
+  }
+  if (direction === 'SHORT' && target >= price) {
+    return { ok: false, reason: `invalid_short_take_profit:${target}>=${price}` };
+  }
+  return { ok: true };
+}
+
 function modePrefix(config) {
   if (config.mode === 'demo') {
     return 'BingX DEMO VST';
@@ -861,6 +1047,10 @@ function modePrefix(config) {
 
 function environmentForMode(mode) {
   return mode === 'demo' ? 'prod-vst' : 'prod-live';
+}
+
+function openOrdersCacheKey(config) {
+  return `${config.mode}:${environmentForMode(config.mode)}`;
 }
 
 function rateLimitBlockedUntil(message) {
@@ -949,6 +1139,17 @@ function protectiveOrdersForPosition(position, openOrders = []) {
       status: order.status
     }))
   };
+}
+
+function takeProfitOrdersForPosition(position, openOrders = []) {
+  const symbol = normalizeSymbol(position.symbol);
+  const positionSide = normalizePositionSide(position);
+  return openOrders.filter((order) => (
+    normalizeSymbol(order.symbol) === symbol
+    && (!order.positionSide || String(order.positionSide).toUpperCase() === positionSide)
+    && ['NEW', 'PARTIALLY_FILLED'].includes(String(order.status || 'NEW').toUpperCase())
+    && isTakeProfitOrder(order)
+  ));
 }
 
 function isStopLossOrder(order = {}) {

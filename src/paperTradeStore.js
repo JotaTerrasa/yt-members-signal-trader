@@ -286,6 +286,35 @@ export class PaperTradeStore {
     return updated;
   }
 
+  async setTakeProfitBySymbol({ symbol, price, post, phase }) {
+    const takeProfit = Number(price);
+    if (!Number.isFinite(takeProfit) || takeProfit <= 0) {
+      return [];
+    }
+
+    const updated = [];
+    for (const position of this.data.positions) {
+      if (position.status !== 'open' || position.symbol !== symbol) {
+        continue;
+      }
+
+      position.takeProfit = takeProfit;
+      position.takeProfits = [takeProfit];
+      position.updatedAt = new Date().toISOString();
+      position.lastManagement = 'set_take_profit';
+      position.managementPostId = post?.id || null;
+      position.managementPostUrl = post?.url || null;
+      position.managementPhase = phase || null;
+      updated.push(position);
+    }
+
+    if (updated.length) {
+      await this.save();
+    }
+
+    return updated;
+  }
+
   riskSnapshot(now = new Date()) {
     const day = dayKey(now);
     const month = monthKey(now);

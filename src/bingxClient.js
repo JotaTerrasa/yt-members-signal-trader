@@ -55,6 +55,14 @@ export class BingXClient {
     return this.request('POST', test ? '/openApi/swap/v2/trade/order/test' : '/openApi/swap/v2/trade/order', order);
   }
 
+  async cancelOrder({ symbol, orderId, clientOrderId }) {
+    return this.request('DELETE', '/openApi/swap/v2/trade/order', {
+      symbol,
+      orderId,
+      clientOrderId
+    });
+  }
+
   async closePosition({ positionId }) {
     return this.request('POST', '/openApi/swap/v1/trade/closePosition', { positionId });
   }

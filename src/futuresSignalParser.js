@@ -1,7 +1,7 @@
 const longWords = ['LONG', 'LARGO', 'BUY', 'COMPRA', 'COMPRAR'];
 const shortWords = ['SHORT', 'CORTO', 'SELL', 'VENTA', 'VENDER'];
 const directionWords = [...longWords, ...shortWords];
-const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL']);
+const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'TPS', 'TAKE', 'PROFIT', 'OBJETIVO', 'OBJETIVOS', 'TARGET', 'TARGETS', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL']);
 const baseSymbolAliases = new Map([
   ['BITCOIN', 'BTC'],
   ['ETHEREUM', 'ETH'],
@@ -18,6 +18,7 @@ const baseSymbolAliases = new Map([
 ]);
 const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
+const takeProfitLineStartPattern = /^\W*(TPS?|TAKE\s*PROFITS?|TAKE\s*PROFIT|OBJETIVOS?|TARGETS?)\b/i;
 
 export function parseFuturesSignal(text) {
   return parseFuturesSignals(text)[0];
@@ -41,6 +42,7 @@ export function parseFuturesSignals(text) {
 function parsePositionManagementSignals(raw) {
   return [
     ...parseCloseSignals(raw),
+    ...parseTakeProfitSignals(raw),
     ...parseBreakEvenSignals(raw)
   ];
 }
@@ -148,6 +150,63 @@ function parseCloseTargetsFromLine(line) {
 
 function looksLikeCloseTickerLine(line) {
   return /^\W*[A-Z]{2,12}(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?\d+(?:[.,]\d+)?\s*[kK]?)?\W*$/i.test(line);
+}
+
+function parseTakeProfitSignals(raw) {
+  const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const takeProfitStart = lines.findIndex(isTakeProfitHeaderLine);
+  if (takeProfitStart < 0) {
+    return [];
+  }
+
+  const signals = [];
+  for (const line of lines.slice(takeProfitStart)) {
+    for (const target of parseTakeProfitTargetsFromLine(line)) {
+      if (!Number.isFinite(target.price) || target.price <= 0) {
+        continue;
+      }
+
+      signals.push({
+        isSignal: true,
+        action: 'SET_TAKE_PROFIT',
+        symbol: `${target.baseSymbol}-USDT`,
+        takeProfit: target.price,
+        takeProfits: [target.price],
+        rawText: raw
+      });
+    }
+  }
+
+  return dedupeSignals(signals);
+}
+
+function isTakeProfitHeaderLine(line) {
+  return takeProfitLineStartPattern.test(normalize(line).trim());
+}
+
+function parseTakeProfitTargetsFromLine(line) {
+  const text = String(line || '').trim();
+  if (!text) {
+    return [];
+  }
+
+  const normalized = normalize(text);
+  const headerLine = isTakeProfitHeaderLine(normalized);
+  const body = headerLine
+    ? normalized.replace(takeProfitLineStartPattern, ' ')
+    : text;
+
+  if (!headerLine && !looksLikeCloseTickerLine(text)) {
+    return [];
+  }
+
+  const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi)];
+  return matches
+    .map((match) => ({
+      baseSymbol: normalizeBaseSymbol(match[1]),
+      price: parseNumberToken(match[2])
+    }))
+    .filter((target) => !symbolIgnoreWords.has(target.baseSymbol));
 }
 
 function parseBreakEvenSignals(raw) {
@@ -403,6 +462,9 @@ function normalizeSignalPrices(signal) {
   }
   if (Array.isArray(next.takeProfits)) {
     next.takeProfits = next.takeProfits.map((price) => normalizeSymbolPrice(baseSymbol, price));
+  }
+  if (next.takeProfit) {
+    next.takeProfit = normalizeSymbolPrice(baseSymbol, next.takeProfit);
   }
   if (next.closePrice) {
     next.closePrice = normalizeSymbolPrice(baseSymbol, next.closePrice);

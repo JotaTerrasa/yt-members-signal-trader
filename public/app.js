@@ -2212,7 +2212,7 @@ function eventTone(event) {
   if (status === 'error' || status === 'blocked' || status.endsWith('_no_position')) {
     return 'negative';
   }
-  if (status.endsWith('_order_sent') || status.endsWith('_close_sent') || status.includes('_sl_be_')) {
+  if (status.endsWith('_order_sent') || status.endsWith('_close_sent') || status.endsWith('_tp_sent') || status.includes('_sl_be_')) {
     return 'positive';
   }
   return 'neutral';
@@ -2224,6 +2224,9 @@ function eventAmountText(event, account) {
   }
   if (event.closePercent) {
     return `${event.closePercent}% cierre`;
+  }
+  if (event.takeProfit) {
+    return `TP ${formatPrice(event.takeProfit)}`;
   }
   return '';
 }
@@ -2773,16 +2776,24 @@ function tradeStatusLabel(value) {
     demo_order_sent: 'demo VST enviada',
     demo_close_sent: 'cierre demo VST',
     demo_close_no_position: 'demo sin posicion',
+    demo_tp_sent: 'TP demo VST enviado',
+    demo_tp_no_position: 'TP demo sin posicion',
+    demo_tp_blocked: 'TP demo bloqueado',
     demo_sl_be_detected: 'SL BE demo detectado',
     test_order_sent: 'test enviada',
     live_order_sent: 'live enviada',
     live_close_sent: 'cierre live enviado',
     live_close_no_position: 'live sin posicion',
+    live_tp_sent: 'TP live enviado',
+    live_tp_no_position: 'TP live sin posicion',
+    live_tp_blocked: 'TP live bloqueado',
     live_sl_be_detected: 'SL BE live detectado',
     exchange_stop_closed: 'stop BingX cerrado',
     exchange_signal_closed: 'cierre BingX ejecutado',
     exchange_position_closed: 'posicion BingX cerrada',
     paper_close_sent: 'cierre paper',
+    paper_tp_sent: 'TP paper',
+    paper_tp_no_position: 'TP paper sin posicion',
     paper_price_close: 'cierre por precio',
     paper_sl_be_sent: 'SL a BE paper',
     close_signal_detected: 'cierre detectado',
