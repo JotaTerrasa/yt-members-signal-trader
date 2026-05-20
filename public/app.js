@@ -1593,6 +1593,18 @@ function renderOpenPositionCard(position) {
     : position.source === 'live' ? 'Live real' : 'Paper';
   const pnl = Number(position.unrealizedPnl ?? position.paperPnl ?? 0);
   const liveClass = position.liveTickAt ? ' live-price' : '';
+  const quantity = positionQuantity(position);
+  const baseAsset = positionBaseAsset(position.symbol);
+  const stopPrices = activeStopPrices(position);
+  const stopSummary = stopPrices.length
+    ? `Stops ${stopPrices.length}: ${stopPrices.map(formatPrice).join(', ')}`
+    : 'Stops 0';
+  const entryLabel = position.source === 'demo' || position.source === 'live'
+    ? 'Entrada media'
+    : 'Entrada';
+  const quantityText = quantity > 0
+    ? `Cantidad ${formatQuantity(quantity)} ${baseAsset}`
+    : null;
   return `
     <article class="position-card ${sideClass}">
       <div class="position-card-top">
@@ -1604,7 +1616,7 @@ function renderOpenPositionCard(position) {
       </div>
       <div class="position-card-grid">
         <div>
-          <span>Entrada</span>
+          <span>${escapeHtml(entryLabel)}</span>
           <strong>${escapeHtml(formatPrice(position.entryPrice))}</strong>
         </div>
         <div>
@@ -1622,13 +1634,34 @@ function renderOpenPositionCard(position) {
       </div>
       <div class="position-card-footer">
         <span>${escapeHtml(sourceLabel)}</span>
+        ${quantityText ? `<span>${escapeHtml(quantityText)}</span>` : ''}
         <span>${escapeHtml(formatLeverage(position.leverage))}</span>
         <span>Margen ${escapeHtml(formatUsdt(position.notional))}</span>
         <span>Exposicion ${escapeHtml(formatUsdt(position.exposure || position.notional))}</span>
+        <span>${escapeHtml(stopSummary)}</span>
         <span>${escapeHtml(formatDuration(position.openedAt, position.closedAt))}</span>
       </div>
     </article>
   `;
+}
+
+function positionQuantity(position) {
+  return Math.abs(Number(position.quantity || position.raw?.availableAmt || position.raw?.positionAmt || 0));
+}
+
+function positionBaseAsset(symbol) {
+  const text = String(symbol || '').toUpperCase();
+  return text.split(/[-/]/)[0] || 'CONTR.';
+}
+
+function activeStopPrices(position) {
+  const orders = Array.isArray(position.protectiveOrders) ? position.protectiveOrders : [];
+  return orders
+    .filter((order) => String(order.status || '').toUpperCase() !== 'CANCELED')
+    .filter((order) => String(order.type || '').toUpperCase().includes('STOP'))
+    .map((order) => Number(order.stopPrice))
+    .filter((price) => Number.isFinite(price) && price > 0)
+    .sort((a, b) => b - a);
 }
 
 function openTradingPositions() {
@@ -2403,6 +2436,17 @@ function formatPrice(value) {
   return number.toLocaleString('es-ES', {
     minimumFractionDigits: number < 1 ? 4 : 2,
     maximumFractionDigits: number < 1 ? 8 : 4
+  });
+}
+
+function formatQuantity(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return '-';
+  }
+  return number.toLocaleString('es-ES', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: number < 1 ? 6 : 4
   });
 }
 
