@@ -141,17 +141,21 @@ export class YouTubePostsScraper extends EventEmitter {
     this.emit('status', { running: true, phase: 'live', channelUrl: url });
 
     while (!this.stopRequested) {
-      await this.gotoPosts(page, url);
-      await this.expandVisiblePosts(page);
+      try {
+        await this.gotoPosts(page, url);
+        await this.expandVisiblePosts(page);
 
-      const topPosts = await this.extractVisiblePosts(page, { phase: 'live', channelUrl: url });
-      this.emitPosts(topPosts, 'live', url);
-      this.emit('progress', {
-        phase: 'live',
-        currentScroll: 0,
-        maxScrolls: 0,
-        visiblePosts: topPosts.length
-      });
+        const topPosts = await this.extractVisiblePosts(page, { phase: 'live', channelUrl: url });
+        this.emitPosts(topPosts, 'live', url);
+        this.emit('progress', {
+          phase: 'live',
+          currentScroll: 0,
+          maxScrolls: 0,
+          visiblePosts: topPosts.length
+        });
+      } catch (error) {
+        this.log(`Lectura YouTube fallida, se reintentara: ${conciseError(error)}`, 'warn');
+      }
 
       await sleepInterruptible(intervalMs, () => this.stopRequested);
     }
@@ -424,6 +428,13 @@ export function normalizePostsUrl(input) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function conciseError(error) {
+  return String(error?.message || error || '')
+    .split('\n')[0]
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function sleepInterruptible(totalMs, shouldStop) {

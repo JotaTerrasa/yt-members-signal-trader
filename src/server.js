@@ -979,10 +979,14 @@ function buildHealth() {
   const ageMs = Number.isFinite(lastRunTime) && lastRunTime > 0 ? Date.now() - lastRunTime : null;
   const stale = scraper.running && state.phase === 'live' && ageMs !== null && ageMs > staleMs;
   const noVisiblePosts = scraper.running && state.phase === 'live' && Number(state.visiblePosts || 0) === 0;
-  const recentError = state.logs.find((log) => (
-    log.level === 'error'
-    && Date.now() - Date.parse(log.at || 0) < 15 * 60 * 1000
-  ));
+  const recentError = state.logs.find((log) => {
+    const errorTime = Date.parse(log.at || 0);
+    return (
+      log.level === 'error'
+      && Date.now() - errorTime < 15 * 60 * 1000
+      && (!Number.isFinite(lastRunTime) || errorTime > lastRunTime)
+    );
+  });
   const lastError = state.lastError || recentError?.message || null;
   const level = stale || noVisiblePosts || lastError ? 'warn' : scraper.running ? 'ok' : 'idle';
 
