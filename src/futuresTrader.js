@@ -523,6 +523,18 @@ export class FuturesTrader {
       };
     }
 
+    if (config.mode === 'live') {
+      const configuredNotional = positiveNumber(config.defaultNotionalUSDT, 10);
+      const maxNotional = positiveNumber(config.maxNotionalUSDT, configuredNotional);
+      return {
+        mode: 'live_fixed_notional',
+        asset: 'USDT',
+        configuredNotional,
+        maxNotional,
+        notional: roundMoney(Math.min(configuredNotional, maxNotional))
+      };
+    }
+
     const signalNotional = Number(signal.notionalUSDT);
     const requestedNotional = Number.isFinite(signalNotional) && signalNotional > 0
       ? signalNotional
