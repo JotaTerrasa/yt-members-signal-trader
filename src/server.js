@@ -64,6 +64,7 @@ const lastPriceBroadcast = new Map();
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
 let exchangeSyncInFlight = false;
+const pendingExchangeClosures = new Map();
 
 const state = {
   browserOpen: false,
@@ -694,12 +695,14 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
   try {
     const previous = exchangePositionsCache;
     const next = await futuresTrader.getExchangeOpenPositions();
-    const closedPositions = detectClosedExchangePositions(previous, next);
-    exchangePositionsCache = next;
-    syncPriceSubscriptions(next);
+    const closedCandidates = detectClosedExchangePositions(previous, next);
+    const closedPositions = confirmClosedExchangePositions(closedCandidates, next, reason);
+    const visibleNext = mergeUnconfirmedExchangePositions(next, closedCandidates, closedPositions, reason);
+    exchangePositionsCache = visibleNext;
+    syncPriceSubscriptions(visibleNext);
 
-    if (reason !== 'poll' || closedPositions.length || positionsChanged(previous, next)) {
-      broadcast('exchangePositions', { positions: next, closedPositions, reason });
+    if (reason !== 'poll' || closedPositions.length || positionsChanged(previous, visibleNext)) {
+      broadcast('exchangePositions', { positions: visibleNext, closedPositions, reason });
     }
 
     for (const position of closedPositions) {
@@ -713,8 +716,89 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
 }
 
 function detectClosedExchangePositions(previous, next) {
-  const openKeys = new Set(next.map(exchangePositionKey));
-  return previous.filter((position) => !openKeys.has(exchangePositionKey(position)));
+  const openKeys = new Set(next.map(exchangePositionIdentityKey));
+  return previous.filter((position) => !openKeys.has(exchangePositionIdentityKey(position)));
+}
+
+function mergeUnconfirmedExchangePositions(next, candidates, confirmed, reason) {
+  if (reason !== 'poll' || !candidates.length) {
+    return next;
+  }
+
+  const confirmedKeys = new Set(confirmed.map(exchangePositionIdentityKey));
+  const openKeys = new Set(next.map(exchangePositionIdentityKey));
+  const merged = [...next];
+  for (const candidate of candidates) {
+    const key = exchangePositionIdentityKey(candidate);
+    if (!confirmedKeys.has(key) && !openKeys.has(key)) {
+      merged.push(candidate);
+      openKeys.add(key);
+    }
+  }
+
+  return merged;
+}
+
+function confirmClosedExchangePositions(candidates, next, reason) {
+  const now = Date.now();
+  const openKeys = new Set(next.map(exchangePositionIdentityKey));
+  for (const key of pendingExchangeClosures.keys()) {
+    if (openKeys.has(key)) {
+      pendingExchangeClosures.delete(key);
+    }
+  }
+
+  if (String(reason || '').includes('close')) {
+    for (const candidate of candidates) {
+      pendingExchangeClosures.delete(exchangePositionIdentityKey(candidate));
+    }
+    return candidates;
+  }
+
+  if (reason !== 'poll') {
+    return candidates;
+  }
+
+  const confirmed = [];
+  const candidateKeys = new Set();
+  for (const candidate of candidates) {
+    const key = exchangePositionIdentityKey(candidate);
+    candidateKeys.add(key);
+    const pending = pendingExchangeClosures.get(key);
+    const misses = Number(pending?.misses || 0) + 1;
+    const firstMissingAt = Number(pending?.firstMissingAt || now);
+    if (misses >= 2 && now - firstMissingAt >= 4000) {
+      confirmed.push(pending?.position || candidate);
+      pendingExchangeClosures.delete(key);
+      continue;
+    }
+
+    pendingExchangeClosures.set(key, {
+      firstMissingAt,
+      misses,
+      position: pending?.position || candidate
+    });
+  }
+
+  for (const [key, pending] of pendingExchangeClosures.entries()) {
+    if (openKeys.has(key) || candidateKeys.has(key)) {
+      continue;
+    }
+
+    const misses = Number(pending.misses || 0) + 1;
+    if (misses >= 2 && now - Number(pending.firstMissingAt || now) >= 4000) {
+      confirmed.push(pending.position);
+      pendingExchangeClosures.delete(key);
+      continue;
+    }
+
+    pendingExchangeClosures.set(key, {
+      ...pending,
+      misses
+    });
+  }
+
+  return confirmed;
 }
 
 function positionsChanged(previous, next) {
@@ -733,6 +817,14 @@ function exchangePositionKey(position) {
     position.direction,
     position.raw?.positionId,
     position.raw?.positionID
+  ].filter(Boolean).join(':');
+}
+
+function exchangePositionIdentityKey(position) {
+  return [
+    position.source,
+    position.symbol,
+    position.direction
   ].filter(Boolean).join(':');
 }
 
