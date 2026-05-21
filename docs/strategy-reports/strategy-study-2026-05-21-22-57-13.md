@@ -1,0 +1,82 @@
+# Strategy Study
+
+Generated: 2026-05-21T22:57:13.147Z
+Window: 2026-05-07T22:57:12.306Z to 2026-05-21T22:57:12.306Z (14 days)
+
+## Sample
+
+- Posts/messages stored: 31
+- Parsed signals: 45
+- Live orders from BingX: 93
+- Live open protective/orders now: 8
+- Reconstructed positions: 29
+- Closed positions: 25
+- Open positions: 4
+- Persisted local trade events: 0
+
+## Performance
+
+- Net PnL closed: 21.35 USDT
+- Gross PnL closed: 31.66 USDT
+- Commission: -10.31 USDT
+- Win rate: 68.0%
+- Profit factor: 1.5441
+- Outcomes: {"SIGNAL_CLOSE":16,"SL":8,"TP":1}
+
+## Signal Shape
+
+- Actions: {"OPEN":21,"CLOSE":13,"SET_TAKE_PROFIT":9,"SET_STOP_LOSS":2}
+- Symbols: {"BTC-USDT":7,"ETH-USDT":10,"SOL-USDT":12,"SUI-USDT":15,"ADA-USDT":1}
+- Average leverage: 25
+- Average stop distance: 1.065%
+- Average reward distance: 0.153%
+
+## Playbook Hypotheses
+
+- Build positions in packs, usually multiple tickers with the same direction and leverage.
+- Stops are mandatory and often exchange-specific.
+- Management messages can modify TP/SL after entry; these are part of the strategy, not noise.
+- Telegram/Web messages may contain management earlier than posts, so they should be logged even if not used for future autonomous trading.
+
+## Current Statistical Status
+
+Sample is exploratory only (25 closed positions). Do not treat it as statistically significant.
+
+## Closed Positions
+
+| Opened | Symbol | Outcome | Entry | Exit | Net USDT | SL | TP |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-05-20T15:12:40.000Z | SOL-USDT | SIGNAL_CLOSE | 85.44 | 86.068 | 2.62 | 84.6 | 0 |
+| 2026-05-20T15:12:42.000Z | SUI-USDT | SIGNAL_CLOSE | 1.0649 | 1.0771 | 4.32 | 1.055 | 0 |
+| 2026-05-20T15:32:08.000Z | BTC-USDT | SIGNAL_CLOSE | 77575.6 | 78013 | 1.91 | 76800 | 78378 |
+| 2026-05-20T15:32:11.000Z | ETH-USDT | SIGNAL_CLOSE | 2138.77 | 2140.96 | 0.01 | 2115 | 2172 |
+| 2026-05-20T15:32:13.000Z | SOL-USDT | SIGNAL_CLOSE | 85.944 | 86.707 | 3.25 | 84.85 | 0 |
+| 2026-05-20T15:32:15.000Z | SUI-USDT | SIGNAL_CLOSE | 1.0758 | 1.0776 | 0.28 | 1.062 | 0 |
+| 2026-05-20T15:59:11.000Z | ADA-USDT | SL | 0.2501 | 0.2473 | -5.04 | 0.2474 | 0.2545 |
+| 2026-05-20T16:58:57.000Z | SOL-USDT | SIGNAL_CLOSE | 86.363 | 86.785 | 1.61 | 85.35 | 0 |
+| 2026-05-20T17:35:12.000Z | SUI-USDT | SL | 1.0793 | 1.0668 | -5.20 | 1.067 | 0 |
+| 2026-05-20T18:09:24.000Z | SOL-USDT | SIGNAL_CLOSE | 86.434 | 86.977 | 2.18 | 85.35 | 88 |
+| 2026-05-20T20:19:28.000Z | SUI-USDT | TP | 1.0712 | 1.1269 | 21.08 | 1.06 | 1.127 |
+| 2026-05-21T09:09:07.000Z | BTC-USDT | SL | 77927.7 | 77096.4 | -4.82 | 77100 | 0 |
+| 2026-05-21T09:09:09.000Z | ETH-USDT | SL | 2139.24 | 2114.21 | -5.16 | 2115 | 0 |
+| 2026-05-21T09:09:12.000Z | SOL-USDT | SL | 86.916 | 85.809 | -5.68 | 85.85 | 0 |
+| 2026-05-21T12:42:54.000Z | BTC-USDT | SIGNAL_CLOSE | 77218.5 | 77872.9 | 3.06 | 76400 | 0 |
+| 2026-05-21T12:42:56.000Z | ETH-USDT | SIGNAL_CLOSE | 2116.83 | 2130.26 | 2.15 | 2094 | 0 |
+| 2026-05-21T12:42:58.000Z | SOL-USDT | SIGNAL_CLOSE | 85.687 | 86.381 | 2.93 | 84.8 | 0 |
+| 2026-05-21T14:42:32.000Z | SUI-USDT | SIGNAL_CLOSE | 1.0964 | 1.1105 | 4.90 | 1.087 | 0 |
+| 2026-05-21T15:23:58.000Z | ETH-USDT | SIGNAL_CLOSE | 2133.93 | 2143.23 | 1.36 | 2110 | 0 |
+| 2026-05-21T15:24:00.000Z | SOL-USDT | SIGNAL_CLOSE | 86.766 | 87.316 | 2.20 | 85.85 | 0 |
+| 2026-05-21T15:24:02.000Z | SUI-USDT | SL | 1.1243 | 1.109 | -6.06 | 1.11 | 0 |
+| 2026-05-21T15:44:52.000Z | SUI-USDT | SIGNAL_CLOSE | 1.1059 | 1.1119 | 1.83 | 1.094 | 0 |
+| 2026-05-21T16:06:57.000Z | SUI-USDT | SL | 1.1141 | 1.1096 | -2.08 | 1.11 | 0 |
+| 2026-05-21T17:26:54.000Z | SUI-USDT | SIGNAL_CLOSE | 1.1456 | 1.1603 | 4.89 | 1.134 | 0 |
+| 2026-05-21T18:53:09.000Z | SUI-USDT | SL | 1.1445 | 1.1313 | -5.19 | 1.132 | 0 |
+
+## Open Positions
+
+| Opened | Symbol | Entry | SL | TP | Qty |
+|---|---:|---:|---:|---:|---:|
+| 2026-05-21T17:26:47.000Z | BTC-USDT | 77869.7 | 76999 | 78350 | 0.0053 |
+| 2026-05-21T17:26:49.000Z | ETH-USDT | 2144.13 | 2115 | 2165 | 0.19 |
+| 2026-05-21T17:26:52.000Z | SOL-USDT | 87.737 | 86.5 | 88.6 | 4.71 |
+| 2026-05-21T22:25:59.000Z | SUI-USDT | 1.123 | 1.111 | 1.159 | 368 |

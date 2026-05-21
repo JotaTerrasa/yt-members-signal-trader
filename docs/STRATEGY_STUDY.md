@@ -23,10 +23,18 @@ npm run study:strategy -- --days 30
 ```
 
 Outputs are private and ignored by Git:
+Outputs with raw research data are private and ignored by Git:
 
 ```text
 .data/strategy-study/strategy-report.md
 .data/strategy-study/strategy-study.json
+```
+
+The Markdown report is also backed up in Git:
+
+```text
+docs/strategy-reports/latest.md
+docs/strategy-reports/strategy-study-YYYY-MM-DD-HH-MM-SS.md
 ```
 
 ## What It Uses

@@ -7,11 +7,13 @@ import { parseFuturesSignals } from '../src/futuresSignalParser.js';
 const rootDir = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dataDir = join(rootDir, '.data');
 const outputDir = join(dataDir, 'strategy-study');
+const gitReportDir = join(rootDir, 'docs', 'strategy-reports');
 const days = clampInteger(argValue('--days'), 1, 365, 14);
 const now = Date.now();
 const startTime = now - days * 24 * 60 * 60 * 1000;
 
 await mkdir(outputDir, { recursive: true });
+await mkdir(gitReportDir, { recursive: true });
 
 const [config, postsData, tradeEventsData] = await Promise.all([
   readJson(join(dataDir, 'config.json'), {}),
@@ -52,13 +54,18 @@ const study = {
   tradeEvents: tradeEventsData.events || []
 };
 
+const markdownReport = renderMarkdown(study);
+const snapshotName = `strategy-study-${study.generatedAt.slice(0, 19).replaceAll(':', '-').replace('T', '-')}.md`;
 await writeFile(join(outputDir, 'strategy-study.json'), `${JSON.stringify(study, null, 2)}\n`);
-await writeFile(join(outputDir, 'strategy-report.md'), renderMarkdown(study));
+await writeFile(join(outputDir, 'strategy-report.md'), markdownReport);
+await writeFile(join(gitReportDir, 'latest.md'), markdownReport);
+await writeFile(join(gitReportDir, snapshotName), markdownReport);
 
 console.log(JSON.stringify({
   ok: true,
   report: join(outputDir, 'strategy-report.md'),
   json: join(outputDir, 'strategy-study.json'),
+  gitBackup: join(gitReportDir, snapshotName),
   sample: study.sample,
   performance: study.performance
 }, null, 2));
@@ -350,7 +357,7 @@ function renderMarkdown(study) {
     ].join(' | ').replace(/^/, '| ').replace(/$/, ' |'));
   }
   lines.push('');
-  return `${lines.join('\n')}\n`;
+  return `${lines.join('\n').trimEnd()}\n`;
 }
 
 function normalizeOrder(order) {
