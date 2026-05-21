@@ -119,6 +119,7 @@ export class PostStore {
   toCsv() {
     const fields = [
       'id',
+      'source',
       'url',
       'channelName',
       'author',

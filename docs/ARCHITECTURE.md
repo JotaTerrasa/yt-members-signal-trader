@@ -1,6 +1,6 @@
 # Arquitectura
 
-La aplicacion es un servidor Node.js local con frontend estatico, scraping por Playwright, persistencia en JSON local y conexiones opcionales a Telegram y BingX.
+Futures Magician es un servidor Node.js local con frontend estatico, scraping por Playwright, persistencia en JSON local y conexiones opcionales a Telegram y BingX.
 
 ## Flujo principal
 
@@ -8,8 +8,10 @@ La aplicacion es un servidor Node.js local con frontend estatico, scraping por P
 flowchart LR
   UI["Frontend localhost"] --> API["src/server.js"]
   API --> Scraper["YouTubePostsScraper"]
+  Scraper --> YouTube["YouTube posts"]
+  Scraper --> TelegramWeb["Telegram Web"]
   Scraper --> Store["PostStore .data/posts.json"]
-  API --> Telegram["TelegramNotifier"]
+  API --> TelegramBot["TelegramNotifier"]
   API --> Trader["FuturesTrader"]
   Trader --> Parser["futuresSignalParser"]
   Trader --> BingX["BingX REST"]
@@ -24,13 +26,14 @@ flowchart LR
 
 ### `src/server.js`
 
-Orquesta todo:
+Orquesta:
 
 - API HTTP.
-- Server-Sent Events para actualizar la UI.
+- Server-Sent Events para la UI.
 - Arranque/parada del scraper.
-- Logs, salud y estado.
-- Telegram.
+- Estado, logs y salud.
+- Telegram bot de alertas.
+- Telegram Web como fuente de mensajes.
 - BingX.
 - Portfolio dinamico.
 - PnL historico.
@@ -43,57 +46,72 @@ Usa Playwright con perfil persistente:
 .yt-profile/
 ```
 
-Extrae posts visibles de YouTube y emite eventos con:
+Responsabilidades:
 
-- `posts`
-- `status`
-- `progress`
-- `log`
+- abrir YouTube;
+- leer posts visibles;
+- abrir Telegram Web;
+- leer mensajes visibles de canal;
+- refrescar Telegram Web cada `refreshSeconds`;
+- emitir `posts`, `status`, `progress` y `log`.
+
+Los mensajes de Telegram Web se guardan como posts con `source: "telegram_web"`.
 
 ### `src/store.js`
 
-Guarda posts en:
+Guarda posts y mensajes filtrados en:
 
 ```text
 .data/posts.json
 ```
 
-Hace upsert por `post.id`, mantiene `firstSeenAt`, `lastSeenAt` y `seenCount`.
+Hace upsert por `post.id`, mantiene `firstSeenAt`, `lastSeenAt`, `seenCount` y `source`.
 
 ### `src/futuresSignalParser.js`
 
 Convierte texto libre en senales normalizadas:
 
-- Aperturas `LONG` / `SHORT`.
-- Cierres.
-- Stop a break even.
-- Multi-ticker.
+- aperturas `LONG` / `SHORT`;
+- entradas LIMIT con precio;
+- cierres por simbolo;
+- cierre global;
+- TP;
+- modificacion de SL;
+- SL a break even;
+- multi-ticker y mensajes mixtos.
 
 ### `src/futuresTrader.js`
 
 Gestiona ejecucion:
 
-- Valida configuracion y riesgo.
-- Consulta contrato y ticker en BingX.
-- Calcula cantidad.
-- Envia ordenes.
-- Abre/cierra paper local.
-- Cierra posiciones demo/live.
+- valida configuracion y riesgo;
+- consulta contrato y ticker en BingX;
+- calcula cantidad;
+- envia ordenes `MARKET` o `LIMIT`;
+- adjunta SL/TP a aperturas;
+- cancela y recrea TP/SL de gestion;
+- abre/cierra paper local;
+- cierra posiciones demo/live;
+- soporta modo `dual`.
 
 ### `src/bingxClient.js`
 
-Cliente REST con firma HMAC para BingX:
+Cliente REST firmado con HMAC para BingX:
 
-- Balance.
-- Income/PnL.
-- Contracts.
-- Ticker.
-- Positions.
-- Set margin type.
-- Set leverage.
-- Place order.
-- Close position.
+- balance;
+- income/PnL;
+- contracts;
+- ticker;
+- positions;
+- open orders;
+- margin type;
+- leverage;
+- place order;
+- cancel order;
+- close position;
 - VST.
+
+Los IDs largos de orden se parsean como string para evitar redondeo de JavaScript.
 
 Entornos:
 
@@ -102,16 +120,16 @@ Entornos:
 
 ### `src/bingxPriceWebSocket.js`
 
-Conecta a WebSocket de mercado de BingX y emite precios para simbolos con posiciones paper abiertas.
+Conecta al WebSocket de mercado de BingX y emite precios para simbolos con posiciones paper abiertas.
 
 Se usa para:
 
-- Marcar PnL flotante paper.
-- Disparar cierres paper por SL/TP.
+- marcar PnL flotante paper;
+- disparar cierres paper por SL/TP.
 
 ### `src/paperTradeStore.js`
 
-Guarda operaciones locales en:
+Guarda operaciones locales:
 
 ```text
 .data/paper-trades.json
@@ -119,11 +137,13 @@ Guarda operaciones locales en:
 
 Calcula:
 
-- PnL diario.
-- PnL mensual.
-- Exposicion abierta.
-- Cierres.
-- Win rate.
+- PnL diario;
+- PnL mensual;
+- exposicion abierta;
+- cierres;
+- cierre global;
+- TP/SL paper;
+- win rate.
 
 ### `src/referenceLedger.js`
 
@@ -139,9 +159,9 @@ Detecta posts de portfolio con enlaces nuevos y actualiza la fuente activa.
 
 ```text
 .data/config.json        Config local y claves
-.data/posts.json         Posts scrapeados
+.data/posts.json         Posts/mensajes scrapeados
 .data/paper-trades.json  Operaciones paper
-.yt-profile/             Sesion Chromium/YouTube
+.yt-profile/             Sesiones Chromium/YouTube/Telegram Web
 ```
 
 Nada de eso debe subirse al repositorio.
@@ -154,6 +174,7 @@ Estado:
 GET /api/state
 GET /api/health
 GET /api/events
+GET /api/audit
 ```
 
 Posts:
@@ -169,6 +190,7 @@ Scraper:
 
 ```text
 POST /api/browser/open
+POST /api/browser/open-telegram
 POST /api/scrape/start
 POST /api/scrape/stop
 ```
@@ -180,6 +202,8 @@ GET  /api/telegram
 PUT  /api/telegram
 POST /api/telegram/test
 POST /api/telegram/detect-chat
+GET  /api/telegram-source
+PUT  /api/telegram-source
 ```
 
 BingX:
@@ -187,12 +211,14 @@ BingX:
 ```text
 GET  /api/bingx
 PUT  /api/bingx
+GET  /api/bingx/open-positions
 POST /api/bingx/test-connection
 POST /api/bingx/vst
 POST /api/bingx/probe
 POST /api/bingx/replay-latest-signal
 POST /api/bingx/paper/clear
 GET  /api/bingx/pnl
+GET  /api/bingx/pnl-sources
 POST /api/bingx/parse-test
 ```
 
@@ -205,7 +231,6 @@ GET /api/reference-ledger
 GET /api/historical-pnl
 GET /api/risk
 GET /api/price-feed
-GET /api/audit
 ```
 
 ## Eventos SSE
@@ -216,28 +241,29 @@ La UI escucha:
 - `posts`
 - `log`
 - `telegram`
+- `telegramSource`
 - `bingx`
 - `portfolio`
 - `trade`
 - `price`
 
-## Ciclo de un post nuevo
+## Ciclo de un item nuevo
 
-1. Scraper extrae posts visibles.
+1. Scraper extrae posts de YouTube y mensajes de Telegram Web.
 2. Store inserta o actualiza.
 3. Si hay URL de portfolio nueva, actualiza fuente.
-4. Telegram envia alerta si procede.
+4. Telegram bot envia alerta si procede.
 5. Parser busca senales.
 6. Trader ejecuta segun modo.
 7. UI recibe eventos por SSE.
 8. PnL se recalcula al actualizar.
 
-## Validacion
+Para Telegram Web, el servidor filtra mensajes sin senales para reducir ruido.
 
-La validacion actual es sintactica:
+## Validacion
 
 ```bash
 npm run lint
 ```
 
-Este comando hace `node --check` sobre los archivos principales. No ejecuta pruebas end-to-end ni ordenes contra BingX.
+El comando hace `node --check` sobre archivos principales. No ejecuta pruebas end-to-end ni ordenes contra BingX.

@@ -6,3 +6,5 @@ tmp/
 .env.*
 .DS_Store
 npm-debug.log*
+tmp-*.png
+frontend-refresh-*.png

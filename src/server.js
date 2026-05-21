@@ -12,7 +12,7 @@ import { detectPortfolioUrl } from './portfolioDetector.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
 import { TelegramNotifier } from './telegramNotifier.js';
-import { YouTubePostsScraper, normalizePostsUrl } from './youtubeScraper.js';
+import { YouTubePostsScraper, normalizePostsUrl, normalizeTelegramWebUrl } from './youtubeScraper.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const rootDir = resolve(__dirname, '..');
@@ -22,6 +22,8 @@ const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
 const EXCHANGE_SYNC_POLL_MS = 30_000;
 const EXCHANGE_SYNC_MIN_INTERVAL_MS = 10_000;
+const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 5 * 60 * 1000;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -78,6 +80,9 @@ const state = {
   currentScroll: 0,
   maxScrolls: 0,
   visiblePosts: 0,
+  visibleTelegramMessages: 0,
+  telegramWebUrl: '',
+  lastTelegramRunAt: null,
   lastRunAt: null,
   lastError: null,
   health: null,
@@ -88,6 +93,7 @@ const state = {
 };
 let lastHealthAlertKey = '';
 let lastHealthAlertAt = 0;
+let noVisiblePostsStartedAt = 0;
 
 scraper.on('log', (entry) => {
   pushLog(entry);
@@ -103,9 +109,13 @@ scraper.on('status', (next) => {
 });
 
 scraper.on('progress', (progress) => {
-  state.currentScroll = progress.currentScroll;
-  state.maxScrolls = progress.maxScrolls;
-  state.visiblePosts = progress.visiblePosts;
+  if (progress.source === 'telegram_web') {
+    state.visibleTelegramMessages = progress.visibleMessages || 0;
+  } else {
+    state.currentScroll = progress.currentScroll;
+    state.maxScrolls = progress.maxScrolls;
+    state.visiblePosts = progress.visiblePosts;
+  }
   broadcast('state', state);
 });
 
@@ -127,14 +137,20 @@ priceFeed.on('price', (tick) => {
 });
 
 async function handlePosts(payload) {
-  const result = await store.upsertMany(payload.posts, payload);
+  const posts = filterIncomingPosts(payload);
+  const result = await store.upsertMany(posts, payload);
   state.stats = store.stats();
   state.lastRunAt = payload.scrapedAt;
+  if (payload.source === 'telegram_web') {
+    state.lastTelegramRunAt = payload.scrapedAt;
+    state.telegramWebUrl = payload.channelUrl || state.telegramWebUrl;
+  }
   broadcast('posts', {
     inserted: result.inserted,
     updated: result.updated,
     total: result.total,
-    phase: payload.phase
+    phase: payload.phase,
+    source: payload.source || 'youtube'
   });
   broadcast('state', state);
 
@@ -143,31 +159,47 @@ async function handlePosts(payload) {
   }
 
   if (result.inserted.length) {
+    const sourceLabel = sourceItemLabel(payload);
     pushLog({
       level: 'info',
-      message: `${result.inserted.length} publicaciones nuevas detectadas.`,
+      message: `${result.inserted.length} ${sourceLabel} nuevos detectados.`,
       at: new Date().toISOString()
     });
 
-    telegramNotifier.notifyPosts(result.inserted, payload)
-      .then((telegramResult) => {
-        if (telegramResult.sent) {
+    if (payload.source !== 'telegram_web') {
+      telegramNotifier.notifyPosts(result.inserted, payload)
+        .then((telegramResult) => {
+          if (telegramResult.sent) {
+            pushLog({
+              level: 'info',
+              message: `${telegramResult.sent} alertas enviadas por Telegram.`,
+              at: new Date().toISOString()
+            });
+          }
+        })
+        .catch((error) => {
           pushLog({
-            level: 'info',
-            message: `${telegramResult.sent} alertas enviadas por Telegram.`,
+            level: 'error',
+            message: `Telegram: ${error.message}`,
             at: new Date().toISOString()
           });
-        }
-      })
-      .catch((error) => {
+        });
+    }
+
+    const tradePlan = tradingPlanForPayload(payload);
+    if (!tradePlan.enabled) {
+      const signalCount = countParsedSignals(result.inserted);
+      if (signalCount) {
         pushLog({
-          level: 'error',
-          message: `Telegram: ${error.message}`,
+          level: 'warn',
+          message: `${signalCount} senales Telegram detectadas sin ejecutar (${tradePlan.reason}).`,
           at: new Date().toISOString()
         });
-      });
+      }
+      return;
+    }
 
-    futuresTrader.processPosts(result.inserted, payload)
+    futuresTrader.processPosts(result.inserted, payload, tradePlan.options)
       .then((tradeResults) => {
         const accepted = tradeResults.filter((result) => result.status.endsWith('_order_sent'));
         if (accepted.length) {
@@ -252,6 +284,53 @@ function publicPostSummary(post) {
   };
 }
 
+function sourceItemLabel(payload = {}) {
+  return payload.source === 'telegram_web' ? 'mensajes Telegram' : 'publicaciones';
+}
+
+function filterIncomingPosts(payload = {}) {
+  const posts = Array.isArray(payload.posts) ? payload.posts : [];
+  if (payload.source !== 'telegram_web') {
+    return posts;
+  }
+  return posts.filter((post) => futuresTrader.parseAll(post.text || '').some((signal) => signal.isSignal));
+}
+
+function tradingPlanForPayload(payload = {}) {
+  if (payload.source !== 'telegram_web') {
+    return { enabled: true, reason: '', options: {} };
+  }
+
+  const telegramSource = configStore.getTelegramSource();
+  if (!telegramSource.executeSignals) {
+    return { enabled: false, reason: 'ejecucion Telegram desactivada', options: {} };
+  }
+
+  const bingx = configStore.getBingX();
+  if (usesLiveMode(bingx.mode) && !telegramSource.liveConfirmed) {
+    return { enabled: false, reason: 'live Telegram no confirmado', options: {} };
+  }
+
+  return {
+    enabled: true,
+    reason: '',
+    options: {
+      filterSignal: (signal) => telegramSource.executeOpenSignals || isPositionManagementSignal(signal),
+      filteredReason: 'telegram_open_signals_disabled'
+    }
+  };
+}
+
+function isPositionManagementSignal(signal = {}) {
+  return ['CLOSE', 'CLOSE_ALL', 'MOVE_SL_BE', 'SET_TAKE_PROFIT', 'SET_STOP_LOSS'].includes(signal.action);
+}
+
+function countParsedSignals(posts = []) {
+  return posts.reduce((total, post) => (
+    total + futuresTrader.parseAll(post.text || '').filter((signal) => signal.isSignal).length
+  ), 0);
+}
+
 const server = createServer(async (request, response) => {
   try {
     const requestUrl = new URL(request.url, `http://${request.headers.host}`);
@@ -304,6 +383,27 @@ const server = createServer(async (request, response) => {
         at: new Date().toISOString()
       });
       return sendJson(response, { ok: true, selected, chats, telegram });
+    }
+
+    if (requestUrl.pathname === '/api/telegram-source' && request.method === 'GET') {
+      return sendJson(response, { telegramSource: configStore.getTelegramSource() });
+    }
+
+    if (requestUrl.pathname === '/api/telegram-source' && request.method === 'PUT') {
+      const body = await readJson(request);
+      if (body.enabled) {
+        try {
+          body.url = normalizeTelegramWebUrl(body.url);
+        } catch (error) {
+          return sendJson(response, { error: error.message }, 400);
+        }
+      }
+      const telegramSource = await configStore.updateTelegramSource(body);
+      scraper.updateTelegramSource(telegramSource);
+      state.telegramWebUrl = telegramSource.url || state.telegramWebUrl;
+      broadcast('telegramSource', { telegramSource });
+      broadcast('state', state);
+      return sendJson(response, { ok: true, telegramSource });
     }
 
     if (requestUrl.pathname === '/api/bingx' && request.method === 'GET') {
@@ -568,6 +668,7 @@ const server = createServer(async (request, response) => {
         risk: futuresTrader.riskSnapshot(),
         bingx: configStore.getBingX(),
         telegram: configStore.getTelegram(),
+        telegramSource: configStore.getTelegramSource(),
         portfolio: configStore.getPortfolio(),
         stats: store.stats(),
         recentLogs: state.logs.slice(0, 80),
@@ -581,6 +682,22 @@ const server = createServer(async (request, response) => {
       state.browserOpen = scraper.isBrowserOpen;
       broadcast('state', state);
       return sendJson(response, { ok: true, state: currentState() });
+    }
+
+    if (requestUrl.pathname === '/api/browser/open-telegram' && request.method === 'POST') {
+      const body = await readJson(request);
+      const configured = configStore.getTelegramSource();
+      let telegramUrl;
+      try {
+        telegramUrl = normalizeTelegramWebUrl(body.url || configured.url);
+      } catch (error) {
+        return sendJson(response, { error: error.message }, 400);
+      }
+      await scraper.openTelegram(telegramUrl);
+      state.browserOpen = scraper.isBrowserOpen;
+      state.telegramWebUrl = telegramUrl;
+      broadcast('state', state);
+      return sendJson(response, { ok: true, state: currentState(), url: telegramUrl });
     }
 
     if (requestUrl.pathname === '/api/scrape/start' && request.method === 'POST') {
@@ -599,11 +716,26 @@ const server = createServer(async (request, response) => {
       } catch (error) {
         return sendJson(response, { error: error.message }, 400);
       }
+      let telegramSource = configStore.getTelegramSource();
+      if (body.telegramSource) {
+        telegramSource = await configStore.updateTelegramSource(body.telegramSource);
+      }
+      if (telegramSource.enabled) {
+        try {
+          telegramSource = {
+            ...telegramSource,
+            url: normalizeTelegramWebUrl(telegramSource.url)
+          };
+        } catch (error) {
+          return sendJson(response, { error: error.message }, 400);
+        }
+      }
 
       state.lastError = null;
       state.running = true;
       state.phase = body.backfill ? 'backfill' : 'live';
       state.channelUrl = normalizedUrl;
+      state.telegramWebUrl = telegramSource.url || '';
       state.currentScroll = 0;
       state.maxScrolls = Number(body.maxScrolls) || 0;
       broadcast('state', state);
@@ -613,7 +745,8 @@ const server = createServer(async (request, response) => {
         backfill: Boolean(body.backfill),
         live: Boolean(body.live),
         pollIntervalSeconds: Number(body.pollIntervalSeconds) || 30,
-        maxScrolls: Number(body.maxScrolls) || 120
+        maxScrolls: Number(body.maxScrolls) || 120,
+        telegramSource
       }).catch((error) => {
         state.running = false;
         state.phase = 'idle';
@@ -667,6 +800,7 @@ function currentState() {
     ...state,
     browserOpen: scraper.isBrowserOpen,
     running: scraper.running,
+    telegramSource: configStore.getTelegramSource(),
     portfolio: configStore.getPortfolio(),
     stats: store.stats()
   };
@@ -1044,8 +1178,21 @@ async function checkHealth() {
   state.health = health;
   broadcast('state', state);
   if (health.level !== 'warn') {
-    lastHealthAlertKey = '';
-    lastHealthAlertAt = 0;
+    noVisiblePostsStartedAt = 0;
+    return;
+  }
+
+  if (health.noVisiblePosts) {
+    noVisiblePostsStartedAt ||= now;
+  } else {
+    noVisiblePostsStartedAt = 0;
+  }
+
+  const noVisiblePostsSeconds = noVisiblePostsStartedAt
+    ? Math.round((now - noVisiblePostsStartedAt) / 1000)
+    : 0;
+  const onlyNoVisiblePosts = health.noVisiblePosts && !health.stale && !health.lastError;
+  if (onlyNoVisiblePosts && noVisiblePostsSeconds < Math.round(NO_VISIBLE_POSTS_ALERT_GRACE_MS / 1000)) {
     return;
   }
 
@@ -1054,7 +1201,13 @@ async function checkHealth() {
     health.noVisiblePosts ? 'no_posts' : '',
     health.lastError || ''
   ].filter(Boolean).join('|');
-  if (!key || key === lastHealthAlertKey) {
+  if (!key) {
+    return;
+  }
+  if (key === lastHealthAlertKey && now - lastHealthAlertAt < HEALTH_ALERT_COOLDOWN_MS) {
+    return;
+  }
+  if (key !== lastHealthAlertKey && now - lastHealthAlertAt < HEALTH_ALERT_COOLDOWN_MS) {
     return;
   }
 
@@ -1062,7 +1215,7 @@ async function checkHealth() {
   lastHealthAlertAt = now;
   const details = [
     health.stale ? `Ultima lectura hace ${health.ageSeconds}s.` : '',
-    health.noVisiblePosts ? 'YouTube no esta devolviendo posts visibles.' : '',
+    health.noVisiblePosts ? `YouTube no esta devolviendo posts visibles desde hace ${Math.max(1, noVisiblePostsSeconds)}s.` : '',
     health.lastError ? `Ultimo error: ${health.lastError}` : ''
   ].filter(Boolean).join('\n');
 

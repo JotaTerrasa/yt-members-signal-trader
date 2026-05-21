@@ -105,7 +105,7 @@ export class BingXClient {
           signal: AbortSignal.timeout(10000)
         });
 
-        const body = await response.json().catch(() => ({}));
+        const body = await parseJsonResponse(response);
         if (!response.ok || body.code !== 0) {
           throw new Error(body.msg || `BingX devolvio HTTP ${response.status}`);
         }
@@ -134,7 +134,7 @@ export class BingXClient {
           signal: AbortSignal.timeout(10000)
         });
 
-        const body = await response.json().catch(() => ({}));
+        const body = await parseJsonResponse(response);
         if (!response.ok || body.code !== 0) {
           throw new Error(body.msg || `BingX devolvio HTTP ${response.status}`);
         }
@@ -155,6 +155,15 @@ function isNetworkOrTimeout(error) {
   return error instanceof TypeError
     || error?.name === 'AbortError'
     || error?.name === 'TimeoutError';
+}
+
+async function parseJsonResponse(response) {
+  const text = await response.text();
+  if (!text) {
+    return {};
+  }
+
+  return JSON.parse(text.replace(/("(?:orderId|orderID)"\s*:\s*)(\d{16,})/g, '$1"$2"'));
 }
 
 function buildEncodedQuery(parameters) {

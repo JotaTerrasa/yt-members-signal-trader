@@ -19,6 +19,15 @@ const defaultConfig = {
     notifyHealth: true,
     healthStaleMinutes: 3
   },
+  telegramSource: {
+    enabled: false,
+    url: '',
+    maxMessages: 40,
+    refreshSeconds: 300,
+    executeSignals: false,
+    executeOpenSignals: false,
+    liveConfirmed: false
+  },
   bingx: {
     enabled: false,
     mode: 'test',
@@ -110,6 +119,26 @@ export class ConfigStore {
     this.data.telegram.chatId = clean(chatId);
     await this.save();
     return this.getTelegram();
+  }
+
+  getTelegramSource() {
+    return { ...this.data.telegramSource };
+  }
+
+  async updateTelegramSource(input = {}) {
+    const next = {
+      enabled: Boolean(input.enabled),
+      url: clean(input.url),
+      maxMessages: clampInteger(input.maxMessages, 5, 200, defaultConfig.telegramSource.maxMessages),
+      refreshSeconds: clampInteger(input.refreshSeconds, 30, 3600, defaultConfig.telegramSource.refreshSeconds),
+      executeSignals: Boolean(input.executeSignals),
+      executeOpenSignals: Boolean(input.executeOpenSignals),
+      liveConfirmed: Boolean(input.executeSignals && input.liveConfirmed)
+    };
+
+    this.data.telegramSource = next;
+    await this.save();
+    return this.getTelegramSource();
   }
 
   getBingX({ includeSecrets = false } = {}) {
@@ -221,6 +250,10 @@ function mergeConfig(input) {
     telegram: {
       ...defaultConfig.telegram,
       ...(input?.telegram || {})
+    },
+    telegramSource: {
+      ...defaultConfig.telegramSource,
+      ...(input?.telegramSource || {})
     },
     portfolio: {
       ...defaultConfig.portfolio,

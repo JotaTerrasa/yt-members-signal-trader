@@ -1,7 +1,7 @@
 const longWords = ['LONG', 'LARGO', 'BUY', 'COMPRA', 'COMPRAR'];
 const shortWords = ['SHORT', 'CORTO', 'SELL', 'VENTA', 'VENDER'];
 const directionWords = [...longWords, ...shortWords];
-const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'TPS', 'TAKE', 'PROFIT', 'OBJETIVO', 'OBJETIVOS', 'TARGET', 'TARGETS', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL']);
+const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'TPS', 'TAKE', 'PROFIT', 'OBJETIVO', 'OBJETIVOS', 'TARGET', 'TARGETS', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL', 'TODO', 'TODOS', 'TODAS']);
 const baseSymbolAliases = new Map([
   ['BITCOIN', 'BTC'],
   ['ETHEREUM', 'ETH'],
@@ -19,6 +19,7 @@ const baseSymbolAliases = new Map([
 const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const takeProfitLineStartPattern = /^\W*(TPS?|TAKE\s*PROFITS?|TAKE\s*PROFIT|OBJETIVOS?|TARGETS?)\b/i;
+const stopLossLineStartPattern = /^\W*(?:MODIFICACI[OÓ]N|MODIFICAR|MODIF|CAMBIO|CAMBIAR|AJUSTE|AJUSTAR)?\s*(?:SL|STOP|STOPLOSS|STOP\s+LOSS|STOPS)\b/i;
 
 export function parseFuturesSignal(text) {
   return parseFuturesSignals(text)[0];
@@ -26,15 +27,18 @@ export function parseFuturesSignal(text) {
 
 export function parseFuturesSignals(text) {
   const raw = String(text || '');
-  const managementSignals = parsePositionManagementSignals(raw);
-  if (managementSignals.length) {
-    return managementSignals.map(normalizeSignalPrices);
+  const closeAllSignals = parseCloseAllSignals(raw);
+  if (closeAllSignals.length) {
+    return closeAllSignals.map(normalizeSignalPrices);
   }
 
   const structured = parseStructuredSignals(raw);
-  if (structured.length) {
-    return structured.map(normalizeSignalPrices);
+  const managementSignals = parsePositionManagementSignals(raw);
+  const combined = mergeStructuredAndManagementSignals(structured, managementSignals);
+  if (combined.length) {
+    return combined.map(normalizeSignalPrices);
   }
+
 
   return [normalizeSignalPrices(parseSingleFuturesSignal(raw))];
 }
@@ -43,8 +47,28 @@ function parsePositionManagementSignals(raw) {
   return [
     ...parseCloseSignals(raw),
     ...parseTakeProfitSignals(raw),
+    ...parseStopLossModificationSignals(raw),
     ...parseBreakEvenSignals(raw)
   ];
+}
+
+function mergeStructuredAndManagementSignals(structured, management) {
+  const openSignals = structured.map((signal) => {
+    const sameSymbolTakeProfits = management
+      .filter((item) => item.action === 'SET_TAKE_PROFIT' && item.symbol === signal.symbol)
+      .flatMap((item) => item.takeProfits || [item.takeProfit])
+      .filter((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+      .map(Number);
+    const sameSymbolStopLoss = management.find((item) => item.action === 'SET_STOP_LOSS' && item.symbol === signal.symbol)?.stopLoss;
+
+    return {
+      ...signal,
+      stopLoss: signal.stopLoss || sameSymbolStopLoss || null,
+      takeProfits: signal.takeProfits?.length ? signal.takeProfits : uniqueNumbers(sameSymbolTakeProfits).slice(0, 6)
+    };
+  });
+
+  return [...openSignals, ...management];
 }
 
 function parseSingleFuturesSignal(raw) {
@@ -116,6 +140,31 @@ function parseCloseSignals(raw) {
   return dedupeSignals(signals);
 }
 
+function parseCloseAllSignals(raw) {
+  const normalized = normalize(raw).replace(/\s+/g, ' ').trim();
+  const closeAllPatterns = [
+    /\bCERRAD(?:LO|LAS|LOS)?\s+TODO(?:S|AS)?\b/i,
+    /\bCERRAR\s+TODO(?:S|AS)?\b/i,
+    /\bCIERRE\s+(?:TOTAL\s+)?TODO(?:S|AS)?\b/i,
+    /\bCIERRE\s+TOTAL\s+DE\s+TODO(?:S|AS)?\b/i,
+    /\bCERRAMOS\s+TODO(?:S|AS)?\b/i,
+    /\bCLOSE\s+ALL\b/i,
+    /\bCLOSE\s+EVERYTHING\b/i,
+    /\bSAL(?:IR|IMOS)\s+DE\s+TODO(?:S|AS)?\b/i
+  ];
+
+  if (!closeAllPatterns.some((pattern) => pattern.test(normalized))) {
+    return [];
+  }
+
+  return [{
+    isSignal: true,
+    action: 'CLOSE_ALL',
+    closePercent: parseClosePercent(raw),
+    rawText: raw
+  }];
+}
+
 function isCloseHeaderLine(line) {
   return closeLineStartPattern.test(normalize(line).trim());
 }
@@ -154,26 +203,28 @@ function looksLikeCloseTickerLine(line) {
 
 function parseTakeProfitSignals(raw) {
   const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  const takeProfitStart = lines.findIndex(isTakeProfitHeaderLine);
-  if (takeProfitStart < 0) {
-    return [];
-  }
-
   const signals = [];
-  for (const line of lines.slice(takeProfitStart)) {
-    for (const target of parseTakeProfitTargetsFromLine(line)) {
-      if (!Number.isFinite(target.price) || target.price <= 0) {
-        continue;
-      }
 
-      signals.push({
-        isSignal: true,
-        action: 'SET_TAKE_PROFIT',
-        symbol: `${target.baseSymbol}-USDT`,
-        takeProfit: target.price,
-        takeProfits: [target.price],
-        rawText: raw
-      });
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isTakeProfitHeaderLine(lines[index])) {
+      continue;
+    }
+
+    for (const line of sectionLines(lines, index, isTakeProfitBoundaryLine)) {
+      for (const target of parseTakeProfitTargetsFromLine(line)) {
+        if (!Number.isFinite(target.price) || target.price <= 0) {
+          continue;
+        }
+
+        signals.push({
+          isSignal: true,
+          action: 'SET_TAKE_PROFIT',
+          symbol: `${target.baseSymbol}-USDT`,
+          takeProfit: target.price,
+          takeProfits: [target.price],
+          rawText: raw
+        });
+      }
     }
   }
 
@@ -182,6 +233,14 @@ function parseTakeProfitSignals(raw) {
 
 function isTakeProfitHeaderLine(line) {
   return takeProfitLineStartPattern.test(normalize(line).trim());
+}
+
+function isTakeProfitBoundaryLine(line, offset) {
+  return offset > 0 && (
+    isStopLossModificationHeaderLine(line)
+    || isCloseHeaderLine(line)
+    || Boolean(parseDirectionLine(line))
+  );
 }
 
 function parseTakeProfitTargetsFromLine(line) {
@@ -209,22 +268,90 @@ function parseTakeProfitTargetsFromLine(line) {
     .filter((target) => !symbolIgnoreWords.has(target.baseSymbol));
 }
 
-function parseBreakEvenSignals(raw) {
-  const text = String(raw || '');
-  const hasBreakEven = /\b(BE|BREAK\s*EVEN|BREAKEVEN)\b/i.test(text)
-    || (/\b(SL|STOP|STOPLOSS|STOP LOSS)\b/i.test(text) && /\b(ENTRADA|ENTRY|PRECIO\s+DE\s+ENTRADA)\b/i.test(text));
-  if (!hasBreakEven) {
-    return [];
-  }
-
-  const matches = [...text.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\b/gi)];
+function parseStopLossModificationSignals(raw) {
+  const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const signals = [];
-  for (const match of matches) {
-    const baseSymbol = normalizeBaseSymbol(match[1]);
-    if (symbolIgnoreWords.has(baseSymbol) || baseSymbol === 'BE' || baseSymbol === 'BREAK' || baseSymbol === 'EVEN') {
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isStopLossModificationHeaderLine(lines[index])) {
       continue;
     }
 
+    for (const line of sectionLines(lines, index, isStopLossBoundaryLine)) {
+      for (const target of parseStopLossTargetsFromLine(line)) {
+        if (!Number.isFinite(target.price) || target.price <= 0) {
+          continue;
+        }
+
+        signals.push({
+          isSignal: true,
+          action: 'SET_STOP_LOSS',
+          symbol: `${target.baseSymbol}-USDT`,
+          stopLoss: target.price,
+          rawText: raw
+        });
+      }
+    }
+  }
+
+  return dedupeSignals(signals);
+}
+
+function isStopLossModificationHeaderLine(line) {
+  const normalized = normalize(line).trim();
+  if (!stopLossLineStartPattern.test(normalized)) {
+    return false;
+  }
+  if (/\b(MODIFICACI[O ]N|MODIFICAR|MODIF|CAMBIO|CAMBIAR|AJUSTE|AJUSTAR)\b/i.test(normalized)) {
+    return true;
+  }
+
+  const remainder = normalized.replace(stopLossLineStartPattern, ' ').trim();
+  return !remainder || !/\b[A-Z]{2,12}\b|\d/.test(remainder);
+}
+
+function isStopLossBoundaryLine(line, offset) {
+  return offset > 0 && (
+    isTakeProfitHeaderLine(line)
+    || isCloseHeaderLine(line)
+    || Boolean(parseDirectionLine(line))
+  );
+}
+
+function parseStopLossTargetsFromLine(line) {
+  const text = String(line || '').trim();
+  if (!text) {
+    return [];
+  }
+
+  const normalized = normalize(text);
+  const headerLine = isStopLossModificationHeaderLine(normalized);
+  const body = headerLine
+    ? normalized.replace(stopLossLineStartPattern, ' ')
+    : text;
+
+  if (!headerLine && !looksLikeCloseTickerLine(text)) {
+    return [];
+  }
+
+  const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi)];
+  return matches
+    .map((match) => ({
+      baseSymbol: normalizeBaseSymbol(match[1]),
+      price: parseNumberToken(match[2])
+    }))
+    .filter((target) => !symbolIgnoreWords.has(target.baseSymbol));
+}
+
+function parseBreakEvenSignals(raw) {
+  const text = stripUrls(String(raw || ''));
+  if (!hasBreakEvenInstruction(text)) {
+    return [];
+  }
+
+  const matches = parseBreakEvenTargets(text);
+  const signals = [];
+  for (const baseSymbol of matches) {
     signals.push({
       isSignal: true,
       action: 'MOVE_SL_BE',
@@ -234,6 +361,47 @@ function parseBreakEvenSignals(raw) {
   }
 
   return dedupeSignals(signals);
+}
+
+function hasBreakEvenInstruction(value) {
+  const text = normalize(stripUrls(value)).replace(/\s+/g, ' ').trim();
+  return [
+    /\b(?:SL|STOP|STOPLOSS|STOP LOSS)\s*(?:A|AL|TO|EN|->|=|:)?\s*(?:BE|BREAK\s*EVEN|BREAKEVEN)\b/i,
+    /\b(?:MOVER|MUEVE|MOVEMOS|MOVE|PONER|PONE|PONEMOS|PASAR|PASA|PASAMOS|SUBIR|SUBE|SUBIMOS|AJUSTAR|AJUSTA|AJUSTAMOS)\b.{0,60}\b(?:SL|STOP|STOPLOSS|STOP LOSS)\b.{0,60}\b(?:BE|BREAK\s*EVEN|BREAKEVEN|ENTRADA|ENTRY|PRECIO DE ENTRADA)\b/i,
+    /\b(?:SL|STOP|STOPLOSS|STOP LOSS)\b.{0,60}\b(?:ENTRADA|ENTRY|PRECIO DE ENTRADA)\b/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function parseBreakEvenTargets(text) {
+  const pairMatches = [...text.matchAll(/\b([A-Z0-9]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)\b/gi)]
+    .map((match) => normalizeBaseSymbol(match[1]))
+    .filter(isBreakEvenSymbolCandidate);
+  if (pairMatches.length) {
+    return [...new Set(pairMatches)];
+  }
+
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const targetLines = lines.filter((line) => hasBreakEvenInstruction(line));
+  const context = (targetLines.length ? targetLines : (lines.length <= 3 ? lines : [])).join(' ');
+  if (!context) {
+    return [];
+  }
+
+  return [...new Set(
+    [...context.matchAll(/\b([A-Z0-9]{2,12})\b/gi)]
+      .map((match) => normalizeBaseSymbol(match[1]))
+      .filter(isBreakEvenSymbolCandidate)
+  )];
+}
+
+function isBreakEvenSymbolCandidate(baseSymbol) {
+  if (
+    symbolIgnoreWords.has(baseSymbol)
+    || ['BE', 'BREAK', 'EVEN', 'BREAKEVEN', 'MOVER', 'MUEVE', 'MOVE', 'PONER', 'PASAR', 'SUBIR', 'AJUSTAR', 'ENTRADA', 'ENTRY', 'A', 'AL', 'EN', 'DE', 'DEL', 'EL', 'LA', 'LAS', 'LOS', 'PARA', 'POR'].includes(baseSymbol)
+  ) {
+    return false;
+  }
+  return baseSymbol.length <= 6 || /\d/.test(baseSymbol);
 }
 
 function parseClosePercent(raw) {
@@ -248,6 +416,19 @@ function parseClosePercent(raw) {
     return 50;
   }
   return 100;
+}
+
+function sectionLines(lines, startIndex, isBoundary) {
+  const section = [];
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const offset = index - startIndex;
+    const line = lines[index];
+    if (offset > 0 && isBoundary(line, offset)) {
+      break;
+    }
+    section.push(line);
+  }
+  return section;
 }
 
 function parseStructuredSignals(raw) {
@@ -519,6 +700,10 @@ function hasWord(text, word) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripUrls(value) {
+  return String(value || '').replace(/https?:\/\/\S+/gi, ' ');
 }
 
 function normalize(value) {

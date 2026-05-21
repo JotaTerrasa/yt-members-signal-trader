@@ -103,6 +103,17 @@ const elements = {
   detectTelegram: document.querySelector('#detect-telegram'),
   testTelegram: document.querySelector('#test-telegram'),
   telegramStatus: document.querySelector('#telegram-status'),
+  telegramSourceEnabled: document.querySelector('#telegram-source-enabled'),
+  telegramSourceUrl: document.querySelector('#telegram-source-url'),
+  telegramSourceMax: document.querySelector('#telegram-source-max'),
+  telegramSourceRefresh: document.querySelector('#telegram-source-refresh'),
+  telegramSourceExecute: document.querySelector('#telegram-source-execute'),
+  telegramSourceOpenSignals: document.querySelector('#telegram-source-open-signals'),
+  telegramSourceLiveConfirmRow: document.querySelector('#telegram-source-live-confirm-row'),
+  telegramSourceLiveConfirm: document.querySelector('#telegram-source-live-confirm'),
+  saveTelegramSource: document.querySelector('#save-telegram-source'),
+  openTelegramSource: document.querySelector('#open-telegram-source'),
+  telegramSourceStatus: document.querySelector('#telegram-source-status'),
   bingxEnabled: document.querySelector('#bingx-enabled'),
   bingxMode: document.querySelector('#bingx-mode'),
   bingxMargin: document.querySelector('#bingx-margin'),
@@ -144,6 +155,7 @@ const appState = {
   postsUpdatedAt: null,
   postsLoading: false,
   telegram: null,
+  telegramSource: null,
   bingx: null,
   pnl: null,
   pnlSources: null,
@@ -163,7 +175,7 @@ init();
 
 async function init() {
   bindEvents();
-  await Promise.all([loadState(), loadPosts(), loadTelegram(), loadBingx()]);
+  await Promise.all([loadState(), loadPosts(), loadTelegram(), loadTelegramSource(), loadBingx()]);
   connectEvents();
   window.lucide?.createIcons();
 }
@@ -183,7 +195,8 @@ function bindEvents() {
         backfill: elements.backfill.checked,
         live: elements.live.checked,
         pollIntervalSeconds: Number(elements.pollInterval.value),
-        maxScrolls: Number(elements.maxScrolls.value)
+        maxScrolls: Number(elements.maxScrolls.value),
+        telegramSource: telegramSourcePayload()
       };
       await postJson('/api/scrape/start', payload);
       await loadState();
@@ -321,8 +334,27 @@ function bindEvents() {
     });
   });
 
+  elements.telegramSourceExecute.addEventListener('change', updateTelegramSourceLiveConfirmVisibility);
+
+  elements.saveTelegramSource.addEventListener('click', async () => {
+    await runAction(async () => {
+      const telegramSource = await saveTelegramSourceConfig();
+      renderTelegramSource(telegramSource, 'Fuente guardada');
+    });
+  });
+
+  elements.openTelegramSource.addEventListener('click', async () => {
+    await runAction(async () => {
+      const telegramSource = await saveTelegramSourceConfig();
+      renderTelegramSource(telegramSource, 'Abriendo canal...');
+      await postJson('/api/browser/open-telegram', { url: telegramSource.url });
+      renderTelegramSource(telegramSource, 'Canal abierto en Chromium');
+    });
+  });
+
   elements.bingxMode.addEventListener('change', () => {
     elements.bingxLiveConfirmRow.classList.toggle('hidden', !usesLiveMode(elements.bingxMode.value));
+    updateTelegramSourceLiveConfirmVisibility();
   });
 
   elements.saveBingx.addEventListener('click', async () => {
@@ -418,6 +450,12 @@ async function loadTelegram() {
   const response = await fetchJson('/api/telegram');
   appState.telegram = response.telegram;
   renderTelegram(response.telegram);
+}
+
+async function loadTelegramSource() {
+  const response = await fetchJson('/api/telegram-source');
+  appState.telegramSource = response.telegramSource;
+  renderTelegramSource(response.telegramSource);
 }
 
 async function loadBingx() {
@@ -520,6 +558,12 @@ function connectEvents() {
     const payload = JSON.parse(event.data);
     appState.telegram = payload.telegram;
     renderTelegram(payload.telegram);
+  });
+
+  source.addEventListener('telegramSource', (event) => {
+    const payload = JSON.parse(event.data);
+    appState.telegramSource = payload.telegramSource;
+    renderTelegramSource(payload.telegramSource);
   });
 
   source.addEventListener('bingx', (event) => {
@@ -643,6 +687,7 @@ function renderPost(post) {
   )).join('');
   const postUrl = post.url ? `<a href="${escapeAttribute(post.url)}" target="_blank" rel="noreferrer">Abrir post</a>` : '';
   const memberBadge = post.isMembersOnly ? '<span class="member-badge">Miembros</span>' : '';
+  const sourceBadge = post.source === 'telegram_web' ? '<span class="source-badge telegram-web">Telegram</span>' : '';
   const poll = post.pollOptions?.length ? `<span>Encuesta: ${escapeHtml(post.pollOptions.join(' / '))}</span>` : '';
 
   return `
@@ -651,6 +696,7 @@ function renderPost(post) {
         <strong>${escapeHtml(post.author || post.channelName || 'Canal')}</strong>
         <span>${escapeHtml(post.publishedText || 'Sin fecha visible')}</span>
         ${memberBadge}
+        ${sourceBadge}
       </div>
       <p class="post-text">${escapeHtml(post.text || '(post sin texto)')}</p>
       ${images ? `<div class="post-assets">${images}</div>` : ''}
@@ -2301,6 +2347,53 @@ async function saveTelegramConfig() {
   return response.telegram;
 }
 
+function renderTelegramSource(telegramSource = appState.telegramSource, message = '') {
+  if (!telegramSource) {
+    return;
+  }
+  appState.telegramSource = telegramSource;
+  elements.telegramSourceEnabled.checked = Boolean(telegramSource.enabled);
+  elements.telegramSourceUrl.value = telegramSource.url || '';
+  elements.telegramSourceMax.value = telegramSource.maxMessages || 40;
+  elements.telegramSourceRefresh.value = telegramSource.refreshSeconds || 300;
+  elements.telegramSourceExecute.checked = Boolean(telegramSource.executeSignals);
+  elements.telegramSourceOpenSignals.checked = Boolean(telegramSource.executeOpenSignals);
+  elements.telegramSourceLiveConfirm.checked = Boolean(telegramSource.liveConfirmed);
+  updateTelegramSourceLiveConfirmVisibility();
+
+  const active = telegramSource.enabled && telegramSource.url;
+  const trading = telegramSource.executeSignals
+    ? telegramSource.executeOpenSignals ? 'Gestion + aperturas' : 'Gestion de posiciones'
+    : 'Solo lectura';
+  const refreshLabel = telegramSource.refreshSeconds ? ` · recarga ${telegramSource.refreshSeconds}s` : '';
+  elements.telegramSourceStatus.textContent = message || (active ? `Fuente activa · ${trading}${refreshLabel}` : 'Fuente desactivada');
+  elements.telegramSourceStatus.classList.toggle('ok', Boolean(message) || Boolean(active));
+  elements.telegramSourceStatus.classList.toggle('warn', Boolean(telegramSource.executeSignals && !telegramSource.liveConfirmed && usesLiveMode(appState.bingx?.mode)));
+}
+
+function updateTelegramSourceLiveConfirmVisibility() {
+  const needsConfirm = Boolean(elements.telegramSourceExecute.checked && usesLiveMode(elements.bingxMode.value));
+  elements.telegramSourceLiveConfirmRow.classList.toggle('hidden', !needsConfirm);
+}
+
+function telegramSourcePayload() {
+  return {
+    enabled: elements.telegramSourceEnabled.checked,
+    url: elements.telegramSourceUrl.value,
+    maxMessages: Number(elements.telegramSourceMax.value),
+    refreshSeconds: Number(elements.telegramSourceRefresh.value),
+    executeSignals: elements.telegramSourceExecute.checked,
+    executeOpenSignals: elements.telegramSourceOpenSignals.checked,
+    liveConfirmed: elements.telegramSourceLiveConfirm.checked
+  };
+}
+
+async function saveTelegramSourceConfig() {
+  const response = await putJson('/api/telegram-source', telegramSourcePayload());
+  appState.telegramSource = response.telegramSource;
+  return response.telegramSource;
+}
+
 function renderBingx(bingx = appState.bingx, message = '') {
   if (!bingx) {
     return;
@@ -2328,6 +2421,7 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxDryRunRequired.checked = bingx.dryRunRequired !== false;
   elements.bingxLiveConfirm.checked = Boolean(bingx.liveConfirmed);
   elements.bingxLiveConfirmRow.classList.toggle('hidden', !usesLiveMode(elements.bingxMode.value));
+  updateTelegramSourceLiveConfirmVisibility();
 
   const ready = bingx.enabled && bingx.apiKeyConfigured && bingx.apiSecretConfigured && (!usesLiveMode(bingx.mode) || bingx.liveConfirmed);
   const modeLabel = bingxModeLabel(bingx.mode);
@@ -2493,7 +2587,7 @@ function tradeHistoryItems() {
       at: event.at,
       source: eventAccountKey(event),
       asset: eventAccountKey(event) === 'demo' ? 'VST' : 'USDT',
-      symbol: event.signal?.symbol || '',
+      symbol: event.signal?.symbol || (event.signal?.action === 'CLOSE_ALL' ? 'TODO' : ''),
       direction: event.signal?.direction || '',
       statusLabel: tradeStatusLabel(event.status),
       entryPrice: event.signal?.entry?.price || null,
@@ -2775,25 +2869,39 @@ function tradeStatusLabel(value) {
   return {
     demo_order_sent: 'demo VST enviada',
     demo_close_sent: 'cierre demo VST',
+    demo_close_all_sent: 'cierre total demo VST',
+    demo_close_all_no_position: 'demo sin posicion',
     demo_close_no_position: 'demo sin posicion',
     demo_tp_sent: 'TP demo VST enviado',
     demo_tp_no_position: 'TP demo sin posicion',
     demo_tp_blocked: 'TP demo bloqueado',
+    demo_sl_sent: 'SL demo VST enviado',
+    demo_sl_no_position: 'SL demo sin posicion',
+    demo_sl_blocked: 'SL demo bloqueado',
     demo_sl_be_detected: 'SL BE demo detectado',
     test_order_sent: 'test enviada',
     live_order_sent: 'live enviada',
     live_close_sent: 'cierre live enviado',
+    live_close_all_sent: 'cierre total live',
+    live_close_all_no_position: 'live sin posicion',
     live_close_no_position: 'live sin posicion',
     live_tp_sent: 'TP live enviado',
     live_tp_no_position: 'TP live sin posicion',
     live_tp_blocked: 'TP live bloqueado',
+    live_sl_sent: 'SL live enviado',
+    live_sl_no_position: 'SL live sin posicion',
+    live_sl_blocked: 'SL live bloqueado',
     live_sl_be_detected: 'SL BE live detectado',
     exchange_stop_closed: 'stop BingX cerrado',
     exchange_signal_closed: 'cierre BingX ejecutado',
     exchange_position_closed: 'posicion BingX cerrada',
     paper_close_sent: 'cierre paper',
+    paper_close_all_sent: 'cierre total paper',
+    paper_close_all_no_position: 'paper sin posicion',
     paper_tp_sent: 'TP paper',
     paper_tp_no_position: 'TP paper sin posicion',
+    paper_sl_sent: 'SL paper',
+    paper_sl_no_position: 'SL paper sin posicion',
     paper_price_close: 'cierre por precio',
     paper_sl_be_sent: 'SL a BE paper',
     close_signal_detected: 'cierre detectado',

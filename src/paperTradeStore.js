@@ -263,6 +263,84 @@ export class PaperTradeStore {
     return closed;
   }
 
+  async closeAll({ percent = 100, reason = 'close_all', post, phase }) {
+    const closed = [];
+    const closeRatio = Math.min(100, Math.max(1, Number(percent) || 100)) / 100;
+
+    for (const position of this.data.positions) {
+      if (position.status !== 'open') {
+        continue;
+      }
+
+      const closePrice = Number(position.currentPrice || position.entryPrice);
+      if (!Number.isFinite(closePrice) || closePrice <= 0) {
+        continue;
+      }
+
+      if (closeRatio >= 0.999) {
+        position.status = 'closed';
+        position.closedAt = new Date().toISOString();
+        position.closePrice = closePrice;
+        position.closeReason = reason;
+        position.currentPrice = closePrice;
+        position.realizedPnl = calculatePnl(position, closePrice);
+        position.unrealizedPnl = 0;
+        position.paperPnl = position.realizedPnl;
+        position.closePostId = post?.id || null;
+        position.closePostUrl = post?.url || null;
+        position.closePhase = phase || null;
+        position.closePercent = 100;
+        closed.push(position);
+        continue;
+      }
+
+      const originalQuantity = Number(position.quantity || 0);
+      const closeQuantity = roundMoney(originalQuantity * closeRatio);
+      const remainingQuantity = roundMoney(originalQuantity - closeQuantity);
+      if (closeQuantity <= 0 || remainingQuantity <= 0) {
+        continue;
+      }
+
+      const closedPosition = {
+        ...position,
+        id: paperId(`${position.id}:close-all:${Date.now()}`),
+        status: 'closed',
+        closedAt: new Date().toISOString(),
+        quantity: closeQuantity,
+        notional: roundMoney(Number(position.notional || 0) * closeRatio),
+        exposure: roundMoney(Number(position.exposure || 0) * closeRatio),
+        closePrice,
+        closeReason: `${reason}_partial`,
+        currentPrice: closePrice,
+        realizedPnl: calculatePnl({ ...position, quantity: closeQuantity }, closePrice),
+        unrealizedPnl: 0,
+        closePostId: post?.id || null,
+        closePostUrl: post?.url || null,
+        closePhase: phase || null,
+        closePercent: roundMoney(closeRatio * 100),
+        sourcePositionId: position.id,
+        paperPnl: 0
+      };
+      closedPosition.paperPnl = closedPosition.realizedPnl;
+
+      position.quantity = remainingQuantity;
+      position.notional = roundMoney(Number(position.notional || 0) * (1 - closeRatio));
+      position.exposure = roundMoney(Number(position.exposure || 0) * (1 - closeRatio));
+      position.currentPrice = closePrice;
+      position.unrealizedPnl = calculatePnl(position, closePrice);
+      position.paperPnl = position.unrealizedPnl;
+
+      this.data.positions.unshift(closedPosition);
+      closed.push(closedPosition);
+    }
+
+    if (closed.length) {
+      await this.save();
+    }
+
+    return closed;
+  }
+
   async moveStopToBreakEven({ symbol, post, phase }) {
     const updated = [];
     for (const position of this.data.positions) {
@@ -302,6 +380,34 @@ export class PaperTradeStore {
       position.takeProfits = [takeProfit];
       position.updatedAt = new Date().toISOString();
       position.lastManagement = 'set_take_profit';
+      position.managementPostId = post?.id || null;
+      position.managementPostUrl = post?.url || null;
+      position.managementPhase = phase || null;
+      updated.push(position);
+    }
+
+    if (updated.length) {
+      await this.save();
+    }
+
+    return updated;
+  }
+
+  async setStopLossBySymbol({ symbol, price, post, phase }) {
+    const stopLoss = Number(price);
+    if (!Number.isFinite(stopLoss) || stopLoss <= 0) {
+      return [];
+    }
+
+    const updated = [];
+    for (const position of this.data.positions) {
+      if (position.status !== 'open' || position.symbol !== symbol) {
+        continue;
+      }
+
+      position.stopLoss = stopLoss;
+      position.updatedAt = new Date().toISOString();
+      position.lastManagement = 'set_stop_loss';
       position.managementPostId = post?.id || null;
       position.managementPostUrl = post?.url || null;
       position.managementPhase = phase || null;

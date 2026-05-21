@@ -1,10 +1,19 @@
 # Formato de senales
 
-El parser intenta leer textos de posts de YouTube y convertirlos en eventos de trading. Esta pagina documenta los formatos esperados y los limites actuales.
+El parser convierte texto libre de YouTube o Telegram Web en senales normalizadas. Esta guia documenta los formatos soportados y sus limites.
 
-## Apertura multi-ticker
+## Acciones soportadas
 
-Formato recomendado:
+- `OPEN`: apertura LONG/SHORT.
+- `CLOSE`: cierre por simbolo.
+- `CLOSE_ALL`: cierre global.
+- `SET_TAKE_PROFIT`: colocar o modificar TP.
+- `SET_STOP_LOSS`: colocar o modificar SL.
+- `MOVE_SL_BE`: mover stop a break even.
+
+## Apertura estructurada
+
+Formato:
 
 ```text
 ORDEN
@@ -13,28 +22,23 @@ LONG BTC 78190
 STOP BTC BINGX 77500
 APALANCAMIENTO X25
 1500USDT
-
-LONG ETH 2178
-STOP ETH BINGX 2155
-APALANCAMIENTO X25
-1500USDT
 ```
 
-Resultado esperado:
+Resultado:
 
-- `BTC-USDT LONG`
-- `ETH-USDT LONG`
-- Leverage: `25`
-- Stop loss por simbolo.
-- Notional leido: `1500 USDT`
+- `BTC-USDT`
+- direccion `LONG`
+- entrada `LIMIT 78190`
+- SL `77500`
+- leverage `25`
+- notional leido `1500 USDT`
 
-En ejecucion actual:
+Regla de tipo de orden:
 
-- La orden de apertura se manda a mercado.
-- El precio de la senal se guarda como referencia.
-- En Demo VST, el tamano real usa una base fija de 1000 VST. Con 15%, cada ticker abre 150 VST de margen.
+- `LONG BTC 78190` o `SHORT BTC 78190` => `LIMIT`.
+- `LONG BTC` o `SHORT BTC` sin precio => `MARKET`.
 
-## Direcciones soportadas
+## Direcciones
 
 Long:
 
@@ -56,32 +60,99 @@ VENTA
 VENDER
 ```
 
-## Stop loss
+## Stop loss obligatorio
 
-Formatos habituales:
+Formatos:
 
 ```text
 STOP BTC 77500
 SL BTC 77500
 STOP BTC BINGX 77500
+STOP SUI BINGX 1.111
 ```
 
 Si `Stop obligatorio` esta activo, una apertura sin stop se bloquea.
 
 ## Take profit
 
-Formatos habituales:
+Formatos:
 
 ```text
 TP BTC 79000
 TAKE PROFIT BTC 79000
+TPS
+BTC 78350
+ETH 2165
+SOL 88.6
+SUI 1.159
 ```
 
-Si hay varios TP, la orden actual usa el primero como `TAKE_PROFIT_MARKET`.
+Cuando aparece una seccion `TPS`, cada linea `SIMBOLO PRECIO` se convierte en `SET_TAKE_PROFIT`.
+
+## Modificacion de stop loss
+
+Formatos:
+
+```text
+MODIFICACION STOPLOSS
+ETH 2115
+SOL 86.5
+```
+
+Tambien detecta:
+
+```text
+SL ETH 2115
+STOP LOSS SOL 86.5
+```
+
+Resultado: `SET_STOP_LOSS`.
+
+## Mensaje mixto de apertura + TP + SL
+
+Ejemplo real:
+
+```text
+ORDEN NOCTURNA Y TPS Y SL
+
+TPS
+
+BTC 78350
+ETH 2165
+SOL 88.6
+SUI 1.159
+
+MODIFICACION STOPLOSS
+
+ETH 2115
+SOL 86.5
+
+LONG SUI 1.123
+STOP SUI BINGX 1.111
+APALANCAMIENTO X25
+1500USDT
+```
+
+Senales generadas:
+
+```text
+OPEN SUI-USDT LONG LIMIT 1.123 SL 1.111 TP 1.159 X25
+SET_TAKE_PROFIT BTC-USDT 78350
+SET_TAKE_PROFIT ETH-USDT 2165
+SET_TAKE_PROFIT SOL-USDT 88.6
+SET_TAKE_PROFIT SUI-USDT 1.159
+SET_STOP_LOSS ETH-USDT 2115
+SET_STOP_LOSS SOL-USDT 86.5
+```
+
+Notas:
+
+- Si el TP del simbolo abierto aparece en `TPS`, se adjunta tambien a la apertura.
+- Las secciones `TPS` y `MODIFICACION STOPLOSS` tienen limites para no mezclar precios.
 
 ## Apalancamiento
 
-Formatos habituales:
+Formatos:
 
 ```text
 APALANCAMIENTO X25
@@ -93,26 +164,25 @@ Regla:
 
 - Si la senal trae apalancamiento, se usa ese valor.
 - Si no trae, se usa el fallback configurado.
-- Si supera el maximo del contrato o el maximo de riesgo local, se bloquea.
+- Si supera el maximo local o del contrato, se bloquea.
 
 ## Notional
 
-Formatos habituales:
+Formatos:
 
 ```text
 1500USDT
 1500 USDT
+1500USDT
 ```
 
-Uso por modo:
+Uso:
 
 - `test`: usa el notional de la senal o el default.
-- `demo`: ignora el USDT de la senal y usa porcentaje sobre capital base VST fijo.
-- `live`: usa el notional de la senal limitado por `maxNotionalUSDT`.
+- `demo`: usa porcentaje sobre capital base VST fijo.
+- `live`: usa el tamano configurado/limitado para real.
 
-## Cierre total
-
-Formato recomendado:
+## Cierre por simbolo
 
 ```text
 CIERRE TOTAL
@@ -123,27 +193,37 @@ ETH 2194
 
 Resultado:
 
-- Cierra `BTC-USDT`.
-- Cierra `ETH-USDT`.
-- Si no hay precio, usa el ultimo precio de mercado.
+- `CLOSE BTC-USDT`
+- `CLOSE ETH-USDT`
 
-## Cierre parcial
-
-Formato recomendado:
+Si hay porcentaje:
 
 ```text
 CIERRE PARCIAL 50%
 SOL 92.4
 ```
 
-Resultado:
+Cierra el porcentaje indicado. Si dice `MITAD`, `HALF` o `PARCIAL` sin porcentaje, usa 50%.
 
-- Cierra el porcentaje indicado.
-- Si el texto contiene `MITAD`, `HALF` o `PARCIAL` sin porcentaje, usa 50%.
+## Cierre global
+
+Formatos:
+
+```text
+CERRADLO TODO
+CERRAR TODO
+CIERRE TOTAL TODO
+CERRAMOS TODO
+SALIMOS DE TODO
+```
+
+Resultado: `CLOSE_ALL`.
+
+En `live` o `dual`, cierra las posiciones abiertas de BingX para los modos activos.
 
 ## Stop a break even
 
-Formatos detectados:
+Formatos:
 
 ```text
 SL BE BTC
@@ -151,14 +231,26 @@ STOP A ENTRADA ETH
 BREAK EVEN SOL
 ```
 
-Estado actual:
+Estado:
 
 - En paper local mueve el stop al precio de entrada.
-- En Demo VST y live solo registra el evento. No modifica aun el stop real en BingX.
+- En Demo VST y live se registra como evento detectado.
+
+## Telegram Web
+
+Telegram Web puede ejecutar:
+
+- cierres;
+- cierre global;
+- TP;
+- SL;
+- break even.
+
+Las aperturas desde Telegram Web solo se ejecutan si `Permitir aperturas` esta activo.
 
 ## Portfolio
 
-Formato detectado:
+Formato:
 
 ```text
 PORTFOLIO COMPLETAMENTE ACTUALIZADO
@@ -174,10 +266,10 @@ Reglas:
 - Debe incluir `4tfs.short.gy`, `short.gy` o Google Sheets.
 - Se resuelve el enlace y se guarda el Google Sheet activo.
 
-## Limitaciones conocidas
+## Limitaciones
 
 - Textos ambiguos pueden producir simbolos no deseados. Usa allowlist si quieres restringir.
 - Los cierres se aplican por simbolo, no por ID de senal original.
-- Si hay varios TP, solo se envia el primero a BingX.
-- El cambio de SL a BE en BingX real no esta implementado todavia.
+- Si hay varios TP de apertura, se usa el primero como TP adjunto.
+- Telegram Web depende de la sesion visual de Chromium.
 - El parser asume pares contra USDT.

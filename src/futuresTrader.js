@@ -289,19 +289,41 @@ export class FuturesTrader {
     };
   }
 
-  async processPosts(posts, payload) {
+  async processPosts(posts, payload, options = {}) {
     const results = [];
+    const filterSignal = typeof options.filterSignal === 'function' ? options.filterSignal : null;
+    const filteredReason = options.filteredReason || 'signal_filtered';
     for (const post of posts) {
       const signals = parseFuturesSignals(post.text || '').filter((signal) => signal.isSignal);
       for (const signal of signals) {
+        const baseEvent = {
+          at: new Date().toISOString(),
+          signal,
+          postId: post?.id || null,
+          postUrl: post?.url || null,
+          phase: payload.phase || null
+        };
+        if (filterSignal && !filterSignal(signal)) {
+          results.push(this.emitTrade({
+            ...baseEvent,
+            status: 'skipped',
+            reason: filteredReason
+          }));
+          continue;
+        }
+
         try {
           const result = signal.action === 'CLOSE'
             ? await this.executeCloseSignal(signal, { post, phase: payload.phase })
-            : signal.action === 'MOVE_SL_BE'
-              ? await this.executeMoveStopSignal(signal, { post, phase: payload.phase })
-              : signal.action === 'SET_TAKE_PROFIT'
-                ? await this.executeTakeProfitSignal(signal, { post, phase: payload.phase })
-                : await this.executeSignal(signal, { post, phase: payload.phase });
+            : signal.action === 'CLOSE_ALL'
+              ? await this.executeCloseAllSignal(signal, { post, phase: payload.phase })
+              : signal.action === 'MOVE_SL_BE'
+                ? await this.executeMoveStopSignal(signal, { post, phase: payload.phase })
+                : signal.action === 'SET_STOP_LOSS'
+                  ? await this.executeStopLossSignal(signal, { post, phase: payload.phase })
+                  : signal.action === 'SET_TAKE_PROFIT'
+                    ? await this.executeTakeProfitSignal(signal, { post, phase: payload.phase })
+                    : await this.executeSignal(signal, { post, phase: payload.phase });
           results.push(...asArray(result));
         } catch (error) {
           const failed = this.emitTrade({
@@ -336,6 +358,68 @@ export class FuturesTrader {
     }
 
     return this.executeCloseSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeCloseAllSignal(signal, { post, phase } = {}) {
+    const config = this.configStore.getBingX({ includeSecrets: true });
+    if (config.mode === 'dual') {
+      const results = [];
+      for (const targetConfig of executionConfigs(config)) {
+        try {
+          results.push(await this.executeCloseAllSignalWithConfig(signal, { post, phase }, targetConfig));
+        } catch (error) {
+          results.push(this.executionError(signal, { post, phase }, targetConfig, error));
+        }
+      }
+      return results;
+    }
+
+    return this.executeCloseAllSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeCloseAllSignalWithConfig(signal, { post, phase } = {}, config) {
+    const baseEvent = {
+      at: new Date().toISOString(),
+      signal,
+      postId: post?.id || null,
+      postUrl: post?.url || null,
+      phase: phase || null,
+      executionMode: config.mode
+    };
+
+    if (!config.enabled) {
+      return this.emitTrade({ ...baseEvent, status: 'skipped', reason: 'bingx_disabled' });
+    }
+
+    if (config.mode === 'live' && !config.liveConfirmed) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: 'live_not_confirmed' });
+    }
+
+    const closePercent = Number(signal.closePercent || 100);
+    const closedPaperPositions = config.mode === 'test' && this.paperStore
+      ? await this.paperStore.closeAll({ percent: closePercent, reason: 'close_all', post, phase })
+      : [];
+    const exchangeClose = config.mode !== 'test'
+      ? await this.closeAllExchangePositions({ client: this.client(config), closePercent })
+      : null;
+
+    const event = this.emitTrade({
+      ...baseEvent,
+      status: closeAllStatus(config, exchangeClose, closedPaperPositions),
+      closePercent,
+      closedPaperPositions,
+      exchangeClose
+    });
+
+    if (closedPaperPositions.length) {
+      this.log(`PAPER CLOSE ALL ${closePercent}% (${closedPaperPositions.length})`, 'warn');
+    } else if (exchangeClose?.orders?.length) {
+      this.log(`${modePrefix(config)} CLOSE ALL ${closePercent}% (${exchangeClose.orders.length})`, 'warn');
+    } else {
+      this.log(`Cierre total detectado, sin posiciones abiertas en ${modePrefix(config)}.`, 'warn');
+    }
+
+    return event;
   }
 
   async executeCloseSignalWithConfig(signal, { post, phase } = {}, config) {
@@ -509,6 +593,75 @@ export class FuturesTrader {
     return event;
   }
 
+  async executeStopLossSignal(signal, { post, phase } = {}) {
+    const config = this.configStore.getBingX({ includeSecrets: true });
+    if (config.mode === 'dual') {
+      const results = [];
+      for (const targetConfig of executionConfigs(config)) {
+        try {
+          results.push(await this.executeStopLossSignalWithConfig(signal, { post, phase }, targetConfig));
+        } catch (error) {
+          results.push(this.executionError(signal, { post, phase }, targetConfig, error));
+        }
+      }
+      return results;
+    }
+
+    return this.executeStopLossSignalWithConfig(signal, { post, phase }, config);
+  }
+
+  async executeStopLossSignalWithConfig(signal, { post, phase } = {}, config) {
+    const baseEvent = {
+      at: new Date().toISOString(),
+      signal,
+      postId: post?.id || null,
+      postUrl: post?.url || null,
+      phase: phase || null,
+      executionMode: config.mode
+    };
+
+    if (!config.enabled) {
+      return this.emitTrade({ ...baseEvent, status: 'skipped', reason: 'bingx_disabled' });
+    }
+
+    if (config.mode === 'live' && !config.liveConfirmed) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: 'live_not_confirmed' });
+    }
+
+    const stopLoss = Number(signal.stopLoss);
+    if (!Number.isFinite(stopLoss) || stopLoss <= 0) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: `invalid_stop_loss:${signal.stopLoss}` });
+    }
+
+    const paperPositions = config.mode === 'test' && this.paperStore
+      ? await this.paperStore.setStopLossBySymbol({ symbol: signal.symbol, price: stopLoss, post, phase })
+      : [];
+    const exchangeStopLoss = config.mode !== 'test'
+      ? await this.setExchangeStopLoss({ client: this.client(config), marketClient: this.marketClient(config), config, signal, stopLoss })
+      : null;
+
+    const event = this.emitTrade({
+      ...baseEvent,
+      status: stopLossStatus(config, paperPositions, exchangeStopLoss),
+      stopLoss,
+      paperPositions,
+      exchangeStopLoss
+    });
+
+    if (paperPositions.length) {
+      this.log(`PAPER SL ${signal.symbol} @ ${stopLoss} (${paperPositions.length})`, 'info');
+    } else if (exchangeStopLoss?.orders?.length) {
+      this.log(`${modePrefix(config)} SL ${signal.symbol} @ ${stopLoss} (${exchangeStopLoss.orders.length})`, config.mode === 'live' ? 'warn' : 'info');
+    } else if (exchangeStopLoss?.positions?.length) {
+      const reason = exchangeStopLoss.skipped?.[0]?.reason || 'no_colocado';
+      this.log(`SL detectado para ${signal.symbol}, no colocado: ${reason}.`, 'warn');
+    } else {
+      this.log(`SL detectado para ${signal.symbol}, sin posicion abierta.`, 'warn');
+    }
+
+    return event;
+  }
+
   async executeSignal(signal, { post, phase } = {}) {
     const config = this.configStore.getBingX({ includeSecrets: true });
     if (config.mode === 'dual') {
@@ -577,14 +730,17 @@ export class FuturesTrader {
     }
 
     const referenceEntryPrice = signal.entry?.price ? Number(signal.entry.price) : null;
-    const entryPrice = await this.fetchMarketPrice(marketClient, signal.symbol);
+    const marketPrice = await this.fetchMarketPrice(marketClient, signal.symbol);
+    const entryPrice = signal.entry?.type === 'LIMIT' && Number.isFinite(referenceEntryPrice) && referenceEntryPrice > 0
+      ? referenceEntryPrice
+      : marketPrice;
     const stopValidation = validateStopLossAgainstMarket(signal, entryPrice);
     if (!stopValidation.ok) {
       return this.emitTrade({
         ...baseEvent,
         status: 'blocked',
         reason: stopValidation.reason,
-        marketPrice: entryPrice,
+        marketPrice,
         referenceEntryPrice
       });
     }
@@ -626,6 +782,8 @@ export class FuturesTrader {
       order,
       response,
       sizing,
+      marketPrice,
+      entryPrice,
       referenceEntryPrice,
       paperPosition,
       bingx
@@ -811,6 +969,67 @@ export class FuturesTrader {
     return { positions, orders };
   }
 
+  async closeAllExchangePositions({ client, closePercent = 100 }) {
+    const response = await client.getPositions();
+    const positions = (Array.isArray(response.data) ? response.data : [])
+      .filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
+
+    if (!positions.length) {
+      return { positions: [], orders: [] };
+    }
+
+    const percent = Math.min(100, Math.max(1, Number(closePercent) || 100));
+    const contractCache = new Map();
+    const orders = [];
+
+    for (const position of positions) {
+      const symbol = position.symbol;
+      if (!symbol) {
+        continue;
+      }
+
+      if (percent >= 99.9 && position.positionId) {
+        orders.push({
+          position,
+          response: await client.closePosition({ positionId: position.positionId })
+        });
+        continue;
+      }
+
+      if (!contractCache.has(symbol)) {
+        contractCache.set(symbol, await this.getContract(client, symbol));
+      }
+      const contract = contractCache.get(symbol);
+      const available = Math.abs(Number(position.availableAmt || position.positionAmt || 0));
+      const quantity = roundDown(available * (percent / 100), contract.quantityPrecision);
+      if (quantity <= 0) {
+        continue;
+      }
+
+      const positionSide = position.positionSide || 'BOTH';
+      const signedAmount = Number(position.positionAmt || 0);
+      const order = {
+        symbol,
+        side: positionSide === 'SHORT' || (positionSide === 'BOTH' && signedAmount < 0) ? 'BUY' : 'SELL',
+        positionSide,
+        type: 'MARKET',
+        quantity,
+        clientOrderId: clientOrderId(`close-all-${position.positionId || symbol || Date.now()}`)
+      };
+      if (positionSide === 'BOTH') {
+        order.reduceOnly = 'true';
+      }
+
+      orders.push({
+        position,
+        order,
+        response: await client.placeOrder(order, { test: false })
+      });
+    }
+
+    return { positions, orders };
+  }
+
   async setExchangeTakeProfit({ client, marketClient, config, signal, takeProfit }) {
     const response = await client.getPositions(signal.symbol);
     const positions = (Array.isArray(response.data) ? response.data : [])
@@ -870,6 +1089,87 @@ export class FuturesTrader {
         positionSide,
         type: 'TAKE_PROFIT_MARKET',
         stopPrice: takeProfit,
+        quantity,
+        workingType: 'MARK_PRICE'
+      };
+
+      if (positionSide === 'BOTH') {
+        order.reduceOnly = 'true';
+      }
+
+      orders.push({
+        position,
+        order,
+        response: await client.placeOrder(order, { test: false })
+      });
+    }
+
+    if (canceled.length || orders.length) {
+      this.openOrdersCache.delete(openOrdersCacheKey(config));
+    }
+
+    return { positions, orders, canceled, skipped };
+  }
+
+  async setExchangeStopLoss({ client, marketClient, config, signal, stopLoss }) {
+    const response = await client.getPositions(signal.symbol);
+    const positions = (Array.isArray(response.data) ? response.data : [])
+      .filter((position) => position.symbol === signal.symbol)
+      .filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
+
+    if (!positions.length) {
+      return { positions: [], orders: [], canceled: [], skipped: [] };
+    }
+
+    const marketPrice = await this.fetchMarketPrice(marketClient, signal.symbol).catch(() => null);
+    const openOrders = await this.getCachedOpenOrders(client, config);
+    const contract = await this.getContract(client, signal.symbol);
+    const canceled = [];
+    const orders = [];
+    const skipped = [];
+
+    for (const position of positions) {
+      const positionSide = position.positionSide || normalizePositionSide(position);
+      const direction = normalizePositionSide(position);
+      const currentPrice = firstFiniteNumber([
+        position.markPrice,
+        position.lastPrice,
+        marketPrice
+      ]);
+      const validation = validateStopLossAgainstMarket({ direction, stopLoss }, currentPrice);
+      if (!validation.ok) {
+        skipped.push({ position, reason: validation.reason, marketPrice: currentPrice });
+        continue;
+      }
+
+      for (const existing of stopLossOrdersForPosition(position, openOrders)) {
+        const orderId = existing.orderId || existing.orderID;
+        if (!orderId) {
+          continue;
+        }
+        try {
+          canceled.push({
+            order: existing,
+            response: await client.cancelOrder({ symbol: signal.symbol, orderId })
+          });
+        } catch (error) {
+          this.log(`BingX SL previo ${signal.symbol}: ${error.message}`, 'warn');
+        }
+      }
+
+      const available = Math.abs(Number(position.availableAmt || position.positionAmt || 0));
+      const quantity = roundDown(available, contract.quantityPrecision);
+      if (quantity <= 0) {
+        skipped.push({ position, reason: `quantity_too_small:${quantity}`, marketPrice: currentPrice });
+        continue;
+      }
+
+      const order = {
+        symbol: signal.symbol,
+        side: direction === 'SHORT' ? 'BUY' : 'SELL',
+        positionSide,
+        type: 'STOP_MARKET',
+        stopPrice: stopLoss,
         quantity,
         workingType: 'MARK_PRICE'
       };
@@ -1007,6 +1307,16 @@ function closeStatus(config, exchangeClose) {
   return `${config.mode}_close_sent`;
 }
 
+function closeAllStatus(config, exchangeClose, closedPaperPositions = []) {
+  if (config.mode === 'test') {
+    return closedPaperPositions.length ? 'paper_close_all_sent' : 'paper_close_all_no_position';
+  }
+  if (!exchangeClose?.orders?.length) {
+    return `${config.mode}_close_all_no_position`;
+  }
+  return `${config.mode}_close_all_sent`;
+}
+
 function takeProfitStatus(config, paperPositions, exchangeTakeProfit) {
   if (config.mode === 'test') {
     return paperPositions.length ? 'paper_tp_sent' : 'paper_tp_no_position';
@@ -1018,6 +1328,19 @@ function takeProfitStatus(config, paperPositions, exchangeTakeProfit) {
     return `${config.mode}_tp_blocked`;
   }
   return `${config.mode}_tp_no_position`;
+}
+
+function stopLossStatus(config, paperPositions, exchangeStopLoss) {
+  if (config.mode === 'test') {
+    return paperPositions.length ? 'paper_sl_sent' : 'paper_sl_no_position';
+  }
+  if (exchangeStopLoss?.orders?.length) {
+    return `${config.mode}_sl_sent`;
+  }
+  if (exchangeStopLoss?.positions?.length) {
+    return `${config.mode}_sl_blocked`;
+  }
+  return `${config.mode}_sl_no_position`;
 }
 
 function validateTakeProfitAgainstMarket({ direction, takeProfit, marketPrice }) {
@@ -1152,6 +1475,17 @@ function takeProfitOrdersForPosition(position, openOrders = []) {
   ));
 }
 
+function stopLossOrdersForPosition(position, openOrders = []) {
+  const symbol = normalizeSymbol(position.symbol);
+  const positionSide = normalizePositionSide(position);
+  return openOrders.filter((order) => (
+    normalizeSymbol(order.symbol) === symbol
+    && (!order.positionSide || String(order.positionSide).toUpperCase() === positionSide)
+    && ['NEW', 'PARTIALLY_FILLED'].includes(String(order.status || 'NEW').toUpperCase())
+    && isStopLossOrder(order)
+  ));
+}
+
 function isStopLossOrder(order = {}) {
   const type = String(order.type || order.stopLoss?.type || '').toUpperCase();
   return type.includes('STOP') && !type.includes('TAKE_PROFIT');
@@ -1209,15 +1543,21 @@ function clampNumber(value, min, max, fallback) {
 
 function buildOrder({ signal, quantity, clientOrderId }) {
   const isLong = signal.direction === 'LONG';
+  const limitPrice = signal.entry?.type === 'LIMIT' ? Number(signal.entry.price) : NaN;
   const order = {
     symbol: signal.symbol,
     side: isLong ? 'BUY' : 'SELL',
     positionSide: signal.direction,
-    type: 'MARKET',
+    type: Number.isFinite(limitPrice) && limitPrice > 0 ? 'LIMIT' : 'MARKET',
     quantity,
     clientOrderId,
     workingType: 'MARK_PRICE'
   };
+
+  if (order.type === 'LIMIT') {
+    order.price = limitPrice;
+    order.timeInForce = 'GTC';
+  }
 
   const takeProfit = signal.takeProfits[0];
   if (takeProfit) {

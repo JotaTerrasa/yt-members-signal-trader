@@ -3,21 +3,28 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YouTube Posts Scraper</title>
-    <link rel="stylesheet" href="/styles.css?v=17">
+    <title>Futures Magician</title>
+    <link rel="stylesheet" href="/styles.css?v=18">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=47" defer></script>
+    <script src="/app.js?v=50" defer></script>
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Monitor local</p>
-          <h1>YouTube Posts Scraper</h1>
+        <div class="brand-block">
+          <span class="brand-mark" aria-hidden="true">
+            <i data-lucide="radar"></i>
+          </span>
+          <div>
+            <p class="eyebrow">Monitor local / Cesar Langreo</p>
+            <h1>Futures Magician</h1>
+          </div>
         </div>
-        <div class="status-pill" id="status-pill">
-          <span class="dot"></span>
-          <span id="status-text">Inactivo</span>
+        <div class="topbar-actions">
+          <div class="status-pill" id="status-pill">
+            <span class="dot"></span>
+            <span id="status-text">Inactivo</span>
+          </div>
         </div>
       </header>
 
@@ -73,6 +80,56 @@
           <p class="notice">
             La sesion vive en Chromium local. Usa esta herramienta solo con canales a los que tu cuenta tenga acceso.
           </p>
+
+          <details class="panel-section compact-fold" aria-label="Fuente Telegram Web" open>
+            <summary class="section-title">
+              <i data-lucide="message-square-text"></i>
+              <span>Telegram Web</span>
+            </summary>
+            <div class="fold-body">
+              <label class="check-option">
+                <input id="telegram-source-enabled" type="checkbox">
+                <span>Scrapear canal</span>
+              </label>
+              <div class="field">
+                <label for="telegram-source-url">Canal Telegram Web</label>
+                <input id="telegram-source-url" type="url" autocomplete="off" placeholder="https://web.telegram.org/k/#-1323595523">
+              </div>
+              <div class="range-grid">
+                <label for="telegram-source-max">
+                  <span>Mensajes visibles</span>
+                  <input id="telegram-source-max" type="number" min="5" max="200" step="1" value="40">
+                </label>
+                <label for="telegram-source-refresh">
+                  <span>Recargar pestaña (s)</span>
+                  <input id="telegram-source-refresh" type="number" min="30" max="3600" step="30" value="300">
+                </label>
+              </div>
+              <label class="check-option" for="telegram-source-execute">
+                <input id="telegram-source-execute" type="checkbox">
+                <span>Cierres/TP/SL</span>
+              </label>
+              <label class="check-option">
+                <input id="telegram-source-open-signals" type="checkbox">
+                <span>Permitir aperturas</span>
+              </label>
+              <label class="check-option live-confirm hidden" id="telegram-source-live-confirm-row">
+                <input id="telegram-source-live-confirm" type="checkbox">
+                <span>Confirmo Telegram hacia BingX real</span>
+              </label>
+              <div class="telegram-actions two-actions">
+                <button id="save-telegram-source" class="button secondary" type="button">
+                  <i data-lucide="save"></i>
+                  <span>Guardar</span>
+                </button>
+                <button id="open-telegram-source" class="button secondary" type="button">
+                  <i data-lucide="external-link"></i>
+                  <span>Abrir canal</span>
+                </button>
+              </div>
+              <p class="status-line" id="telegram-source-status">Fuente desactivada</p>
+            </div>
+          </details>
 
           <details class="panel-section compact-fold" aria-label="Alertas Telegram">
             <summary class="section-title">
@@ -290,17 +347,26 @@
 
         <section class="content-panel" aria-label="Resultados">
           <div class="metrics">
-            <div>
-              <span class="metric-label">Guardados</span>
-              <strong id="metric-total">0</strong>
+            <div class="metric-card">
+              <span class="metric-icon" aria-hidden="true"><i data-lucide="database"></i></span>
+              <div>
+                <span class="metric-label">Guardados</span>
+                <strong id="metric-total">0</strong>
+              </div>
             </div>
-            <div>
-              <span class="metric-label">Visibles</span>
-              <strong id="metric-visible">0</strong>
+            <div class="metric-card">
+              <span class="metric-icon" aria-hidden="true"><i data-lucide="eye"></i></span>
+              <div>
+                <span class="metric-label">Visibles</span>
+                <strong id="metric-visible">0</strong>
+              </div>
             </div>
-            <div>
-              <span class="metric-label">Ultima lectura</span>
-              <strong id="metric-last">-</strong>
+            <div class="metric-card">
+              <span class="metric-icon" aria-hidden="true"><i data-lucide="activity"></i></span>
+              <div>
+                <span class="metric-label">Ultima lectura</span>
+                <strong id="metric-last">-</strong>
+              </div>
             </div>
           </div>
 

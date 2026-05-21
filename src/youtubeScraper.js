@@ -14,6 +14,9 @@ export class YouTubePostsScraper extends EventEmitter {
     this.profileDir = profileDir;
     this.context = null;
     this.page = null;
+    this.telegramPage = null;
+    this.telegramSource = { enabled: false, url: '', maxMessages: 40, refreshSeconds: 300 };
+    this.telegramLastRefreshAt = 0;
     this.running = false;
     this.stopRequested = false;
   }
@@ -30,7 +33,16 @@ export class YouTubePostsScraper extends EventEmitter {
     return { url: page.url() };
   }
 
-  async start({ channelUrl, backfill, live, pollIntervalSeconds, maxScrolls }) {
+  async openTelegram(telegramUrl) {
+    const url = normalizeTelegramWebUrl(telegramUrl);
+    const page = await this.ensureTelegramPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2500);
+    this.log('Telegram Web abierto. Inicia sesion en Chromium si aun no lo has hecho.');
+    return { url: page.url() };
+  }
+
+  async start({ channelUrl, backfill, live, pollIntervalSeconds, maxScrolls, telegramSource = {} }) {
     if (this.running) {
       throw new Error('Ya hay un scrapeo en curso.');
     }
@@ -40,6 +52,7 @@ export class YouTubePostsScraper extends EventEmitter {
     const normalizedUrl = normalizePostsUrl(channelUrl);
     const intervalMs = Math.max(10, Number(pollIntervalSeconds) || 30) * 1000;
     const scrollLimit = clamp(Number(maxScrolls) || 120, 1, 500);
+    const telegram = this.updateTelegramSource(telegramSource);
 
     try {
       const page = await this.ensurePage();
@@ -47,6 +60,9 @@ export class YouTubePostsScraper extends EventEmitter {
 
       if (backfill) {
         await this.backfill(page, normalizedUrl, { maxScrolls: scrollLimit });
+        if (telegram.enabled) {
+          await this.readTelegramOnce(telegram, 'backfill');
+        }
       }
 
       if (live && !this.stopRequested) {
@@ -69,6 +85,8 @@ export class YouTubePostsScraper extends EventEmitter {
       await this.context.close().catch(() => {});
       this.context = null;
       this.page = null;
+      this.telegramPage = null;
+      this.telegramLastRefreshAt = 0;
     }
   }
 
@@ -82,6 +100,7 @@ export class YouTubePostsScraper extends EventEmitter {
       this.context.on('close', () => {
         this.context = null;
         this.page = null;
+        this.telegramPage = null;
         this.log('La ventana de Chromium se ha cerrado.');
       });
     }
@@ -90,6 +109,26 @@ export class YouTubePostsScraper extends EventEmitter {
     this.page = this.page && !this.page.isClosed() ? this.page : pages[0] || await this.context.newPage();
     this.page.setDefaultTimeout(15000);
     return this.page;
+  }
+
+  async ensureTelegramPage() {
+    await this.ensurePage();
+    const pages = this.context.pages();
+    this.telegramPage = this.telegramPage && !this.telegramPage.isClosed()
+      ? this.telegramPage
+      : pages.find((page) => page.url().includes('web.telegram.org')) || await this.context.newPage();
+    this.telegramPage.setDefaultTimeout(15000);
+    return this.telegramPage;
+  }
+
+  updateTelegramSource(input = {}) {
+    const next = normalizeTelegramSource(input);
+    const previous = this.telegramSource || {};
+    if (previous.url !== next.url || previous.refreshSeconds !== next.refreshSeconds || previous.enabled !== next.enabled) {
+      this.telegramLastRefreshAt = 0;
+    }
+    this.telegramSource = next;
+    return next;
   }
 
   async backfill(page, url, { maxScrolls }) {
@@ -155,6 +194,13 @@ export class YouTubePostsScraper extends EventEmitter {
         });
       } catch (error) {
         this.log(`Lectura YouTube fallida, se reintentara: ${conciseError(error)}`, 'warn');
+      }
+
+      const telegram = this.telegramSource;
+      if (telegram.enabled) {
+        await this.readTelegramOnce(telegram, 'live').catch((error) => {
+          this.log(`Lectura Telegram fallida, se reintentara: ${conciseError(error)}`, 'warn');
+        });
       }
 
       await sleepInterruptible(intervalMs, () => this.stopRequested);
@@ -386,7 +432,258 @@ export class YouTubePostsScraper extends EventEmitter {
       posts,
       phase,
       channelUrl,
+      source: 'youtube',
       scrapedAt: new Date().toISOString()
+    });
+  }
+
+  async readTelegramOnce(telegram, phase) {
+    const page = await this.ensureTelegramPage();
+    const now = Date.now();
+    const shouldRefresh = this.shouldRefreshTelegram(telegram, now);
+    const navigation = await this.gotoTelegramChat(page, telegram.url, { refresh: shouldRefresh });
+    if (!this.telegramLastRefreshAt || navigation.navigated || navigation.refreshed) {
+      this.telegramLastRefreshAt = Date.now();
+    }
+    if (navigation.refreshed) {
+      this.log(`Telegram Web refrescado automaticamente cada ${telegram.refreshSeconds} segundos.`);
+    }
+    if (await this.telegramNeedsLogin(page)) {
+      this.emit('progress', {
+        source: 'telegram_web',
+        phase,
+        currentScroll: 0,
+        maxScrolls: 0,
+        visibleMessages: 0
+      });
+      return;
+    }
+    const messages = await this.extractVisibleTelegramMessages(page, {
+      phase,
+      channelUrl: telegram.url,
+      maxMessages: telegram.maxMessages
+    });
+    this.emit('progress', {
+      source: 'telegram_web',
+      phase,
+      currentScroll: 0,
+      maxScrolls: 0,
+      visibleMessages: messages.length
+    });
+    this.emit('posts', {
+      posts: messages,
+      phase,
+      channelUrl: telegram.url,
+      source: 'telegram_web',
+      scrapedAt: new Date().toISOString()
+    });
+  }
+
+  shouldRefreshTelegram(telegram, now = Date.now()) {
+    const refreshMs = Math.max(0, Number(telegram.refreshSeconds) || 0) * 1000;
+    return refreshMs > 0
+      && this.telegramLastRefreshAt > 0
+      && now - this.telegramLastRefreshAt >= refreshMs;
+  }
+
+  async gotoTelegramChat(page, url, { refresh = false } = {}) {
+    let navigated = false;
+    let refreshed = false;
+    if (!page.url().startsWith(url)) {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      navigated = true;
+    } else if (refresh) {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      refreshed = true;
+    }
+    await page.waitForTimeout(1800);
+    await page.keyboard.press('End').catch(() => {});
+    await page.evaluate(() => {
+      const scrollables = [...document.querySelectorAll('main, section, div')]
+        .filter((node) => node.scrollHeight > node.clientHeight + 80);
+      for (const node of scrollables.slice(-6)) {
+        node.scrollTop = node.scrollHeight;
+      }
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    }).catch(() => {});
+    await page.waitForTimeout(700);
+
+    const count = await page.locator('[data-mid], .message, .bubble').count().catch(() => 0);
+    if (count === 0) {
+      const needsLogin = await this.telegramNeedsLogin(page);
+      this.log(
+        needsLogin
+          ? 'Telegram Web pide iniciar sesion en Chromium.'
+          : 'No se detectaron mensajes Telegram. Si ves una pantalla de login, inicia sesion en Chromium.',
+        'warn'
+      );
+    }
+    return { navigated, refreshed };
+  }
+
+  async telegramNeedsLogin(page) {
+    return page.evaluate(() => {
+      const text = String(document.body?.innerText || '').toLowerCase();
+      return text.includes('log in to telegram')
+        || text.includes('log in by phone number')
+        || text.includes('link desktop device')
+        || text.includes('continuar en espa');
+    }).catch(() => false);
+  }
+
+  async extractVisibleTelegramMessages(page, meta) {
+    return page.evaluate(({ phase, channelUrl, maxMessages }) => {
+      const chatKey = chatKeyFromUrl(channelUrl);
+      const channelName = cleanText(
+        document.querySelector('.chat-info .peer-title')?.textContent ||
+        document.querySelector('.topbar .peer-title')?.textContent ||
+        document.querySelector('[class*="peer-title"]')?.textContent ||
+        document.querySelector('[class*="chat-title"]')?.textContent ||
+        'Telegram Web'
+      );
+      const nodes = findMessageNodes().slice(-Math.max(5, Number(maxMessages) || 40));
+
+      return nodes.map((node) => extractMessage(node)).filter(Boolean);
+
+      function findMessageNodes() {
+        const selectorGroups = [
+          '[data-mid]',
+          '.message',
+          '.bubble',
+          '[id^="message-"]'
+        ];
+
+        for (const selector of selectorGroups) {
+          const nodes = uniqueElements([...document.querySelectorAll(selector)])
+            .filter(isUsefulMessageNode);
+          if (nodes.length) {
+            return nodes.filter((node) => !nodes.some((other) => other !== node && node.contains(other)));
+          }
+        }
+
+        return [];
+      }
+
+      function isUsefulMessageNode(node) {
+        const rect = node.getBoundingClientRect();
+        const text = cleanTelegramText(node.innerText || node.textContent || '');
+        return rect.width > 120
+          && rect.height > 18
+          && text.length > 1
+          && !/^(search|buscar|emoji|sticker|menu)$/i.test(text);
+      }
+
+      function extractMessage(node) {
+        const textNode = node.querySelector('.text-content, .translatable-message, [class*="text-content"], [class*="message-text"]') || node;
+        const text = cleanTelegramText(textNode.innerText || textNode.textContent || node.innerText || '');
+        if (!text || isTelegramLoginText(text) || !looksLikeTradingMessage(text)) {
+          return null;
+        }
+
+        const timeNode = node.querySelector('time, .time, .message-time, [datetime], [title]');
+        const publishedText = cleanText(
+          timeNode?.getAttribute('datetime') ||
+          timeNode?.getAttribute('title') ||
+          timeNode?.textContent ||
+          ''
+        );
+        const rawId = node.getAttribute('data-mid') ||
+          node.querySelector('[data-mid]')?.getAttribute('data-mid') ||
+          node.id ||
+          '';
+        const id = rawId
+          ? `telegram-${chatKey}-${cleanId(rawId)}`
+          : `telegram-${chatKey}-${stableHash(`${publishedText}|${text}`)}`;
+
+        return {
+          id,
+          url: channelUrl,
+          channelUrl,
+          channelName,
+          author: channelName,
+          publishedText,
+          text,
+          likeText: '',
+          commentText: '',
+          isMembersOnly: false,
+          source: 'telegram_web',
+          images: [],
+          links: extractLinks(node),
+          pollOptions: [],
+          scrapedAt: new Date().toISOString(),
+          scrapePhase: phase
+        };
+      }
+
+      function extractLinks(node) {
+        return uniqueStrings(
+          [...node.querySelectorAll('a[href]')]
+            .map((anchor) => anchor.href)
+            .filter((href) => href && !href.startsWith('javascript:'))
+        );
+      }
+
+      function cleanTelegramText(value) {
+        return cleanText(value)
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line && !/^\d{1,2}:\d{2}(?:\s?(am|pm))?$/i.test(line))
+          .filter((line) => !/^(edited|visto|views?|reactions?)$/i.test(line))
+          .join('\n')
+          .trim();
+      }
+
+      function isTelegramLoginText(value) {
+        const text = String(value || '').toLowerCase();
+        return text.includes('log in to telegram')
+          || text.includes('log in by phone number')
+          || text.includes('link desktop device')
+          || text.includes('continuar en espa');
+      }
+
+      function looksLikeTradingMessage(value) {
+        return /\b(cierre|cerrar|orden|long|short|tps?|take profit|stop|sl|apalancamiento|bingx)\b/i.test(String(value || ''));
+      }
+
+      function cleanText(value) {
+        return String(value || '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/[ \t]+\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      }
+
+      function cleanId(value) {
+        return String(value || '').replace(/[^a-z0-9_-]/gi, '-').replace(/-+/g, '-');
+      }
+
+      function chatKeyFromUrl(value) {
+        try {
+          const url = new URL(value);
+          return cleanId(url.hash || url.pathname || 'chat');
+        } catch {
+          return 'chat';
+        }
+      }
+
+      function stableHash(value) {
+        let hash = 0;
+        for (let index = 0; index < value.length; index += 1) {
+          hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+        }
+        return `hash-${Math.abs(hash)}`;
+      }
+
+      function uniqueElements(items) {
+        return [...new Set(items)];
+      }
+
+      function uniqueStrings(items) {
+        return [...new Set(items.map((item) => cleanText(item)).filter(Boolean))];
+      }
+    }, meta).catch((error) => {
+      this.log(`No se pudieron extraer mensajes Telegram: ${error.message}`, 'error');
+      return [];
     });
   }
 
@@ -424,6 +721,47 @@ export function normalizePostsUrl(input) {
   url.search = '';
   url.hash = '';
   return url.toString();
+}
+
+export function normalizeTelegramWebUrl(input) {
+  const trimmed = String(input || '').trim();
+  if (!trimmed) {
+    throw new Error('Introduce la URL del canal de Telegram Web.');
+  }
+
+  let raw = trimmed;
+  if (/^-?\d+$/.test(raw) || raw.startsWith('#')) {
+    raw = `https://web.telegram.org/k/#${raw.replace(/^#/, '')}`;
+  }
+  if (!/^https?:\/\//i.test(raw)) {
+    raw = `https://web.telegram.org/k/#${raw}`;
+  }
+
+  const url = new URL(raw);
+  if (!/(^|\.)web\.telegram\.org$/i.test(url.hostname)) {
+    throw new Error('La URL debe ser de web.telegram.org.');
+  }
+
+  if (!url.pathname || url.pathname === '/') {
+    url.pathname = '/k/';
+  }
+  if (!url.hash) {
+    throw new Error('La URL de Telegram Web debe incluir el chat en el hash.');
+  }
+  return url.toString();
+}
+
+function normalizeTelegramSource(input = {}) {
+  const enabled = Boolean(input.enabled);
+  if (!enabled) {
+    return { enabled: false, url: '', maxMessages: 40, refreshSeconds: 300 };
+  }
+  return {
+    enabled: true,
+    url: normalizeTelegramWebUrl(input.url),
+    maxMessages: clamp(Number(input.maxMessages) || 40, 5, 200),
+    refreshSeconds: clamp(Number(input.refreshSeconds) || 300, 30, 3600)
+  };
 }
 
 function clamp(value, min, max) {
