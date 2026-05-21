@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node src/server.js",
-    "lint": "node --check src/server.js && node --check src/store.js && node --check src/configStore.js && node --check src/telegramNotifier.js && node --check src/futuresSignalParser.js && node --check src/bingxClient.js && node --check src/bingxPriceWebSocket.js && node --check src/futuresTrader.js && node --check src/historicalPnl.js && node --check src/paperTradeStore.js && node --check src/referenceLedger.js && node --check src/youtubeScraper.js && node --check public/app.js",
-    "install:browsers": "playwright install chromium"
+    "lint": "node --check src/server.js && node --check src/store.js && node --check src/configStore.js && node --check src/telegramNotifier.js && node --check src/tradeEventStore.js && node --check src/futuresSignalParser.js && node --check src/bingxClient.js && node --check src/bingxPriceWebSocket.js && node --check src/futuresTrader.js && node --check src/historicalPnl.js && node --check src/paperTradeStore.js && node --check src/referenceLedger.js && node --check src/youtubeScraper.js && node --check public/app.js && node --check scripts/strategyStudy.js",
+    "install:browsers": "playwright install chromium",
+    "study:strategy": "node scripts/strategyStudy.js"
   },
   "dependencies": {
     "playwright": "^1.60.0",

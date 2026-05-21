@@ -12,6 +12,7 @@ import { detectPortfolioUrl } from './portfolioDetector.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
 import { TelegramNotifier } from './telegramNotifier.js';
+import { TradeEventStore } from './tradeEventStore.js';
 import { YouTubePostsScraper, normalizePostsUrl, normalizeTelegramWebUrl } from './youtubeScraper.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -37,6 +38,9 @@ await configStore.init();
 const paperStore = new PaperTradeStore(join(dataDir, 'paper-trades.json'));
 await paperStore.init();
 
+const tradeEventStore = new TradeEventStore(join(dataDir, 'trade-events.json'));
+await tradeEventStore.init();
+
 const scraper = new YouTubePostsScraper({ profileDir });
 const telegramNotifier = new TelegramNotifier({
   configStore,
@@ -51,9 +55,7 @@ const futuresTrader = new FuturesTrader({
   onLog: (entry) => pushLog(entry),
   onTrade: (event) => {
     pnlSourcesCache = null;
-    state.trades.unshift(event);
-    state.trades = state.trades.slice(0, 200);
-    broadcast('trade', event);
+    recordTradeEvent(event);
     notifyTradeExecutionError(event);
     syncExchangePositions({ reason: event.status || 'trade' }).catch((error) => {
       pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
@@ -88,7 +90,7 @@ const state = {
   health: null,
   priceFeed: null,
   logs: [],
-  trades: [],
+  trades: tradeEventStore.list(200),
   stats: store.stats()
 };
 let lastHealthAlertKey = '';
@@ -444,9 +446,7 @@ const server = createServer(async (request, response) => {
         cleared,
         paperTrades: []
       };
-      state.trades.unshift(event);
-      state.trades = state.trades.slice(0, 200);
-      broadcast('trade', event);
+      recordTradeEvent(event);
       broadcast('state', state);
       pushLog({
         level: 'info',
@@ -658,6 +658,14 @@ const server = createServer(async (request, response) => {
         'content-disposition': 'attachment; filename="paper-trades.csv"'
       });
       return response.end(paperStore.toCsv());
+    }
+
+    if (requestUrl.pathname === '/api/trade-events' && request.method === 'GET') {
+      const limit = Number(requestUrl.searchParams.get('limit') || 200);
+      return sendJson(response, {
+        ok: true,
+        events: tradeEventStore.list(Math.min(Math.max(limit, 1), 1000))
+      });
     }
 
     if (requestUrl.pathname === '/api/audit' && request.method === 'GET') {
@@ -1035,9 +1043,7 @@ function handleExchangeClosedPosition(position, reason) {
       status: 'closed'
     }
   };
-  state.trades.unshift(event);
-  state.trades = state.trades.slice(0, 200);
-  broadcast('trade', event);
+  recordTradeEvent(event);
   pushLog({
     level: 'warn',
     message: `BingX cerro ${position.symbol} ${position.direction || ''}.`,
@@ -1114,9 +1120,7 @@ async function handlePriceTick(tick) {
       priceTick: tick,
       closedPaperPositions: [position]
     };
-    state.trades.unshift(event);
-    state.trades = state.trades.slice(0, 200);
-    broadcast('trade', event);
+    recordTradeEvent(event);
     pushLog({
       level: 'warn',
       message: `Cierre paper por ${position.closeReason} en ${position.symbol}: ${position.closePrice}.`,
@@ -1138,6 +1142,15 @@ async function handlePriceTick(tick) {
 
   syncPriceSubscriptions();
   broadcast('state', state);
+}
+
+function recordTradeEvent(event) {
+  state.trades.unshift(event);
+  state.trades = state.trades.slice(0, 200);
+  tradeEventStore.append(event).catch((error) => {
+    pushLog({ level: 'error', message: `Trade event store: ${error.message}`, at: new Date().toISOString() });
+  });
+  broadcast('trade', event);
 }
 
 function positionSymbol(value) {
