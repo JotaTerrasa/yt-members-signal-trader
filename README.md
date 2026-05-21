@@ -68,12 +68,12 @@ Primer uso:
 4. Configura BingX en `test`, `demo`, `live` o `dual`.
 5. Activa `Monitor continuo`, revisa el intervalo y pulsa `Iniciar`.
 
-## Configuracion actual recomendada para Cesar Langreo
+## Configuracion recomendada
 
 Sin incluir secretos:
 
 ```text
-YouTube URL: https://www.youtube.com/@CesarLangreo/posts
+YouTube URL: https://www.youtube.com/@tu-canal/posts
 Telegram Web: https://web.telegram.org/k/#-1323595523
 Monitor: live cada 30 segundos
 BingX: dual, Demo VST + live real

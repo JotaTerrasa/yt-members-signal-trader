@@ -71,10 +71,10 @@ No se guarda ninguna contrasena en el repo.
 
 ## 5. Configuracion funcional
 
-Ejemplo de configuracion usada para Cesar Langreo:
+Ejemplo de configuracion:
 
 ```text
-YouTube URL: https://www.youtube.com/@CesarLangreo/posts
+YouTube URL: https://www.youtube.com/@tu-canal/posts
 Telegram Web URL: https://web.telegram.org/k/#-1323595523
 Monitor: live cada 30 segundos
 BingX mode: dual, Demo VST + live real
