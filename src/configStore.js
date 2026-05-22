@@ -28,6 +28,15 @@ const defaultConfig = {
     executeOpenSignals: false,
     liveConfirmed: false
   },
+  monitor: {
+    autoResume: false,
+    channelUrl: '',
+    backfill: false,
+    live: true,
+    pollIntervalSeconds: 30,
+    maxScrolls: 120,
+    updatedAt: null
+  },
   bingx: {
     enabled: false,
     mode: 'test',
@@ -145,6 +154,37 @@ export class ConfigStore {
     this.data.telegramSource = next;
     await this.save();
     return this.getTelegramSource();
+  }
+
+  getMonitor() {
+    return { ...this.data.monitor };
+  }
+
+  async updateMonitor(input = {}) {
+    const current = this.data.monitor || defaultConfig.monitor;
+    const next = {
+      autoResume: Boolean(input.autoResume),
+      channelUrl: clean(input.channelUrl) || current.channelUrl || defaultConfig.monitor.channelUrl,
+      backfill: Boolean(input.backfill),
+      live: input.live === undefined ? current.live !== false : Boolean(input.live),
+      pollIntervalSeconds: clampInteger(
+        input.pollIntervalSeconds,
+        5,
+        3600,
+        current.pollIntervalSeconds || defaultConfig.monitor.pollIntervalSeconds
+      ),
+      maxScrolls: clampInteger(
+        input.maxScrolls,
+        0,
+        1000,
+        current.maxScrolls || defaultConfig.monitor.maxScrolls
+      ),
+      updatedAt: new Date().toISOString()
+    };
+
+    this.data.monitor = next;
+    await this.save();
+    return this.getMonitor();
   }
 
   getBingX({ includeSecrets = false } = {}) {
@@ -272,6 +312,10 @@ function mergeConfig(input) {
     telegramSource: {
       ...defaultConfig.telegramSource,
       ...(input?.telegramSource || {})
+    },
+    monitor: {
+      ...defaultConfig.monitor,
+      ...(input?.monitor || {})
     },
     portfolio: {
       ...defaultConfig.portfolio,

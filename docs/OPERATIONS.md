@@ -60,6 +60,12 @@ Opciones:
 
 El modo live es polling. YouTube y Telegram Web no se leen como stream.
 
+Persistencia:
+
+- Al iniciar el monitor continuo, la app guarda la configuracion live en `.data/config.json`.
+- Si PM2 o Node reinician la app, el monitor live se rearma automaticamente con la ultima URL, intervalo y fuente de Telegram Web guardados.
+- Pulsar `Parar` desactiva ese auto-resume, para que un stop manual siga siendo manual.
+
 ## 4. Telegram de alertas
 
 Uso recomendado:

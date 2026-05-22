@@ -794,65 +794,17 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/scrape/start' && request.method === 'POST') {
-      if (scraper.running) {
-        return sendJson(response, { error: 'Ya hay un scrapeo en curso.' }, 409);
-      }
-
       const body = await readJson(request);
-      if (!body.backfill && !body.live) {
-        return sendJson(response, { error: 'Activa posts pasados, monitor continuo o ambos.' }, 400);
+      const result = await startScraperMonitor(body, { persistMonitor: true, reason: 'api' });
+      if (!result.ok) {
+        return sendJson(response, { error: result.error }, result.status || 400);
       }
-
-      let normalizedUrl;
-      try {
-        normalizedUrl = normalizePostsUrl(body.channelUrl);
-      } catch (error) {
-        return sendJson(response, { error: error.message }, 400);
-      }
-      let telegramSource = configStore.getTelegramSource();
-      if (body.telegramSource) {
-        telegramSource = await configStore.updateTelegramSource(body.telegramSource);
-      }
-      if (telegramSource.enabled) {
-        try {
-          telegramSource = {
-            ...telegramSource,
-            url: normalizeTelegramWebUrl(telegramSource.url)
-          };
-        } catch (error) {
-          return sendJson(response, { error: error.message }, 400);
-        }
-      }
-
-      state.lastError = null;
-      state.running = true;
-      state.phase = body.backfill ? 'backfill' : 'live';
-      state.channelUrl = normalizedUrl;
-      state.telegramWebUrl = telegramSource.url || '';
-      state.currentScroll = 0;
-      state.maxScrolls = Number(body.maxScrolls) || 0;
-      broadcast('state', state);
-
-      scraper.start({
-        channelUrl: normalizedUrl,
-        backfill: Boolean(body.backfill),
-        live: Boolean(body.live),
-        pollIntervalSeconds: Number(body.pollIntervalSeconds) || 30,
-        maxScrolls: Number(body.maxScrolls) || 120,
-        telegramSource
-      }).catch((error) => {
-        state.running = false;
-        state.phase = 'idle';
-        state.lastError = error.message;
-        pushLog({ level: 'error', message: error.message, at: new Date().toISOString() });
-        broadcast('state', state);
-      });
-
       return sendJson(response, { ok: true, state: currentState() });
     }
 
     if (requestUrl.pathname === '/api/scrape/stop' && request.method === 'POST') {
       scraper.stop();
+      await configStore.updateMonitor({ ...configStore.getMonitor(), autoResume: false });
       return sendJson(response, { ok: true });
     }
 
@@ -868,6 +820,9 @@ server.listen(port, () => {
   syncExchangePositions({ reason: 'startup' }).catch((error) => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
     syncPriceSubscriptions();
+  });
+  resumeMonitorOnStartup().catch((error) => {
+    pushLog({ level: 'error', message: `Auto-resume monitor: ${error.message}`, at: new Date().toISOString() });
   });
 });
 
@@ -886,6 +841,111 @@ setInterval(() => {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
+async function resumeMonitorOnStartup() {
+  const monitor = configStore.getMonitor();
+  if (!monitor.autoResume || !monitor.live) {
+    return;
+  }
+
+  const result = await startScraperMonitor({
+    channelUrl: monitor.channelUrl,
+    backfill: false,
+    live: true,
+    pollIntervalSeconds: monitor.pollIntervalSeconds,
+    maxScrolls: monitor.maxScrolls
+  }, { persistMonitor: false, reason: 'startup' });
+
+  if (!result.ok) {
+    state.lastError = result.error;
+    pushLog({
+      level: 'error',
+      message: `Auto-resume monitor: ${result.error}`,
+      at: new Date().toISOString()
+    });
+    return;
+  }
+
+  pushLog({
+    level: 'info',
+    message: 'Monitor live rearmado automaticamente al arrancar.',
+    at: new Date().toISOString()
+  });
+}
+
+async function startScraperMonitor(input = {}, { persistMonitor = false } = {}) {
+  if (scraper.running) {
+    return { ok: false, status: 409, error: 'Ya hay un scrapeo en curso.' };
+  }
+
+  if (!input.backfill && !input.live) {
+    return { ok: false, status: 400, error: 'Activa posts pasados, monitor continuo o ambos.' };
+  }
+
+  let normalizedUrl;
+  try {
+    normalizedUrl = normalizePostsUrl(input.channelUrl);
+  } catch (error) {
+    return { ok: false, status: 400, error: error.message };
+  }
+
+  let telegramSource = configStore.getTelegramSource();
+  if (input.telegramSource) {
+    telegramSource = await configStore.updateTelegramSource(input.telegramSource);
+  }
+  if (telegramSource.enabled) {
+    try {
+      telegramSource = {
+        ...telegramSource,
+        url: normalizeTelegramWebUrl(telegramSource.url)
+      };
+    } catch (error) {
+      return { ok: false, status: 400, error: error.message };
+    }
+  }
+
+  const pollIntervalSeconds = Number(input.pollIntervalSeconds) || 30;
+  const maxScrolls = Number(input.maxScrolls) || 120;
+  const backfill = Boolean(input.backfill);
+  const live = Boolean(input.live);
+
+  if (persistMonitor) {
+    await configStore.updateMonitor({
+      autoResume: live,
+      channelUrl: normalizedUrl,
+      backfill: false,
+      live,
+      pollIntervalSeconds,
+      maxScrolls
+    });
+  }
+
+  state.lastError = null;
+  state.running = true;
+  state.phase = backfill ? 'backfill' : 'live';
+  state.channelUrl = normalizedUrl;
+  state.telegramWebUrl = telegramSource.url || '';
+  state.currentScroll = 0;
+  state.maxScrolls = maxScrolls;
+  broadcast('state', state);
+
+  scraper.start({
+    channelUrl: normalizedUrl,
+    backfill,
+    live,
+    pollIntervalSeconds,
+    maxScrolls,
+    telegramSource
+  }).catch((error) => {
+    state.running = false;
+    state.phase = 'idle';
+    state.lastError = error.message;
+    pushLog({ level: 'error', message: error.message, at: new Date().toISOString() });
+    broadcast('state', state);
+  });
+
+  return { ok: true };
+}
+
 function currentState() {
   state.health = buildHealth();
   state.priceFeed = priceFeed.status();
@@ -893,6 +953,7 @@ function currentState() {
     ...state,
     browserOpen: scraper.isBrowserOpen,
     running: scraper.running,
+    monitor: configStore.getMonitor(),
     telegramSource: configStore.getTelegramSource(),
     portfolio: configStore.getPortfolio(),
     exchangeSafety: buildExchangeSafety(),
