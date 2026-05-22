@@ -70,6 +70,7 @@ const elements = {
   pnlSimCapital: document.querySelector('#pnl-sim-capital'),
   pnlSimMetrics: document.querySelector('#pnl-sim-metrics'),
   pnlNote: document.querySelector('#pnl-note'),
+  realModeBanner: document.querySelector('#real-mode-banner'),
   pnlEmpty: document.querySelector('#pnl-empty'),
   liveReadinessStatus: document.querySelector('#live-readiness-status'),
   liveReadinessList: document.querySelector('#live-readiness-list'),
@@ -82,6 +83,11 @@ const elements = {
   exchangeSafetyStatus: document.querySelector('#exchange-safety-status'),
   exchangeSafetyMetrics: document.querySelector('#exchange-safety-metrics'),
   exchangeSafetyChecks: document.querySelector('#exchange-safety-checks'),
+  emergencyStatus: document.querySelector('#emergency-status'),
+  pauseEntries: document.querySelector('#pause-entries'),
+  managementOnly: document.querySelector('#management-only'),
+  cancelRealOrders: document.querySelector('#cancel-real-orders'),
+  closeRealAll: document.querySelector('#close-real-all'),
   dualOpsPanel: document.querySelector('#dual-ops-panel'),
   dualOpsStatus: document.querySelector('#dual-ops-status'),
   dualOpsMetrics: document.querySelector('#dual-ops-metrics'),
@@ -97,6 +103,7 @@ const elements = {
   tradeHistoryStatus: document.querySelector('#trade-history-status'),
   tradeHistoryEmpty: document.querySelector('#trade-history-empty'),
   tradeHistoryList: document.querySelector('#trade-history-list'),
+  realAuditTable: document.querySelector('#real-audit-table'),
   search: document.querySelector('#search'),
   clearPosts: document.querySelector('#clear-posts'),
   telegramEnabled: document.querySelector('#telegram-enabled'),
@@ -130,8 +137,13 @@ const elements = {
   bingxMaxLeverage: document.querySelector('#bingx-max-leverage'),
   bingxSymbols: document.querySelector('#bingx-symbols'),
   bingxRequireSl: document.querySelector('#bingx-require-sl'),
+  bingxEntriesPaused: document.querySelector('#bingx-entries-paused'),
+  bingxManagementOnly: document.querySelector('#bingx-management-only'),
   bingxMaxOpen: document.querySelector('#bingx-max-open'),
+  bingxMaxDailyOrders: document.querySelector('#bingx-max-daily-orders'),
   bingxMaxSignalLeverage: document.querySelector('#bingx-max-signal-leverage'),
+  bingxMaxSignalAge: document.querySelector('#bingx-max-signal-age'),
+  bingxMaxEntryDeviation: document.querySelector('#bingx-max-entry-deviation'),
   bingxVstBaseCapital: document.querySelector('#bingx-vst-base-capital'),
   bingxVstCapitalPercent: document.querySelector('#bingx-vst-capital-percent'),
   bingxDailyLoss: document.querySelector('#bingx-daily-loss'),
@@ -304,6 +316,48 @@ function bindEvents() {
       const bingx = await saveBingxConfig();
       renderBingx(bingx, 'Modo test armado');
       renderPnl();
+    });
+  });
+  elements.pauseEntries.addEventListener('click', async () => {
+    await runAction(async () => {
+      elements.bingxEntriesPaused.checked = !elements.bingxEntriesPaused.checked;
+      const bingx = await saveBingxConfig();
+      renderBingx(bingx, bingx.entriesPaused ? 'Entradas pausadas' : 'Entradas activas');
+      renderPnl();
+    });
+  });
+  elements.managementOnly.addEventListener('click', async () => {
+    await runAction(async () => {
+      elements.bingxManagementOnly.checked = !elements.bingxManagementOnly.checked;
+      const bingx = await saveBingxConfig();
+      renderBingx(bingx, bingx.managementOnly ? 'Solo gestion activo' : 'Gestion normal');
+      renderPnl();
+    });
+  });
+  elements.cancelRealOrders.addEventListener('click', async () => {
+    await runAction(async () => {
+      const confirmText = prompt('Escribe CANCELAR_ORDENES_REAL para cancelar ordenes pendientes reales.');
+      if (confirmText !== 'CANCELAR_ORDENES_REAL') {
+        return;
+      }
+      elements.emergencyStatus.textContent = 'Cancelando pendientes...';
+      const response = await postJson('/api/bingx/emergency/cancel-all-real', { confirm: confirmText });
+      appState.exchangeSafety = response.exchangeSafety || appState.exchangeSafety;
+      renderPnl();
+      elements.emergencyStatus.textContent = `${response.result?.canceled?.length || 0} canceladas`;
+    });
+  });
+  elements.closeRealAll.addEventListener('click', async () => {
+    await runAction(async () => {
+      const confirmText = prompt('Escribe CERRAR_TODO_REAL para cerrar todas las posiciones reales.');
+      if (confirmText !== 'CERRAR_TODO_REAL') {
+        return;
+      }
+      elements.emergencyStatus.textContent = 'Cerrando real...';
+      const response = await postJson('/api/bingx/emergency/close-all-real', { confirm: confirmText });
+      appState.exchangeSafety = response.exchangeSafety || appState.exchangeSafety;
+      renderPnl();
+      elements.emergencyStatus.textContent = `${response.result?.orders?.length || 0} cierres enviados`;
     });
   });
   [
@@ -814,6 +868,7 @@ function renderPnl() {
   renderSimulation();
   renderPnlChart(performanceMonthlyRows(rows));
   renderLiveReadiness();
+  renderRealModeBanner();
   renderHealthPanel();
   renderRiskPanel(openPositions, closedPositions);
   renderExchangeSafetyPanel();
@@ -823,6 +878,7 @@ function renderPnl() {
   renderHistoricalPnl();
   renderOpenPositions(openPositions);
   renderTradeHistory();
+  renderRealAuditTable();
   elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
   window.lucide?.createIcons();
 }
@@ -1742,6 +1798,7 @@ function liveReadiness() {
   const maxOpen = Number(bingx.maxOpenPositions || 0);
   const monthlyLimit = Number(bingx.maxMonthlyLossUSDT || 0);
   const maxSignalLeverage = Number(bingx.maxSignalLeverage || 0);
+  const maxDailyOrders = Number(bingx.maxDailyOrders || 0);
   const dryRunOk = bingx.dryRunRequired === false
     || Boolean(bingx.dryRunCompletedAt)
     || (appState.paperTrades || []).length > 0;
@@ -1770,7 +1827,7 @@ function liveReadiness() {
     {
       key: 'risk',
       label: 'Riesgo operativo configurado',
-      ok: maxOpen > 0 && maxSignalLeverage > 0
+      ok: maxOpen > 0 && maxSignalLeverage > 0 && maxDailyOrders >= 0
     },
     {
       key: 'dry-run',
@@ -1782,6 +1839,8 @@ function liveReadiness() {
       label: 'No hay bloqueo local',
       ok: !(maxOpen > 0 && risk.openPositions >= maxOpen)
         && !(monthlyLimit > 0 && risk.monthlyPnl <= -Math.abs(monthlyLimit))
+        && !bingx.entriesPaused
+        && !bingx.managementOnly
     }
   ];
 
@@ -1825,15 +1884,67 @@ function renderHealthPanel() {
   ].map(renderOpsMetric).join('');
 }
 
+function renderRealModeBanner() {
+  if (!elements.realModeBanner) {
+    return;
+  }
+
+  const bingx = appState.bingx || {};
+  const safety = appState.exchangeSafety || {};
+  const health = appState.state?.health || {};
+  const telegram = appState.telegram || {};
+  const lastLiveEvent = (appState.trades || []).find((event) => eventAccountKey(event) === 'live' || String(event.status || '').startsWith('live_'));
+  const lastError = (appState.trades || []).find((event) => event.status === 'error');
+  const real = safety.real || {};
+  const active = usesLiveMode(bingx.mode) && bingx.liveConfirmed;
+  elements.realModeBanner.classList.toggle('active', active);
+  elements.realModeBanner.classList.toggle('paused', Boolean(bingx.entriesPaused || bingx.managementOnly));
+  elements.realModeBanner.innerHTML = `
+    <div>
+      <span>${escapeHtml(active ? 'REAL ACTIVADO' : 'REAL NO ARMADO')}</span>
+      <strong>${escapeHtml(bingxModeLabel(bingx.mode))}</strong>
+    </div>
+    <div>
+      <span>Orden real</span>
+      <strong>${escapeHtml(formatMoney(bingx.defaultNotionalUSDT || 0, 'USDT'))}</strong>
+    </div>
+    <div>
+      <span>Ultima ejecucion</span>
+      <strong>${escapeHtml(lastLiveEvent ? formatDateTime(lastLiveEvent.at) : '-')}</strong>
+    </div>
+    <div>
+      <span>Ultimo error</span>
+      <strong>${escapeHtml(lastError ? reasonLabel(lastError.reason || lastError.status) : '-')}</strong>
+    </div>
+    <div>
+      <span>Sync BingX</span>
+      <strong>${escapeHtml(safety.ageSeconds === null || safety.ageSeconds === undefined ? '-' : `${safety.ageSeconds}s`)}</strong>
+    </div>
+    <div>
+      <span>YouTube / Telegram</span>
+      <strong>${escapeHtml(`${health.level === 'ok' ? 'YT ok' : 'YT revisar'} - ${telegram.enabled ? 'TG ok' : 'TG off'}`)}</strong>
+    </div>
+    <div>
+      <span>Real abierto</span>
+      <strong>${escapeHtml(`${real.openPositions || 0} - ${formatMoney(real.floatingPnl || 0, real.asset || 'USDT')}`)}</strong>
+    </div>
+  `;
+}
+
 function renderRiskPanel(openPositions = openPaperPositions(), closedPositions = closedPaperPositions()) {
   const risk = localRiskSnapshot(openPositions, closedPositions);
   const config = appState.bingx || {};
   const maxOpen = Number(config.maxOpenPositions || 0);
+  const maxDailyOrders = Number(config.maxDailyOrders || 0);
   const dailyLimit = Number(config.maxDailyLossUSDT || 0);
   const monthlyLimit = Number(config.maxMonthlyLossUSDT || 0);
+  const dailyOrders = dailyOpeningExecutions();
   const blocked = (maxOpen > 0 && risk.openPositions >= maxOpen)
     || (dailyLimit > 0 && risk.dailyPnl <= -Math.abs(dailyLimit))
-    || (monthlyLimit > 0 && risk.monthlyPnl <= -Math.abs(monthlyLimit));
+    || (monthlyLimit > 0 && risk.monthlyPnl <= -Math.abs(monthlyLimit))
+    || (maxDailyOrders > 0 && dailyOrders >= maxDailyOrders)
+    || config.entriesPaused
+    || config.managementOnly;
 
   elements.riskStatus.textContent = blocked ? 'Bloqueo local activo' : 'Local dentro de limites';
   elements.riskStatus.className = amountClass(blocked ? -1 : 1);
@@ -1846,10 +1957,19 @@ function renderRiskPanel(openPositions = openPaperPositions(), closedPositions =
 
   elements.riskMetrics.innerHTML = [
     ['Abiertas local', `${risk.openPositions}/${maxOpen || '-'}`, maxOpen > 0 && risk.openPositions >= maxOpen ? 'negative' : ''],
+    ['Ordenes dia', `${dailyOrders}/${maxDailyOrders || '-'}`, maxDailyOrders > 0 && dailyOrders >= maxDailyOrders ? 'negative' : ''],
     ['Exposicion local', formatUsdt(risk.openExposure), ''],
     ['PnL dia local', dailyText, risk.dailyPnl < 0 ? 'negative' : 'positive'],
     ['PnL mes local', monthlyText, risk.monthlyPnl < 0 ? 'negative' : 'positive']
   ].map(renderOpsMetric).join('');
+}
+
+function dailyOpeningExecutions() {
+  const today = dayKeyFromValue(new Date());
+  return (appState.trades || []).filter((event) => (
+    dayKeyFromValue(event.at) === today
+    && ['test_order_sent', 'demo_order_sent', 'live_order_sent'].includes(String(event.status || ''))
+  )).length;
 }
 
 function renderExchangeSafetyPanel() {
@@ -1862,6 +1982,8 @@ function renderExchangeSafetyPanel() {
   const level = safety.level || 'idle';
   const missingSl = Number(real.missingStopLoss || 0);
   const missingTp = Number(real.missingTakeProfit || 0);
+  const balance = real.balance || {};
+  const liquidation = real.nearestLiquidation || null;
   const status = level === 'ok'
     ? 'Real cubierto'
     : level === 'warn'
@@ -1872,9 +1994,14 @@ function renderExchangeSafetyPanel() {
   elements.exchangeSafetyStatus.className = amountClass(level === 'ok' ? 1 : level === 'warn' ? -1 : 0);
   elements.exchangeSafetyMetrics.innerHTML = [
     ['Sync', safety.ageSeconds === null || safety.ageSeconds === undefined ? '-' : `${safety.ageSeconds}s`, safety.stale ? 'negative' : safety.enabled ? 'positive' : ''],
+    ['Equity real', balance.equity == null ? '-' : formatMoney(balance.equity, balance.asset || 'USDT'), ''],
+    ['Margen libre', balance.availableMargin == null ? '-' : formatMoney(balance.availableMargin, balance.asset || 'USDT'), ''],
+    ['Margen usado', balance.usedMargin == null ? '-' : `${formatMoney(balance.usedMargin, balance.asset || 'USDT')} - ${formatPercent(balance.marginUsagePercent)}`, ''],
     ['Real abiertas', String(real.openPositions || 0), missingSl ? 'negative' : ''],
     ['Exposicion real', formatMoney(real.exposure || 0, real.asset || 'USDT'), ''],
-    ['Flotante real', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)]
+    ['Flotante real', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)],
+    ['Liq. cercana', liquidation ? `${liquidation.symbol} ${formatPercent(liquidation.distancePercent)}` : '-', liquidation && liquidation.distancePercent < 5 ? 'negative' : ''],
+    ['Pendientes', `${real.openOrders || 0} - huerf. ${real.orphanOrders || 0}`, real.orphanOrders ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
   const checks = Array.isArray(safety.checks) ? safety.checks : [];
@@ -1892,12 +2019,24 @@ function renderExchangeSafetyPanel() {
     const missing = [
       missingSl ? `${missingSl} sin SL` : '',
       missingTp ? `${missingTp} sin TP` : ''
-    ].filter(Boolean).join(' · ');
+    ].filter(Boolean).join(' - ');
     elements.exchangeSafetyChecks.insertAdjacentHTML('beforeend', `
       <div class="exchange-safety-warning">
         ${escapeHtml(missing)}
       </div>
     `);
+  }
+
+  if (elements.emergencyStatus) {
+    const paused = appState.bingx?.entriesPaused;
+    const managementOnly = appState.bingx?.managementOnly;
+    elements.emergencyStatus.textContent = paused
+      ? 'Entradas pausadas'
+      : managementOnly ? 'Solo gestion' : 'Listo';
+    elements.pauseEntries.classList.toggle('active', Boolean(paused));
+    elements.managementOnly.classList.toggle('active', Boolean(managementOnly));
+    elements.cancelRealOrders.disabled = !usesLiveMode(appState.bingx?.mode) || !appState.bingx?.liveConfirmed;
+    elements.closeRealAll.disabled = !usesLiveMode(appState.bingx?.mode) || !appState.bingx?.liveConfirmed;
   }
 }
 
@@ -2910,6 +3049,78 @@ function renderTradeHistory() {
   elements.tradeHistoryList.innerHTML = items.map(renderTradeHistoryItem).join('');
 }
 
+function renderRealAuditTable() {
+  if (!elements.realAuditTable) {
+    return;
+  }
+  const events = (appState.trades || [])
+    .filter((event) => eventAccountKey(event) === 'live' || event.exchangePosition?.source === 'live')
+    .slice(0, 20);
+  elements.realAuditTable.innerHTML = events.length
+    ? events.map(renderRealAuditRow).join('')
+    : '<tr><td colspan="9">Sin eventos reales auditables todavia.</td></tr>';
+}
+
+function renderRealAuditRow(event) {
+  const signalText = event.signal?.rawText || [event.signal?.symbol, event.signal?.direction || event.signal?.action].filter(Boolean).join(' ');
+  const orderText = auditOrderText(event);
+  const responseText = auditResponseText(event);
+  const pnl = Number(event.exchangePosition?.paperPnl ?? event.exchangePosition?.unrealizedPnl ?? event.closedPaperPositions?.[0]?.paperPnl ?? 0);
+  const feeFunding = auditFeeFundingText(event);
+  return `
+    <tr>
+      <td>${escapeHtml(formatDateTime(event.at))}</td>
+      <td><span>${escapeHtml(truncateText(signalText || '-', 90))}</span></td>
+      <td>${escapeHtml(tradeStatusLabel(event.status))}</td>
+      <td>${escapeHtml(orderText)}</td>
+      <td>${escapeHtml(responseText)}</td>
+      <td>${escapeHtml(auditSnapshotText(event))}</td>
+      <td class="${amountClass(pnl)}">${escapeHtml(formatMoney(pnl, 'USDT'))}</td>
+      <td>${escapeHtml(feeFunding)}</td>
+      <td>${escapeHtml(reasonLabel(event.reason || event.status || '-'))}</td>
+    </tr>
+  `;
+}
+
+function auditOrderText(event = {}) {
+  const order = event.order || event.exchangeClose?.orders?.[0]?.order || event.exchangeCancel?.canceled?.[0]?.order;
+  const id = order?.clientOrderId || order?.orderId || order?.orderID || event.response?.data?.order?.orderId || '';
+  const type = order?.type || event.status || '';
+  return [type, id].filter(Boolean).join(' - ') || '-';
+}
+
+function auditResponseText(event = {}) {
+  const data = event.response?.data || event.exchangeClose?.orders?.[0]?.response?.data || event.exchangeCancel?.canceled?.[0]?.response?.data;
+  const id = data?.order?.orderId || data?.orderId || data?.orderID || data?.positionId || '';
+  return id ? `ok - ${id}` : (event.response ? 'ok' : '-');
+}
+
+function auditSnapshotText(event = {}) {
+  const snapshot = event.auditSnapshot || {};
+  const safety = snapshot.exchangeSafety || {};
+  const real = safety.real || {};
+  const health = snapshot.health || {};
+  const pieces = [
+    safety.level ? `sync ${safety.level}` : '',
+    safety.ageSeconds === null || safety.ageSeconds === undefined ? '' : `${safety.ageSeconds}s`,
+    health.level ? `YT ${health.level}` : '',
+    `SL ${real.protectedStopLoss || 0}/${real.openPositions || 0}`,
+    real.balance?.equity == null ? '' : `eq ${formatMoney(real.balance.equity, real.balance.asset || 'USDT')}`
+  ].filter(Boolean);
+  return pieces.join(' - ') || '-';
+}
+
+function auditFeeFundingText(event = {}) {
+  const raw = event.exchangePosition?.raw || {};
+  const realized = raw.realisedProfit || raw.realizedProfit;
+  return realized ? `realizado ${realized}` : '-';
+}
+
+function truncateText(value, maxLength = 120) {
+  const text = String(value || '');
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
+}
+
 function groupedSignalEvents() {
   const groups = new Map();
   for (const event of appState.trades || []) {
@@ -3006,12 +3217,48 @@ function renderSignalAccountCell(event, account) {
   const tone = eventTone(event);
   const amount = eventAmountText(event, account);
   const detail = event.reason ? reasonLabel(event.reason) : amount;
+  const lifecycle = orderLifecycleText(event);
   return `
     <div class="signal-cell ${escapeAttribute(tone)}">
       <strong>${escapeHtml(tradeStatusLabel(event.status))}</strong>
       <span>${escapeHtml(detail || amount || '-')}</span>
+      <small>${escapeHtml(lifecycle)}</small>
     </div>
   `;
+}
+
+function orderLifecycleText(event = {}) {
+  const status = String(event.status || '');
+  const steps = ['Recibida', 'Parseada'];
+  if (status === 'blocked' || status === 'error' || status === 'skipped') {
+    steps.push(status === 'blocked' ? 'Bloqueada' : status === 'error' ? 'Error' : 'Omitida');
+    return steps.join(' > ');
+  }
+  steps.push('Validada');
+  if (status.endsWith('_order_sent') || event.order) {
+    steps.push('Orden enviada');
+  }
+  if (event.response) {
+    steps.push('Aceptada');
+  }
+  if (status.endsWith('_sl_sent') || hasEventStopLoss(event)) {
+    steps.push('SL confirmado');
+  }
+  if (status.endsWith('_tp_sent') || hasEventTakeProfit(event)) {
+    steps.push('TP confirmado');
+  }
+  if (status.includes('close')) {
+    steps.push(status.includes('stop') ? 'Cerrada por SL' : status.includes('tp') ? 'Cerrada por TP' : 'Cerrada');
+  }
+  return steps.join(' > ');
+}
+
+function hasEventStopLoss(event = {}) {
+  return Boolean(event.signal?.stopLoss || event.order?.stopLoss || event.exchangeStopLoss?.orders?.length);
+}
+
+function hasEventTakeProfit(event = {}) {
+  return Boolean(event.signal?.takeProfits?.length || event.order?.takeProfit || event.exchangeTakeProfit?.orders?.length);
 }
 
 function signalGroupTitle(group) {
@@ -3205,8 +3452,13 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxMaxLeverage.value = bingx.maxLeverage || 5;
   elements.bingxSymbols.value = bingx.allowedSymbols || '';
   elements.bingxRequireSl.checked = Boolean(bingx.requireStopLoss);
+  elements.bingxEntriesPaused.checked = Boolean(bingx.entriesPaused);
+  elements.bingxManagementOnly.checked = Boolean(bingx.managementOnly);
   elements.bingxMaxOpen.value = bingx.maxOpenPositions || 5;
+  elements.bingxMaxDailyOrders.value = bingx.maxDailyOrders ?? 0;
   elements.bingxMaxSignalLeverage.value = bingx.maxSignalLeverage || 125;
+  elements.bingxMaxSignalAge.value = bingx.maxSignalAgeMinutes ?? 180;
+  elements.bingxMaxEntryDeviation.value = bingx.maxEntryDeviationPercent ?? 5;
   elements.bingxVstBaseCapital.value = bingx.vstBaseCapital || 1000;
   elements.bingxVstCapitalPercent.value = bingx.vstCapitalPercent || 15;
   elements.bingxDailyLoss.value = bingx.maxDailyLossUSDT ?? 100;
@@ -3233,8 +3485,13 @@ async function saveBingxConfig() {
     maxLeverage: Number(elements.bingxMaxLeverage.value),
     allowedSymbols: elements.bingxSymbols.value,
     requireStopLoss: elements.bingxRequireSl.checked,
+    entriesPaused: elements.bingxEntriesPaused.checked,
+    managementOnly: elements.bingxManagementOnly.checked,
     maxOpenPositions: Number(elements.bingxMaxOpen.value),
+    maxDailyOrders: Number(elements.bingxMaxDailyOrders.value),
     maxSignalLeverage: Number(elements.bingxMaxSignalLeverage.value),
+    maxSignalAgeMinutes: Number(elements.bingxMaxSignalAge.value),
+    maxEntryDeviationPercent: Number(elements.bingxMaxEntryDeviation.value),
     vstBaseCapital: Number(elements.bingxVstBaseCapital.value),
     vstCapitalPercent: Number(elements.bingxVstCapitalPercent.value),
     maxDailyLossUSDT: Number(elements.bingxDailyLoss.value),

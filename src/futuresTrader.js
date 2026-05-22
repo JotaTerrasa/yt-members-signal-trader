@@ -6,9 +6,10 @@ const OPEN_ORDERS_ERROR_LOG_MS = 60_000;
 const OPEN_ORDERS_DEFAULT_BACKOFF_MS = 60_000;
 
 export class FuturesTrader {
-  constructor({ configStore, paperStore, onLog, onTrade }) {
+  constructor({ configStore, paperStore, tradeEventStore, onLog, onTrade }) {
     this.configStore = configStore;
     this.paperStore = paperStore;
+    this.tradeEventStore = tradeEventStore;
     this.onLog = onLog;
     this.onTrade = onTrade;
     this.contractCache = new Map();
@@ -228,6 +229,27 @@ export class FuturesTrader {
       realizedProfit: Number(row.realizedProfit || 0),
       raw: row
     };
+  }
+
+  async getExchangeOpenOrders({ mode = null } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      ...(mode ? { mode } : {})
+    };
+    if (config.mode === 'dual') {
+      const [demo, live] = await Promise.all([
+        this.getExchangeOpenOrders({ mode: 'demo' }),
+        this.getExchangeOpenOrders({ mode: 'live' })
+      ]);
+      return [...demo, ...live];
+    }
+    if (config.mode === 'test' || !config.apiKey || !config.apiSecret) {
+      return [];
+    }
+
+    const client = this.client(config);
+    const orders = await this.getCachedOpenOrders(client, config);
+    return orders.map((order) => normalizeOpenOrder(order, config.mode));
   }
 
   async normalizeExchangePosition(client, position, config, openOrders = []) {
@@ -714,6 +736,19 @@ export class FuturesTrader {
       return this.emitTrade({ ...baseEvent, status: 'blocked', reason: 'dry_run_required' });
     }
 
+    if (config.entriesPaused) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: 'entries_paused' });
+    }
+
+    if (config.managementOnly) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: 'management_only' });
+    }
+
+    const ageValidation = validateSignalAge(post, phase, config);
+    if (!ageValidation.ok) {
+      return this.emitTrade({ ...baseEvent, status: 'blocked', reason: ageValidation.reason });
+    }
+
     const validation = validateSignal(signal, config);
     if (!validation.ok) {
       return this.emitTrade({ ...baseEvent, status: 'blocked', reason: validation.reason });
@@ -747,6 +782,16 @@ export class FuturesTrader {
     const entryPrice = signal.entry?.type === 'LIMIT' && Number.isFinite(referenceEntryPrice) && referenceEntryPrice > 0
       ? referenceEntryPrice
       : marketPrice;
+    const entryValidation = validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config });
+    if (!entryValidation.ok) {
+      return this.emitTrade({
+        ...baseEvent,
+        status: 'blocked',
+        reason: entryValidation.reason,
+        marketPrice,
+        referenceEntryPrice
+      });
+    }
     const stopValidation = validateStopLossAgainstMarket(signal, entryPrice);
     if (!stopValidation.ok) {
       return this.emitTrade({
@@ -1043,6 +1088,49 @@ export class FuturesTrader {
     return { positions, orders };
   }
 
+  async emergencyCloseAllRealPositions({ closePercent = 100 } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      mode: 'live'
+    };
+    if (!config.enabled || !config.liveConfirmed) {
+      throw new Error('Live real no esta armado.');
+    }
+    return this.closeAllExchangePositions({ client: this.client(config), closePercent });
+  }
+
+  async cancelAllRealOpenOrders() {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      mode: 'live'
+    };
+    if (!config.enabled || !config.liveConfirmed) {
+      throw new Error('Live real no esta armado.');
+    }
+
+    const client = this.client(config);
+    const orders = await this.getCachedOpenOrders(client, config);
+    const canceled = [];
+    const skipped = [];
+    for (const order of orders) {
+      const symbol = order.symbol;
+      const orderId = order.orderId || order.orderID;
+      const clientOrderIdValue = order.clientOrderId || order.clientOrderID;
+      if (!symbol || (!orderId && !clientOrderIdValue)) {
+        skipped.push({ order, reason: 'missing_order_id' });
+        continue;
+      }
+      canceled.push({
+        order,
+        response: await client.cancelOrder({ symbol, orderId, clientOrderId: clientOrderIdValue })
+      });
+    }
+    if (canceled.length) {
+      this.openOrdersCache.delete(openOrdersCacheKey(config));
+    }
+    return { orders, canceled, skipped };
+  }
+
   async setExchangeTakeProfit({ client, marketClient, config, signal, takeProfit }) {
     const response = await client.getPositions(signal.symbol);
     const positions = (Array.isArray(response.data) ? response.data : [])
@@ -1217,6 +1305,21 @@ export class FuturesTrader {
       return { ok: false, reason: `signal_leverage_above_risk_max:${leverage}>${maxSignalLeverage}`, snapshot };
     }
 
+    const maxDailyOrders = Number(config.maxDailyOrders || 0);
+    if (maxDailyOrders > 0) {
+      const dailyOrders = this.tradeEventStore?.countOpeningExecutions?.({
+        mode: config.mode,
+        since: startOfLocalDayIso()
+      }) || 0;
+      if (dailyOrders >= maxDailyOrders) {
+        return {
+          ok: false,
+          reason: `daily_order_limit:${dailyOrders}/${maxDailyOrders}`,
+          snapshot: { ...snapshot, dailyOrders }
+        };
+      }
+    }
+
     const dailyLimit = Number(config.maxDailyLossUSDT || 0);
     if (dailyLimit > 0 && Number(snapshot.dailyPnl || 0) <= -Math.abs(dailyLimit)) {
       return { ok: false, reason: `daily_loss_limit:${snapshot.dailyPnl}`, snapshot };
@@ -1278,6 +1381,44 @@ function validateSignal(signal, config) {
     return { ok: false, reason: 'missing_stop_loss' };
   }
 
+  return { ok: true };
+}
+
+function validateSignalAge(post = {}, phase = '', config = {}) {
+  if (phase === 'manual_replay' || phase === 'manual_probe') {
+    return { ok: true };
+  }
+  const maxMinutes = Number(config.maxSignalAgeMinutes || 0);
+  if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) {
+    return { ok: true };
+  }
+
+  const timestamp = Date.parse(post.firstSeenAt || post.scrapedAt || post.publishedAt || 0);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return { ok: true };
+  }
+
+  const ageMinutes = (Date.now() - timestamp) / 60000;
+  if (ageMinutes > maxMinutes) {
+    return { ok: false, reason: `stale_signal:${Math.round(ageMinutes)}m>${maxMinutes}m` };
+  }
+  return { ok: true };
+}
+
+function validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config }) {
+  if (signal.entry?.type !== 'LIMIT') {
+    return { ok: true };
+  }
+  const maxDeviation = Number(config.maxEntryDeviationPercent || 0);
+  const reference = Number(referenceEntryPrice);
+  const market = Number(marketPrice);
+  if (!Number.isFinite(maxDeviation) || maxDeviation <= 0 || !Number.isFinite(reference) || !Number.isFinite(market) || market <= 0) {
+    return { ok: true };
+  }
+  const deviation = Math.abs(reference - market) / market * 100;
+  if (deviation > maxDeviation) {
+    return { ok: false, reason: `entry_deviation_too_high:${roundMoney(deviation)}%>${maxDeviation}%` };
+  }
   return { ok: true };
 }
 
@@ -1449,6 +1590,23 @@ function normalizePositionSide(position) {
 function extractOpenOrders(response) {
   const rows = response?.data?.orders ?? response?.data ?? [];
   return Array.isArray(rows) ? rows : [];
+}
+
+function normalizeOpenOrder(order = {}, source = '') {
+  return {
+    orderId: order.orderId || order.orderID || null,
+    clientOrderId: order.clientOrderId || order.clientOrderID || null,
+    source,
+    symbol: order.symbol || '',
+    side: order.side || '',
+    positionSide: order.positionSide || '',
+    type: order.type || '',
+    status: order.status || '',
+    price: firstFiniteNumber([order.price]),
+    stopPrice: orderStopPrice(order),
+    quantity: firstFiniteNumber([order.origQty, order.quantity, order.executedQty]),
+    raw: order
+  };
 }
 
 function protectiveOrdersForPosition(position, openOrders = []) {
@@ -1845,4 +2003,8 @@ function monthKey(date) {
 
 function roundMoney(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100000000) / 100000000;
+}
+
+function startOfLocalDayIso(now = new Date()) {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 }

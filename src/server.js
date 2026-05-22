@@ -55,11 +55,12 @@ const priceFeed = new BingXPriceWebSocket({
 const futuresTrader = new FuturesTrader({
   configStore,
   paperStore,
+  tradeEventStore,
   onLog: (entry) => pushLog(entry),
   onTrade: (event) => {
     pnlSourcesCache = null;
     recordTradeEvent(event);
-    notifyTradeExecutionError(event);
+    notifyTradeCriticalEvent(event);
     syncExchangePositions({ reason: event.status || 'trade' }).catch((error) => {
       pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
       syncPriceSubscriptions();
@@ -73,6 +74,8 @@ let pnlSourcesCache = null;
 const lastPriceBroadcast = new Map();
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
+let exchangeBalancesCache = {};
+let exchangeOpenOrdersCache = [];
 let exchangeSyncInFlight = false;
 let lastExchangeSyncAt = 0;
 let lastExchangeSyncReason = '';
@@ -450,6 +453,7 @@ const server = createServer(async (request, response) => {
         paperTrades: paperStore.list(),
         exchangePositions,
         exchangeSafety: buildExchangeSafety(exchangePositions),
+        exchangeOpenOrders: exchangeOpenOrdersCache,
         risk: futuresTrader.riskSnapshot()
       });
     }
@@ -459,12 +463,54 @@ const server = createServer(async (request, response) => {
       return sendJson(response, { ok: true, positions, exchangeSafety: buildExchangeSafety(positions) });
     }
 
+    if (requestUrl.pathname === '/api/bingx/emergency/close-all-real' && request.method === 'POST') {
+      const body = await readJson(request);
+      if (body.confirm !== 'CERRAR_TODO_REAL') {
+        return sendJson(response, { error: 'Confirma CERRAR_TODO_REAL para cerrar todas las posiciones reales.' }, 400);
+      }
+      const result = await futuresTrader.emergencyCloseAllRealPositions({ closePercent: 100 });
+      const event = {
+        at: new Date().toISOString(),
+        status: result.orders?.length ? 'live_emergency_close_all_sent' : 'live_emergency_close_all_no_position',
+        reason: 'manual_emergency',
+        executionMode: 'live',
+        exchangeClose: result
+      };
+      recordTradeEvent(event);
+      notifyTradeCriticalEvent(event);
+      pnlCache = null;
+      pnlSourcesCache = null;
+      await syncExchangePositions({ reason: 'manual_emergency_close' }).catch(() => exchangePositionsCache);
+      return sendJson(response, { ok: true, result, exchangeSafety: buildExchangeSafety() });
+    }
+
+    if (requestUrl.pathname === '/api/bingx/emergency/cancel-all-real' && request.method === 'POST') {
+      const body = await readJson(request);
+      if (body.confirm !== 'CANCELAR_ORDENES_REAL') {
+        return sendJson(response, { error: 'Confirma CANCELAR_ORDENES_REAL para cancelar ordenes pendientes reales.' }, 400);
+      }
+      const result = await futuresTrader.cancelAllRealOpenOrders();
+      const event = {
+        at: new Date().toISOString(),
+        status: result.canceled?.length ? 'live_emergency_cancel_orders_sent' : 'live_emergency_cancel_orders_empty',
+        reason: 'manual_emergency',
+        executionMode: 'live',
+        exchangeCancel: result
+      };
+      recordTradeEvent(event);
+      notifyTradeCriticalEvent(event);
+      await syncExchangePositions({ reason: 'manual_emergency_cancel' }).catch(() => exchangePositionsCache);
+      return sendJson(response, { ok: true, result, exchangeSafety: buildExchangeSafety() });
+    }
+
     if (requestUrl.pathname === '/api/bingx' && request.method === 'PUT') {
       const body = await readJson(request);
+      const previous = configStore.getBingX();
       const bingx = await configStore.updateBingX(body);
       pnlCache = null;
       pnlSourcesCache = null;
       broadcast('bingx', { bingx });
+      notifyBingxPauseChange(previous, bingx);
       return sendJson(response, { ok: true, bingx });
     }
 
@@ -900,9 +946,13 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
       pendingExchangeClosures.clear();
     }
     const next = await futuresTrader.getExchangeOpenPositions();
+    await syncExchangeAccountState(config).catch((error) => {
+      pushLog({ level: 'warn', message: `BingX cuenta: ${error.message}`, at: new Date().toISOString() });
+    });
     lastExchangeSyncAt = Date.now();
     lastExchangeSyncReason = reason;
     const closedCandidates = sourceChanged ? [] : detectClosedExchangePositions(previous, next);
+    const partialPositions = sourceChanged ? [] : detectPartialExchangePositions(previous, next);
     const closedPositions = confirmClosedExchangePositions(closedCandidates, next, reason);
     const visibleNext = mergeUnconfirmedExchangePositions(next, closedCandidates, closedPositions, reason);
     exchangePositionsCache = visibleNext;
@@ -911,10 +961,11 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
       pushLog({ level: 'error', message: `BingX safety: ${error.message}`, at: new Date().toISOString() });
     });
 
-    if (reason !== 'poll' || sourceChanged || closedPositions.length || positionsChanged(previous, visibleNext)) {
+    if (reason !== 'poll' || sourceChanged || closedPositions.length || partialPositions.length || positionsChanged(previous, visibleNext)) {
       broadcast('exchangePositions', {
         positions: visibleNext,
         closedPositions,
+        partialPositions,
         exchangeSafety: buildExchangeSafety(visibleNext),
         reason
       });
@@ -922,6 +973,9 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
 
     for (const position of closedPositions) {
       handleExchangeClosedPosition(position, reason);
+    }
+    for (const position of partialPositions) {
+      handleExchangePartialPosition(position, reason);
     }
 
     return exchangePositionsCache;
@@ -933,6 +987,26 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
 function detectClosedExchangePositions(previous, next) {
   const openKeys = new Set(next.map(exchangePositionIdentityKey));
   return previous.filter((position) => !openKeys.has(exchangePositionIdentityKey(position)));
+}
+
+function detectPartialExchangePositions(previous, next) {
+  const previousByKey = new Map(previous.map((position) => [exchangePositionIdentityKey(position), position]));
+  return next
+    .map((position) => {
+      const before = previousByKey.get(exchangePositionIdentityKey(position));
+      const beforeQuantity = Number(before?.quantity || 0);
+      const afterQuantity = Number(position.quantity || 0);
+      if (!before || !Number.isFinite(beforeQuantity) || !Number.isFinite(afterQuantity) || afterQuantity >= beforeQuantity || afterQuantity <= 0) {
+        return null;
+      }
+      return {
+        ...position,
+        previousQuantity: beforeQuantity,
+        closedQuantity: roundMoney(beforeQuantity - afterQuantity),
+        partialPercent: beforeQuantity > 0 ? roundMoney(((beforeQuantity - afterQuantity) / beforeQuantity) * 100) : null
+      };
+    })
+    .filter(Boolean);
 }
 
 function mergeUnconfirmedExchangePositions(next, candidates, confirmed, reason) {
@@ -1050,6 +1124,27 @@ function exchangeSourcesForMode(mode) {
   return [mode === 'demo' ? 'demo' : 'live'];
 }
 
+async function syncExchangeAccountState(config = configStore.getBingX()) {
+  if (!config.enabled || config.mode === 'test' || !config.apiKeyConfigured || !config.apiSecretConfigured) {
+    exchangeBalancesCache = {};
+    exchangeOpenOrdersCache = [];
+    return;
+  }
+
+  const modes = exchangeSourcesForMode(config.mode);
+  const [balances, openOrders] = await Promise.all([
+    Promise.allSettled(modes.map((mode) => futuresTrader.getExchangeBalance({ mode: mode === 'demo' ? 'demo' : 'live' }))),
+    futuresTrader.getExchangeOpenOrders({ mode: config.mode })
+  ]);
+
+  exchangeBalancesCache = {};
+  balances.forEach((result, index) => {
+    const mode = modes[index];
+    exchangeBalancesCache[mode] = result.status === 'fulfilled' ? result.value : null;
+  });
+  exchangeOpenOrdersCache = openOrders;
+}
+
 function buildExchangeSafety(inputPositions = exchangePositionsCache) {
   const config = configStore.getBingX();
   const credentialsOk = Boolean(config.apiKeyConfigured && config.apiSecretConfigured);
@@ -1060,12 +1155,17 @@ function buildExchangeSafety(inputPositions = exchangePositionsCache) {
   const liveWithoutStopLoss = livePositions.filter((position) => !hasStopLossProtection(position));
   const liveWithoutTakeProfit = livePositions.filter((position) => !hasTakeProfitProtection(position));
   const demoWithoutStopLoss = demoPositions.filter((position) => !hasStopLossProtection(position));
+  const liveOrders = exchangeOpenOrdersCache.filter((order) => order.source === 'live');
+  const demoOrders = exchangeOpenOrdersCache.filter((order) => order.source === 'demo');
+  const liveOrphanOrders = orphanProtectiveOrders(liveOrders, livePositions);
+  const demoOrphanOrders = orphanProtectiveOrders(demoOrders, demoPositions);
   const ageMs = lastExchangeSyncAt ? Date.now() - lastExchangeSyncAt : null;
   const stale = exchangeEnabled && (ageMs === null || ageMs > EXCHANGE_SYNC_STALE_MS);
   const missingRequiredStops = Boolean(config.requireStopLoss && usesLiveMode(config.mode) && liveWithoutStopLoss.length);
+  const orphanRequired = Boolean(usesLiveMode(config.mode) && liveOrphanOrders.length);
   const level = !exchangeEnabled
     ? 'idle'
-    : stale || missingRequiredStops ? 'warn' : 'ok';
+    : stale || missingRequiredStops || orphanRequired ? 'warn' : 'ok';
 
   return {
     level,
@@ -1077,8 +1177,8 @@ function buildExchangeSafety(inputPositions = exchangePositionsCache) {
     ageSeconds: ageMs === null ? null : Math.max(0, Math.round(ageMs / 1000)),
     stale,
     staleAfterSeconds: Math.round(EXCHANGE_SYNC_STALE_MS / 1000),
-    real: exchangeSafetySummary(livePositions, liveWithoutStopLoss, liveWithoutTakeProfit, 'USDT'),
-    demo: exchangeSafetySummary(demoPositions, demoWithoutStopLoss, [], 'VST'),
+    real: exchangeSafetySummary(livePositions, liveWithoutStopLoss, liveWithoutTakeProfit, liveOrders, liveOrphanOrders, exchangeBalancesCache.live, 'USDT'),
+    demo: exchangeSafetySummary(demoPositions, demoWithoutStopLoss, [], demoOrders, demoOrphanOrders, exchangeBalancesCache.demo, 'VST'),
     checks: [
       {
         key: 'exchange-sync',
@@ -1107,6 +1207,12 @@ function buildExchangeSafety(inputPositions = exchangePositionsCache) {
         detail: `${Math.max(0, livePositions.length - liveWithoutTakeProfit.length)}/${livePositions.length}`
       },
       {
+        key: 'orphan-orders',
+        label: 'Ordenes huerfanas',
+        ok: !liveOrphanOrders.length,
+        detail: String(liveOrphanOrders.length)
+      },
+      {
         key: 'duplicate-guard',
         label: 'Anti-duplicados',
         ok: true,
@@ -1116,14 +1222,18 @@ function buildExchangeSafety(inputPositions = exchangePositionsCache) {
   };
 }
 
-function exchangeSafetySummary(positions, withoutStopLoss, withoutTakeProfit, asset) {
+function exchangeSafetySummary(positions, withoutStopLoss, withoutTakeProfit, openOrders, orphanOrders, balance, asset) {
   return {
     asset,
+    balance: balanceSummaryForSafety(balance),
     openPositions: positions.length,
     protectedStopLoss: Math.max(0, positions.length - withoutStopLoss.length),
     protectedTakeProfit: Math.max(0, positions.length - withoutTakeProfit.length),
     missingStopLoss: withoutStopLoss.length,
     missingTakeProfit: withoutTakeProfit.length,
+    openOrders: openOrders.length,
+    orphanOrders: orphanOrders.length,
+    nearestLiquidation: nearestLiquidationSummary(positions),
     exposure: roundMoney(positions.reduce((sum, position) => (
       sum + Number(position.exposure || position.notional || 0)
     ), 0)),
@@ -1131,8 +1241,48 @@ function exchangeSafetySummary(positions, withoutStopLoss, withoutTakeProfit, as
       sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
     ), 0)),
     withoutStopLoss: withoutStopLoss.map(publicExchangeSafetyPosition),
-    withoutTakeProfit: withoutTakeProfit.map(publicExchangeSafetyPosition)
+    withoutTakeProfit: withoutTakeProfit.map(publicExchangeSafetyPosition),
+    orphanOrderItems: orphanOrders.map(publicOpenOrder)
   };
+}
+
+function balanceSummaryForSafety(balance) {
+  if (!balance) {
+    return null;
+  }
+  const equity = Number(balance.equity || 0);
+  const usedMargin = Number(balance.usedMargin || 0);
+  return {
+    asset: balance.asset || 'USDT',
+    balance: roundMoney(balance.balance || 0),
+    equity: roundMoney(equity),
+    availableMargin: roundMoney(balance.availableMargin || 0),
+    usedMargin: roundMoney(usedMargin),
+    frozenMargin: roundMoney(balance.frozenMargin || 0),
+    marginUsagePercent: equity > 0 ? roundMoney((usedMargin / equity) * 100) : 0,
+    unrealizedProfit: roundMoney(balance.unrealizedProfit || 0)
+  };
+}
+
+function nearestLiquidationSummary(positions = []) {
+  const items = positions
+    .map((position) => {
+      const liquidation = Number(position.raw?.liquidationPrice || position.liquidationPrice || 0);
+      const price = Number(position.currentPrice || 0);
+      if (!Number.isFinite(liquidation) || !Number.isFinite(price) || liquidation <= 0 || price <= 0) {
+        return null;
+      }
+      return {
+        symbol: position.symbol,
+        direction: position.direction,
+        liquidationPrice: liquidation,
+        currentPrice: price,
+        distancePercent: roundMoney(Math.abs(price - liquidation) / price * 100)
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.distancePercent - right.distancePercent);
+  return items[0] || null;
 }
 
 function publicExchangeSafetyPosition(position) {
@@ -1146,6 +1296,40 @@ function publicExchangeSafetyPosition(position) {
     unrealizedPnl: position.unrealizedPnl,
     exposure: position.exposure || position.notional || 0
   };
+}
+
+function orphanProtectiveOrders(openOrders = [], positions = []) {
+  return openOrders.filter((order) => (
+    isProtectiveOrder(order)
+    && !positions.some((position) => (
+      normalizePositionSymbol(position.symbol) === normalizePositionSymbol(order.symbol)
+      && (!order.positionSide || String(order.positionSide).toUpperCase() === String(position.direction || '').toUpperCase())
+    ))
+  ));
+}
+
+function isProtectiveOrder(order = {}) {
+  const type = String(order.type || '').toUpperCase();
+  return type.includes('STOP') || type.includes('TAKE_PROFIT');
+}
+
+function publicOpenOrder(order = {}) {
+  return {
+    orderId: order.orderId,
+    clientOrderId: order.clientOrderId,
+    source: order.source,
+    symbol: order.symbol,
+    side: order.side,
+    positionSide: order.positionSide,
+    type: order.type,
+    status: order.status,
+    stopPrice: order.stopPrice,
+    quantity: order.quantity
+  };
+}
+
+function normalizePositionSymbol(value) {
+  return String(value || '').toUpperCase().replace('/', '-');
 }
 
 function hasStopLossProtection(position = {}) {
@@ -1167,17 +1351,25 @@ function hasTakeProfitProtection(position = {}) {
 
 async function evaluateExchangeSafety(positions = exchangePositionsCache, reason = 'poll') {
   const config = configStore.getBingX();
-  if (!config.requireStopLoss || !usesLiveMode(config.mode)) {
+  if (!usesLiveMode(config.mode)) {
     return;
   }
 
   const missing = positions
     .filter((position) => position.source === 'live' && position.status === 'open')
     .filter((position) => !hasStopLossProtection(position));
+  const liveOrders = exchangeOpenOrdersCache.filter((order) => order.source === 'live');
+  const orphanOrders = orphanProtectiveOrders(liveOrders, positions.filter((position) => position.source === 'live' && position.status === 'open'));
+  if (config.requireStopLoss) {
+    await alertMissingLiveStops(missing, reason);
+  }
+  await alertOrphanLiveOrders(orphanOrders, reason);
+}
+
+async function alertMissingLiveStops(missing, reason) {
   if (!missing.length) {
     return;
   }
-
   const key = `missing-live-sl:${missing.map((position) => `${position.symbol}:${position.direction}`).sort().join('|')}`;
   const now = Date.now();
   if (now - Number(exchangeSafetyAlerts.get(key) || 0) < EXCHANGE_SAFETY_ALERT_COOLDOWN_MS) {
@@ -1205,6 +1397,31 @@ async function evaluateExchangeSafety(positions = exchangePositionsCache, reason
         pushLog({ level: 'warn', message: 'Alerta de riesgo real enviada por Telegram.', at: new Date().toISOString() });
       }
     });
+}
+
+async function alertOrphanLiveOrders(orphanOrders, reason) {
+  if (!orphanOrders.length) {
+    return;
+  }
+  const key = `orphan-live-orders:${orphanOrders.map((order) => `${order.symbol}:${order.orderId || order.clientOrderId}`).sort().join('|')}`;
+  const now = Date.now();
+  if (now - Number(exchangeSafetyAlerts.get(key) || 0) < EXCHANGE_SAFETY_ALERT_COOLDOWN_MS) {
+    return;
+  }
+  exchangeSafetyAlerts.set(key, now);
+  const details = [
+    `${orphanOrders.length} orden(es) protectoras reales sin posicion asociada.`,
+    `Sync: ${reason}`,
+    ...orphanOrders.map((order) => `${order.symbol} ${order.type || ''} ${order.stopPrice || ''}`.trim())
+  ].join('\n');
+  pushLog({
+    level: 'warn',
+    message: `BingX real con ordenes huerfanas: ${orphanOrders.map((order) => order.symbol).join(', ')}.`,
+    at: new Date().toISOString()
+  });
+  await telegramNotifier.sendAlert('Descuadre BingX real', details).catch((error) => {
+    pushLog({ level: 'error', message: `Telegram BingX orphan: ${error.message}`, at: new Date().toISOString() });
+  });
 }
 
 function usesLiveMode(mode) {
@@ -1236,6 +1453,88 @@ function notifyTradeExecutionError(event) {
     })
     .catch((error) => {
       pushLog({ level: 'error', message: `Telegram BingX order error: ${error.message}`, at: new Date().toISOString() });
+    });
+}
+
+function notifyTradeCriticalEvent(event = {}) {
+  notifyTradeExecutionError(event);
+  if (!isLiveCriticalEvent(event)) {
+    return;
+  }
+
+  const title = criticalTradeTitle(event);
+  const details = [
+    event.signal?.symbol ? `${event.signal.symbol} ${event.signal.direction || event.signal.action || ''}`.trim() : '',
+    event.status ? `Estado: ${event.status}` : '',
+    event.sizing?.notional ? `Orden: ${formatSigned(event.sizing.notional).replace('+', '')} ${event.sizing.asset || 'USDT'}` : '',
+    event.takeProfit ? `TP: ${event.takeProfit}` : '',
+    event.stopLoss ? `SL: ${event.stopLoss}` : '',
+    event.closePercent ? `Cierre: ${event.closePercent}%` : '',
+    event.reason ? `Motivo: ${event.reason}` : '',
+    event.postUrl ? `Post: ${event.postUrl}` : ''
+  ].filter(Boolean).join('\n');
+
+  telegramNotifier.sendAlert(title, details || event.status)
+    .then((result) => {
+      if (result.sent) {
+        pushLog({ level: 'warn', message: `${title} enviado por Telegram.`, at: new Date().toISOString() });
+      }
+    })
+    .catch((error) => {
+      pushLog({ level: 'error', message: `Telegram critical trade: ${error.message}`, at: new Date().toISOString() });
+    });
+}
+
+function isLiveCriticalEvent(event = {}) {
+  const status = String(event.status || '');
+  return event.executionMode === 'live'
+    || status.startsWith('live_')
+    || event.exchangePosition?.source === 'live';
+}
+
+function criticalTradeTitle(event = {}) {
+  const status = String(event.status || '');
+  if (status === 'live_order_sent') {
+    return 'Orden real enviada';
+  }
+  if (status === 'live_tp_sent') {
+    return 'TP real colocado';
+  }
+  if (status === 'live_sl_sent') {
+    return 'SL real colocado';
+  }
+  if (status.includes('close_all')) {
+    return 'Cierre total real';
+  }
+  if (status.includes('cancel_orders')) {
+    return 'Ordenes reales canceladas';
+  }
+  if (status.includes('close')) {
+    return 'Cierre real enviado';
+  }
+  return 'Evento critico real';
+}
+
+function notifyBingxPauseChange(previous = {}, next = {}) {
+  const changes = [];
+  if (!previous.entriesPaused && next.entriesPaused) {
+    changes.push('Entradas pausadas');
+  }
+  if (previous.entriesPaused && !next.entriesPaused) {
+    changes.push('Entradas reactivadas');
+  }
+  if (!previous.managementOnly && next.managementOnly) {
+    changes.push('Solo gestion de cierres/SL/TP');
+  }
+  if (previous.managementOnly && !next.managementOnly) {
+    changes.push('Gestion normal reactivada');
+  }
+  if (!changes.length) {
+    return;
+  }
+  telegramNotifier.sendAlert('Bot BingX actualizado', changes.join('\n'))
+    .catch((error) => {
+      pushLog({ level: 'error', message: `Telegram BingX pause: ${error.message}`, at: new Date().toISOString() });
     });
 }
 
@@ -1272,6 +1571,38 @@ function handleExchangeClosedPosition(position, reason) {
   ).catch((error) => {
     pushLog({ level: 'error', message: `Telegram BingX close: ${error.message}`, at: new Date().toISOString() });
   });
+}
+
+function handleExchangePartialPosition(position, reason) {
+  const event = {
+    at: new Date().toISOString(),
+    status: 'exchange_position_partial',
+    reason,
+    signal: {
+      symbol: position.symbol,
+      direction: position.direction
+    },
+    exchangePosition: position
+  };
+  recordTradeEvent(event);
+  pushLog({
+    level: 'warn',
+    message: `BingX parcial ${position.symbol}: ${position.closedQuantity || '?'} cerrados.`,
+    at: event.at
+  });
+  if (position.source === 'live') {
+    telegramNotifier.sendAlert(
+      'Cierre parcial real detectado',
+      [
+        `${position.symbol} ${position.direction || ''}`.trim(),
+        `Cerrado aprox: ${position.closedQuantity || '-'}`,
+        position.partialPercent ? `${position.partialPercent}%` : '',
+        `Queda: ${position.quantity || '-'}`
+      ].filter(Boolean).join('\n')
+    ).catch((error) => {
+      pushLog({ level: 'error', message: `Telegram BingX partial: ${error.message}`, at: new Date().toISOString() });
+    });
+  }
 }
 
 function exchangeCloseStatus(position, reason) {
@@ -1356,12 +1687,21 @@ async function handlePriceTick(tick) {
 }
 
 function recordTradeEvent(event) {
-  state.trades.unshift(event);
+  const storedEvent = {
+    ...event,
+    auditSnapshot: event.auditSnapshot || {
+      health: buildHealth(),
+      exchangeSafety: buildExchangeSafety(),
+      mode: configStore.getBingX().mode,
+      capturedAt: new Date().toISOString()
+    }
+  };
+  state.trades.unshift(storedEvent);
   state.trades = state.trades.slice(0, 200);
-  tradeEventStore.append(event).catch((error) => {
+  tradeEventStore.append(storedEvent).catch((error) => {
     pushLog({ level: 'error', message: `Trade event store: ${error.message}`, at: new Date().toISOString() });
   });
-  broadcast('trade', event);
+  broadcast('trade', storedEvent);
 }
 
 function positionSymbol(value) {

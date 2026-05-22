@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=24">
+    <link rel="stylesheet" href="/styles.css?v=25">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=56" defer></script>
+    <script src="/app.js?v=57" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -239,6 +239,14 @@
               <input id="bingx-require-sl" type="checkbox" checked>
               <span>Exigir stop loss</span>
             </label>
+            <label class="check-option">
+              <input id="bingx-entries-paused" type="checkbox">
+              <span>Pausar nuevas entradas</span>
+            </label>
+            <label class="check-option">
+              <input id="bingx-management-only" type="checkbox">
+              <span>Solo gestionar cierres, SL y TP</span>
+            </label>
             <div class="range-grid">
               <label for="bingx-max-open">
                 <span>Max abiertas</span>
@@ -247,6 +255,22 @@
 	              <label for="bingx-max-signal-leverage">
 	                <span>Leverage max señal</span>
 	                <input id="bingx-max-signal-leverage" type="number" min="1" max="125" step="1" value="125">
+	              </label>
+	            </div>
+	            <div class="range-grid">
+	              <label for="bingx-max-daily-orders">
+	                <span>Max ordenes dia</span>
+	                <input id="bingx-max-daily-orders" type="number" min="0" max="500" step="1" value="0">
+	              </label>
+	              <label for="bingx-max-signal-age">
+	                <span>Edad max senal min</span>
+	                <input id="bingx-max-signal-age" type="number" min="0" max="1440" step="5" value="180">
+	              </label>
+	            </div>
+	            <div class="range-grid">
+	              <label for="bingx-max-entry-deviation">
+	                <span>Desvio entrada %</span>
+	                <input id="bingx-max-entry-deviation" type="number" min="0" max="50" step="0.1" value="5">
 	              </label>
 	            </div>
 	            <div class="range-grid">
@@ -466,6 +490,8 @@
               Modo test: el neto superior suma paper local. Las posiciones abiertas se actualizan con BingX Futuros Perpetuo USDⓈ.
             </p>
 
+            <div class="real-mode-banner" id="real-mode-banner"></div>
+
 	            <div id="pnl-empty" class="empty-state hidden">
               Configura BingX para leer el PnL mensual.
             </div>
@@ -509,6 +535,30 @@
                 </div>
                 <div class="ops-metrics" id="exchange-safety-metrics"></div>
                 <div class="exchange-safety-checks" id="exchange-safety-checks"></div>
+              </div>
+              <div class="ops-panel emergency-panel" id="emergency-panel">
+                <div class="trade-section-header">
+                  <h3>Emergencia real</h3>
+                  <span id="emergency-status">Armado con confirmacion</span>
+                </div>
+                <div class="emergency-actions">
+                  <button id="pause-entries" class="button secondary" type="button">
+                    <i data-lucide="pause-circle"></i>
+                    <span>Pausar entradas</span>
+                  </button>
+                  <button id="management-only" class="button secondary" type="button">
+                    <i data-lucide="shield"></i>
+                    <span>Solo gestion</span>
+                  </button>
+                  <button id="cancel-real-orders" class="button danger" type="button">
+                    <i data-lucide="ban"></i>
+                    <span>Cancelar pendientes</span>
+                  </button>
+                  <button id="close-real-all" class="button danger" type="button">
+                    <i data-lucide="octagon-alert"></i>
+                    <span>Cerrar todo real</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -555,6 +605,24 @@
                   Todavia no hay señales operadas.
                 </div>
                 <div class="trade-history" id="trade-history-list"></div>
+                <div class="trade-table-wrap real-audit-wrap">
+                  <table class="trade-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Senal</th>
+                        <th>Estado</th>
+                        <th>Orden</th>
+                        <th>Respuesta</th>
+                        <th>Snapshot</th>
+                        <th>PnL</th>
+                        <th>Fees/Funding</th>
+                        <th>Motivo</th>
+                      </tr>
+                    </thead>
+                    <tbody id="real-audit-table"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
 

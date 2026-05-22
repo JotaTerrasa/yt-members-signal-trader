@@ -939,6 +939,44 @@ summary.dashboard-section-title {
   gap: 8px;
 }
 
+.real-mode-banner {
+  display: none;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(177, 65, 58, 0.28);
+  border-radius: 8px;
+  background: #161b1f;
+  color: #f7fbff;
+}
+
+.real-mode-banner.active {
+  display: grid;
+}
+
+.real-mode-banner.paused {
+  border-color: rgba(196, 122, 16, 0.6);
+}
+
+.real-mode-banner div {
+  display: grid;
+  gap: 3px;
+  min-height: 50px;
+}
+
+.real-mode-banner span {
+  color: #9fb0b7;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.real-mode-banner strong {
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
 .exchange-safety-panel {
   border-color: rgba(36, 91, 155, 0.18);
 }
@@ -990,6 +1028,22 @@ summary.dashboard-section-title {
 .exchange-safety-empty {
   background: var(--panel-strong);
   color: var(--muted);
+}
+
+.emergency-panel {
+  border-color: rgba(177, 65, 58, 0.22);
+}
+
+.emergency-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.emergency-actions .button.active {
+  border-color: var(--gold);
+  color: #604412;
+  background: #fff6de;
 }
 
 .pnl-chart {
@@ -2106,6 +2160,14 @@ summary.dashboard-section-title {
   overflow-wrap: anywhere;
 }
 
+.signal-cell small {
+  color: inherit;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.25;
+  opacity: 0.82;
+}
+
 .signal-cell.muted {
   color: var(--muted);
   background: #f8faf9;
@@ -2282,6 +2344,10 @@ summary.dashboard-section-title {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.real-audit-wrap {
+  margin-top: 10px;
 }
 
 .trade-table {

@@ -76,6 +76,16 @@ export class TradeEventStore {
         && tradeSignalFingerprint(event.signal) === target;
     }) || null;
   }
+
+  countOpeningExecutions({ mode = null, since = null } = {}) {
+    const cutoff = since ? Date.parse(since) : NaN;
+    return this.data.events.filter((event) => {
+      const timestamp = Date.parse(event.at || 0);
+      return isOpeningExecutionStatus(event.status)
+        && (!Number.isFinite(cutoff) || timestamp >= cutoff)
+        && (!mode || eventExecutionMode(event) === mode);
+    }).length;
+  }
 }
 
 function tradeEventId(event = {}) {
@@ -124,4 +134,22 @@ function isOpeningExecutionStatus(status) {
   return value === 'test_order_sent'
     || value === 'demo_order_sent'
     || value === 'live_order_sent';
+}
+
+function eventExecutionMode(event = {}) {
+  const explicit = String(event.executionMode || '').toLowerCase();
+  if (explicit === 'demo' || explicit === 'live' || explicit === 'test') {
+    return explicit;
+  }
+  const status = String(event.status || '').toLowerCase();
+  if (status.startsWith('demo_')) {
+    return 'demo';
+  }
+  if (status.startsWith('live_')) {
+    return 'live';
+  }
+  if (status.startsWith('test_')) {
+    return 'test';
+  }
+  return '';
 }
