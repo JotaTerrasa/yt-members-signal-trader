@@ -2012,33 +2012,6 @@ summary.dashboard-section-title {
   padding: 14px;
 }
 
-.dual-ops-panel {
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.dual-ops-panel.dual-active {
-  border-color: rgba(19, 123, 109, 0.35);
-}
-
-.dual-ops-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
-  gap: 8px;
-}
-
-.dual-ops-metrics div {
-  display: grid;
-  gap: 5px;
-  min-height: 68px;
-  padding: 10px;
-  border-radius: 8px;
-  background: var(--panel-strong);
-}
-
-.dual-ops-metrics span,
 .signal-grid-head,
 .signal-cell span,
 .position-column-header strong {
@@ -2046,16 +2019,6 @@ summary.dashboard-section-title {
   font-size: 0.74rem;
   font-weight: 900;
   text-transform: uppercase;
-}
-
-.dual-ops-metrics strong {
-  font-size: 0.96rem;
-  overflow-wrap: anywhere;
-}
-
-.dual-signal-matrix {
-  display: grid;
-  gap: 8px;
 }
 
 .signal-group {
@@ -2127,7 +2090,7 @@ summary.dashboard-section-title {
 
 .signal-grid {
   display: grid;
-  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 1fr) minmax(150px, 1fr);
+  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 1fr);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2140,11 +2103,11 @@ summary.dashboard-section-title {
   border-bottom: 1px solid var(--line);
 }
 
-.signal-grid > div:nth-child(3n) {
+.signal-grid > div:nth-child(2n) {
   border-right: 0;
 }
 
-.signal-grid > div:nth-last-child(-n + 3) {
+.signal-grid > div:nth-last-child(-n + 2) {
   border-bottom: 0;
 }
 
@@ -2621,8 +2584,8 @@ summary.dashboard-section-title {
   }
 
   .signal-grid > div,
-  .signal-grid > div:nth-child(3n),
-  .signal-grid > div:nth-last-child(-n + 3) {
+  .signal-grid > div:nth-child(2n),
+  .signal-grid > div:nth-last-child(-n + 2) {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -3130,7 +3093,6 @@ h1 {
 .ops-panel,
 .simulation-panel,
 .historical-panel,
-.dual-ops-panel,
 .signal-group,
 .position-column {
   background: #fff;
@@ -3142,7 +3104,6 @@ h1 {
 }
 
 .pnl-card span,
-.dual-ops-metrics span,
 .ops-metrics span,
 .historical-summary span,
 .simulation-metrics span,
@@ -3172,7 +3133,6 @@ h1 {
 }
 
 .ops-metrics div,
-.dual-ops-metrics div,
 .curve-stats div,
 .simulation-summary div,
 .historical-summary div,
@@ -3202,11 +3162,6 @@ h1 {
 
 .live-check.missing {
   background: var(--danger-soft);
-}
-
-.dual-ops-panel.dual-active {
-  border-color: rgba(15, 118, 110, 0.45);
-  box-shadow: 0 12px 30px rgba(15, 118, 110, 0.08);
 }
 
 .signal-grid,

@@ -88,10 +88,6 @@ const elements = {
   managementOnly: document.querySelector('#management-only'),
   cancelRealOrders: document.querySelector('#cancel-real-orders'),
   closeRealAll: document.querySelector('#close-real-all'),
-  dualOpsPanel: document.querySelector('#dual-ops-panel'),
-  dualOpsStatus: document.querySelector('#dual-ops-status'),
-  dualOpsMetrics: document.querySelector('#dual-ops-metrics'),
-  dualSignalMatrix: document.querySelector('#dual-signal-matrix'),
   tickerPnlStatus: document.querySelector('#ticker-pnl-status'),
   tickerPnlChart: document.querySelector('#ticker-pnl-chart'),
   dailyPnlStatus: document.querySelector('#daily-pnl-status'),
@@ -297,12 +293,12 @@ function bindEvents() {
         renderLiveReadiness(readiness);
         throw new Error('Live aun no esta preparado. Revisa el checklist.');
       }
-      const confirmed = confirm('Vas a armar VST + LIVE REAL. Las proximas señales validas podran enviar ordenes demo VST y ordenes reales a BingX. Continuar?');
+      const confirmed = confirm('Vas a armar LIVE REAL. Las proximas senales validas podran enviar ordenes reales a BingX. Continuar?');
       if (!confirmed) {
         return;
       }
       elements.bingxEnabled.checked = true;
-      elements.bingxMode.value = 'dual';
+      elements.bingxMode.value = 'live';
       elements.bingxLiveConfirm.checked = true;
       const bingx = await saveBingxConfig();
       renderBingx(bingx, 'Live armado');
@@ -872,7 +868,6 @@ function renderPnl() {
   renderHealthPanel();
   renderRiskPanel(openPositions, closedPositions);
   renderExchangeSafetyPanel();
-  renderDualOpsPanel();
   renderTickerPnl();
   renderDailyPnl();
   renderHistoricalPnl();
@@ -884,22 +879,15 @@ function renderPnl() {
 }
 
 function pnlSourceCards(reference = currentReferenceLedger()) {
-  const sheet = sheetPnlSource(reference);
-  const vstPositions = positionsForPnlSource('vst', reference);
   const livePositions = positionsForPnlSource('live', reference);
-  const vst = exchangeSourceWithPositions(appState.pnlSources?.sources?.vst, vstPositions, {
-    key: 'vst',
-    label: 'Futuros VST',
-    modeLabel: 'Demo VST',
-    asset: 'VST'
-  });
   const live = exchangeSourceWithPositions(appState.pnlSources?.sources?.live, livePositions, {
     key: 'live',
     label: 'Futuros reales',
     modeLabel: 'Live real',
     asset: 'USDT'
   });
-  return [sheet, vst, live];
+  const sheet = sheetPnlSource(reference);
+  return [live, sheet];
 }
 
 function sheetPnlSource(reference = currentReferenceLedger()) {
@@ -1014,13 +1002,10 @@ function selectedPnlSource(sources = pnlSourceCards()) {
 }
 
 function defaultPnlSourceKey(sources) {
-  if (appState.bingx?.mode === 'live' || appState.bingx?.mode === 'dual') {
+  if (sources.some((source) => source.key === 'live')) {
     return 'live';
   }
-  if (appState.bingx?.mode === 'demo') {
-    return 'vst';
-  }
-  return sources.find((source) => source.key === 'sheet' && source.available) ? 'sheet' : 'vst';
+  return sources.find((source) => source.key === 'sheet' && source.available) ? 'sheet' : 'live';
 }
 
 function renderPnlSourceGrid(sources, selectedKey) {
@@ -1446,17 +1431,10 @@ function sourceNoteText(source) {
   if (source.key === 'sheet') {
     return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
   }
-  if (source.key === 'vst') {
-    return appState.bingx?.mode === 'dual'
-      ? 'VST demo queda separado de real. Las nuevas señales usan 150 VST por orden.'
-      : 'Futuros VST muestra solamente el saldo total de la cuenta demo de BingX.';
-  }
   if (source.key === 'live') {
-    return appState.bingx?.mode === 'dual'
-      ? 'Futuros reales queda separado de VST. Las nuevas señales usan 16,55 USDT por orden.'
-      : 'Futuros reales lee la cuenta real de BingX. Mantenlo separado de VST antes de armar live.';
+    return 'Futuros reales muestra solo USDT: cuenta real, posiciones reales, fees, funding y senales ejecutadas en real.';
   }
-  return 'Cada tarjeta separa una fuente de PnL para evitar mezclar referencia, demo y real.';
+  return 'Cada tarjeta separa una fuente de PnL para evitar mezclar referencia y real.';
 }
 
 function pnlNoteText({ hasPaperActivity, hasBingxActivity, hasReference }) {
@@ -1902,7 +1880,7 @@ function renderRealModeBanner() {
   elements.realModeBanner.innerHTML = `
     <div>
       <span>${escapeHtml(active ? 'REAL ACTIVADO' : 'REAL NO ARMADO')}</span>
-      <strong>${escapeHtml(bingxModeLabel(bingx.mode))}</strong>
+      <strong>${escapeHtml(realTabModeLabel(bingx.mode))}</strong>
     </div>
     <div>
       <span>Orden real</span>
@@ -2502,36 +2480,12 @@ function renderPnlRow(row, source = null) {
   `;
 }
 
-function renderOpenPositions(openPositions = openTradingPositions()) {
-  if (appState.bingx?.mode === 'dual') {
-    const demoPositions = positionsForPnlSource('vst').filter((position) => position.status === 'open');
-    const livePositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
-    const total = demoPositions.length + livePositions.length;
-    elements.openPositionsStatus.textContent = `VST ${demoPositions.length} · Real ${livePositions.length}`;
-    elements.openPositionsEmpty.classList.toggle('hidden', total > 0);
-    elements.openPositionsEmpty.textContent = 'Sin posiciones abiertas en VST ni real.';
-    elements.openPositionsList.classList.add('position-grid-split');
-    elements.openPositionsList.innerHTML = `
-      ${renderPositionColumn({
-        key: 'demo',
-        title: 'Demo VST',
-        subtitle: `${demoPositions.length} abiertas`,
-        positions: demoPositions
-      })}
-      ${renderPositionColumn({
-        key: 'live',
-        title: 'Real USDT',
-        subtitle: `${livePositions.length} abiertas`,
-        positions: livePositions
-      })}
-    `;
-    return;
-  }
-
+function renderOpenPositions() {
+  const openPositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
   elements.openPositionsList.classList.remove('position-grid-split');
-  elements.openPositionsStatus.textContent = `${openPositions.length} abiertas`;
+  elements.openPositionsStatus.textContent = `${openPositions.length} reales`;
   elements.openPositionsEmpty.classList.toggle('hidden', openPositions.length > 0);
-  elements.openPositionsEmpty.textContent = `Sin posiciones abiertas en ${selectedPnlSource().label}.`;
+  elements.openPositionsEmpty.textContent = 'Sin posiciones reales abiertas en USDT.';
   elements.openPositionsList.innerHTML = openPositions.map(renderOpenPositionCard).join('');
 }
 
@@ -3000,42 +2954,13 @@ function renderOpenPositionRow(position) {
   `;
 }
 
-function renderDualOpsPanel() {
-  if (!elements.dualOpsPanel) {
-    return;
-  }
-
-  const demoPositions = positionsForPnlSource('vst').filter((position) => position.status === 'open');
-  const livePositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
-  const config = appState.bingx || {};
-  const groups = groupedSignalEvents().slice(0, 4);
-  const vstNotional = Number(config.vstBaseCapital || 1000) * (Number(config.vstCapitalPercent || 15) / 100);
-  const realNotional = Number(config.defaultNotionalUSDT || 0);
-
-  elements.dualOpsPanel.classList.toggle('dual-active', config.mode === 'dual');
-  elements.dualOpsStatus.textContent = config.mode === 'dual'
-    ? `${groups.length} posts recientes · VST + Real`
-    : `${bingxModeLabel(config.mode)} · vista comparativa`;
-  elements.dualOpsMetrics.innerHTML = [
-    ['Modo', bingxModeLabel(config.mode)],
-    ['Proxima VST', formatMoney(vstNotional, 'VST')],
-    ['Proxima real', formatMoney(realNotional, 'USDT')],
-    ['Abiertas VST', String(demoPositions.length)],
-    ['Abiertas real', String(livePositions.length)]
-  ].map(([label, value]) => `
-    <div>
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value)}</strong>
-    </div>
-  `).join('');
-
-  elements.dualSignalMatrix.innerHTML = groups.length
-    ? groups.map(renderSignalGroup).join('')
-    : '<div class="empty-state compact">Las proximas señales apareceran agrupadas aqui con el estado VST y Real por separado.</div>';
-}
-
 function renderTradeHistory() {
-  const groups = groupedSignalEvents();
+  const groups = groupedSignalEvents()
+    .map((group) => ({
+      ...group,
+      rows: group.rows.filter((row) => row.live)
+    }))
+    .filter((group) => group.rows.length);
   if (groups.length) {
     elements.tradeHistoryStatus.textContent = `${groups.length} posts`;
     elements.tradeHistoryEmpty.classList.add('hidden');
@@ -3183,14 +3108,12 @@ function renderSignalGroup(group) {
           <span>${escapeHtml(formatDateTime(group.at))}</span>
         </div>
         <div class="signal-group-status">
-          <span class="${escapeAttribute(totals.demoClass)}">VST ${escapeHtml(totals.demo)}</span>
           <span class="${escapeAttribute(totals.liveClass)}">Real ${escapeHtml(totals.live)}</span>
           ${postLink}
         </div>
       </div>
       <div class="signal-grid">
         <div class="signal-grid-head">Señal</div>
-        <div class="signal-grid-head">VST Demo</div>
         <div class="signal-grid-head">Real USDT</div>
         ${group.rows.map(renderSignalRow).join('')}
       </div>
@@ -3204,7 +3127,6 @@ function renderSignalRow(row) {
       <strong>${escapeHtml(row.symbol || '-')}</strong>
       <span>${escapeHtml(row.direction || '-')}</span>
     </div>
-    ${renderSignalAccountCell(row.demo, 'demo')}
     ${renderSignalAccountCell(row.live, 'live')}
   `;
 }
@@ -3268,12 +3190,9 @@ function signalGroupTitle(group) {
 
 function signalGroupTotals(group) {
   const total = group.rows.length || 0;
-  const demoOk = group.rows.filter((row) => row.demo && eventTone(row.demo) !== 'negative').length;
   const liveOk = group.rows.filter((row) => row.live && eventTone(row.live) !== 'negative').length;
   return {
-    demo: `${demoOk}/${total}`,
     live: `${liveOk}/${total}`,
-    demoClass: demoOk === total && total ? 'positive' : demoOk ? 'warn' : 'negative',
     liveClass: liveOk === total && total ? 'positive' : liveOk ? 'warn' : 'negative'
   };
 }
@@ -3981,6 +3900,10 @@ function bingxModeLabel(value) {
     live: 'Live real',
     dual: 'VST + Live real'
   }[value] || 'Test order';
+}
+
+function realTabModeLabel(value) {
+  return usesLiveMode(value) ? 'Live real USDT' : bingxModeLabel(value);
 }
 
 function usesLiveMode(value) {
