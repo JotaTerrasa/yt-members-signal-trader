@@ -139,6 +139,7 @@ const elements = {
   bingxMaxLeverage: document.querySelector('#bingx-max-leverage'),
   bingxSymbols: document.querySelector('#bingx-symbols'),
   bingxRequireSl: document.querySelector('#bingx-require-sl'),
+  bingxForceMarket: document.querySelector('#bingx-force-market'),
   bingxEntriesPaused: document.querySelector('#bingx-entries-paused'),
   bingxManagementOnly: document.querySelector('#bingx-management-only'),
   bingxMaxOpen: document.querySelector('#bingx-max-open'),
@@ -3507,6 +3508,7 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxMaxLeverage.value = bingx.maxLeverage || 5;
   elements.bingxSymbols.value = bingx.allowedSymbols || '';
   elements.bingxRequireSl.checked = Boolean(bingx.requireStopLoss);
+  elements.bingxForceMarket.checked = Boolean(bingx.forceMarketEntries);
   elements.bingxEntriesPaused.checked = Boolean(bingx.entriesPaused);
   elements.bingxManagementOnly.checked = Boolean(bingx.managementOnly);
   elements.bingxMaxOpen.value = bingx.maxOpenPositions || 5;
@@ -3540,6 +3542,7 @@ async function saveBingxConfig() {
     maxLeverage: Number(elements.bingxMaxLeverage.value),
     allowedSymbols: elements.bingxSymbols.value,
     requireStopLoss: elements.bingxRequireSl.checked,
+    forceMarketEntries: elements.bingxForceMarket.checked,
     entriesPaused: elements.bingxEntriesPaused.checked,
     managementOnly: elements.bingxManagementOnly.checked,
     maxOpenPositions: Number(elements.bingxMaxOpen.value),

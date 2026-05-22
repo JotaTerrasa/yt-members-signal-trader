@@ -137,6 +137,8 @@ Tipo de orden:
 
 - Si la linea de direccion trae precio, por ejemplo `LONG SUI 1.123`, envia `LIMIT` a ese precio.
 - Si no trae precio, usa `MARKET`.
+- Si `Entradas siempre a mercado` esta activo, ignora el precio de entrada de la senal y envia `MARKET`.
+- Incluso en mercado, el stop debe seguir siendo valido: en LONG por debajo del mercado y en SHORT por encima.
 
 ## 8. Gestion de posiciones
 

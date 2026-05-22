@@ -777,12 +777,13 @@ export class FuturesTrader {
       });
     }
 
+    const forceMarketEntry = Boolean(config.forceMarketEntries);
     const referenceEntryPrice = signal.entry?.price ? Number(signal.entry.price) : null;
     const marketPrice = await this.fetchMarketPrice(marketClient, signal.symbol);
-    const entryPrice = signal.entry?.type === 'LIMIT' && Number.isFinite(referenceEntryPrice) && referenceEntryPrice > 0
+    const entryPrice = !forceMarketEntry && signal.entry?.type === 'LIMIT' && Number.isFinite(referenceEntryPrice) && referenceEntryPrice > 0
       ? referenceEntryPrice
       : marketPrice;
-    const entryValidation = validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config });
+    const entryValidation = validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config, forceMarketEntry });
     if (!entryValidation.ok) {
       return this.emitTrade({
         ...baseEvent,
@@ -821,8 +822,9 @@ export class FuturesTrader {
     });
     await client.setLeverage({ symbol: signal.symbol, side: signal.direction, leverage });
 
+    const executionSignal = forceMarketEntry ? marketExecutionSignal(signal, referenceEntryPrice) : signal;
     const order = buildOrder({
-      signal,
+      signal: executionSignal,
       quantity,
       leverage,
       clientOrderId: clientOrderId(post?.id || signal.rawText)
@@ -830,7 +832,7 @@ export class FuturesTrader {
     const test = config.mode === 'test';
     const response = await client.placeOrder(order, { test });
     const paperPosition = test && this.paperStore
-      ? await this.paperStore.openPosition({ signal, post, phase, order, response, entryPrice, quantity, leverage, notional, exposure })
+      ? await this.paperStore.openPosition({ signal: executionSignal, post, phase, order, response, entryPrice, quantity, leverage, notional, exposure })
       : null;
     const bingx = test ? await this.configStore.markDryRunCompleted().catch(() => null) : null;
 
@@ -843,6 +845,7 @@ export class FuturesTrader {
       marketPrice,
       entryPrice,
       referenceEntryPrice,
+      executionEntryType: order.type,
       paperPosition,
       bingx
     });
@@ -1405,8 +1408,8 @@ function validateSignalAge(post = {}, phase = '', config = {}) {
   return { ok: true };
 }
 
-function validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config }) {
-  if (signal.entry?.type !== 'LIMIT') {
+function validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config, forceMarketEntry = false }) {
+  if (forceMarketEntry || signal.entry?.type !== 'LIMIT') {
     return { ok: true };
   }
   const maxDeviation = Number(config.maxEntryDeviationPercent || 0);
@@ -1459,6 +1462,18 @@ function closeStatus(config, exchangeClose) {
     return `${config.mode}_close_no_position`;
   }
   return `${config.mode}_close_sent`;
+}
+
+function marketExecutionSignal(signal, referenceEntryPrice) {
+  return {
+    ...signal,
+    entry: {
+      type: 'MARKET',
+      price: null,
+      requestedType: signal.entry?.type || null,
+      requestedPrice: Number.isFinite(referenceEntryPrice) ? referenceEntryPrice : null
+    }
+  };
 }
 
 function closeAllStatus(config, exchangeClose, closedPaperPositions = []) {
