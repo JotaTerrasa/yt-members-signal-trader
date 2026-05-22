@@ -1496,15 +1496,26 @@ summary.dashboard-section-title {
   text-align: center;
 }
 
-.asset-range-tabs span {
+.asset-range-tabs button {
+  appearance: none;
   min-height: 24px;
   padding: 4px 6px;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
-.asset-range-tabs span.active {
+.asset-range-tabs button.active {
   background: #11181c;
   color: #f7fbff;
+}
+
+.asset-range-tabs button:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
 }
 
 .account-waterfall-panel {

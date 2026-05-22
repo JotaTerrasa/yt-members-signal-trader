@@ -164,6 +164,7 @@ const appState = {
   pnlSources: null,
   pnlSource: '',
   performanceSource: '',
+  performanceRange: '1D',
   pnlLoading: false,
   pnlError: '',
   simTouched: false,
@@ -264,6 +265,14 @@ function bindEvents() {
     renderSimulation();
     renderPnlChart(performanceMonthlyRows());
     renderHistoricalPnl();
+  });
+  elements.pnlCurve.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-asset-range]');
+    if (!button) {
+      return;
+    }
+    appState.performanceRange = button.dataset.assetRange || '1D';
+    renderPnlCurve();
   });
   elements.armLive.addEventListener('click', async () => {
     await runAction(async () => {
@@ -1476,7 +1485,8 @@ function renderAccountWaterfall(source) {
   const total = finiteNumber(source.total, realized + floating);
   const equity = accountEquityValue(source, total);
   const previousEquity = finiteNumber(source.balance?.balance, equity - total);
-  const accountLine = accountAssetCurve(source, equity, total);
+  const selectedRange = selectedAssetRange();
+  const accountLine = accountAssetCurve(source, equity, total, selectedRange);
   const hasGross = grossRealized != null && Math.abs(grossRealized) > 0;
   const steps = [
     {
@@ -1518,10 +1528,11 @@ function renderAccountWaterfall(source) {
           <span>${escapeHtml(formatMoney(accountLine.min, asset))}</span>
         </div>
         <div class="asset-range-tabs" aria-label="Rango de grafica">
-          <span class="active">1D</span>
-          <span>7D</span>
-          <span>30D</span>
-          <span>180D</span>
+          ${assetRangeOptions().map((option) => `
+            <button class="${option.key === selectedRange ? 'active' : ''}" type="button" data-asset-range="${escapeAttribute(option.key)}">
+              ${escapeHtml(option.label)}
+            </button>
+          `).join('')}
         </div>
       </div>
     </section>
@@ -1571,18 +1582,46 @@ function accountEquityValue(source, total = 0) {
   return balance != null ? roundPnl(balance + total) : total;
 }
 
-function accountAssetCurve(source, equity, total = 0) {
+function assetRangeOptions() {
+  return [
+    { key: '1D', label: '1D', ms: unitMs.day },
+    { key: '7D', label: '7D', ms: 7 * unitMs.day },
+    { key: '30D', label: '30D', ms: 30 * unitMs.day },
+    { key: '180D', label: '180D', ms: 180 * unitMs.day }
+  ];
+}
+
+function selectedAssetRange() {
+  const options = assetRangeOptions();
+  const selected = options.find((option) => option.key === appState.performanceRange);
+  if (selected) {
+    return selected.key;
+  }
+  appState.performanceRange = options[0].key;
+  return options[0].key;
+}
+
+function assetRangeMs(key) {
+  return assetRangeOptions().find((option) => option.key === key)?.ms || unitMs.day;
+}
+
+function accountAssetCurve(source, equity, total = 0, rangeKey = selectedAssetRange()) {
   const positions = performanceSourcePositions(source.key, currentReferenceLedger(), source).positions;
-  const items = equityCurveItems(positions);
+  const cutoff = Date.now() - assetRangeMs(rangeKey);
+  const items = equityCurveItems(positions).filter((item) => {
+    const timestamp = Date.parse(item.at || 0);
+    return Number.isFinite(timestamp) && timestamp >= cutoff;
+  });
   const detectedTotal = items.at(-1)?.equity || 0;
-  const start = roundPnl(equity - (detectedTotal || total || 0));
+  const fallbackMove = detectedTotal || total || finiteNumber(source.floating, 0);
+  const start = roundPnl(equity - fallbackMove);
   const values = [start, ...items.map((item) => roundPnl(start + item.equity))];
   if (values.length < 2 || values.at(-1) !== equity) {
     values.push(equity);
   }
   const min = Math.min(...values);
   const max = Math.max(...values);
-  return { values, min, max };
+  return { values, min, max, range: rangeKey, points: items.length };
 }
 
 function renderAssetSparkline(values, finalValue = 0, asset = 'USDT') {
