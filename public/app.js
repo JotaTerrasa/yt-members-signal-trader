@@ -1474,6 +1474,9 @@ function renderAccountWaterfall(source) {
   const funding = finiteNumber(source.funding, 0);
   const floating = finiteNumber(source.floating, 0);
   const total = finiteNumber(source.total, realized + floating);
+  const equity = accountEquityValue(source, total);
+  const previousEquity = finiteNumber(source.balance?.balance, equity - total);
+  const accountLine = accountAssetCurve(source, equity, total);
   const hasGross = grossRealized != null && Math.abs(grossRealized) > 0;
   const steps = [
     {
@@ -1489,22 +1492,40 @@ function renderAccountWaterfall(source) {
   ];
   const bars = waterfallBars(steps, total);
   const complete = !source.error;
-  const title = source.key === 'live'
-    ? (complete ? 'Rendimiento cuenta real mensual' : 'Cuenta real: resumen parcial')
-    : (complete ? 'Rendimiento cuenta VST mensual' : 'Cuenta VST: resumen parcial');
+  const accountScope = source.key === 'live'
+    ? (complete ? 'Cuenta real' : 'Cuenta real: parcial')
+    : (complete ? 'Cuenta VST' : 'Cuenta VST: parcial');
   const subtitle = complete
-    ? (hasGross ? 'Desglose del mes con costes separados.' : 'Resumen mensual de cuenta; BingX no ha devuelto costes brutos separados ahora mismo.')
-    : 'BingX esta limitando el resumen completo; uso posiciones detectadas y flotante disponible.';
+    ? accountScope
+    : 'Rate-limit temporal';
 
   return `
-    <section class="account-waterfall-panel">
-      <div class="curve-panel-header">
-        <div>
-          <h4>${escapeHtml(title)}</h4>
-          <p>${escapeHtml(subtitle)}</p>
+    <section class="asset-performance-card ${escapeAttribute(amountTone(total))}">
+      <div class="asset-card-copy">
+        <span>Activos totales</span>
+        <strong>${escapeHtml(formatMoney(equity, asset))}</strong>
+        <small>≈ ${escapeHtml(formatMoney(previousEquity, asset))}</small>
+        <p class="${amountClass(total)}">${escapeHtml(`PnL mes ${formatMoney(total, asset)}`)}</p>
+        <div class="asset-card-actions">
+          <span>${escapeHtml(subtitle)}</span>
+          <span>${escapeHtml(`${source.openPositions || 0} abiertas`)}</span>
         </div>
-        <strong class="${amountClass(total)}">${escapeHtml(formatMoney(total, asset))}</strong>
       </div>
+      <div class="asset-card-chart">
+        ${renderAssetSparkline(accountLine.values, total, asset)}
+        <div class="asset-chart-scale">
+          <span>${escapeHtml(formatMoney(accountLine.max, asset))}</span>
+          <span>${escapeHtml(formatMoney(accountLine.min, asset))}</span>
+        </div>
+        <div class="asset-range-tabs" aria-label="Rango de grafica">
+          <span class="active">1D</span>
+          <span>7D</span>
+          <span>30D</span>
+          <span>180D</span>
+        </div>
+      </div>
+    </section>
+    <section class="account-waterfall-panel">
       <div class="waterfall-summary">
         <div>
           <span>Realizado</span>
@@ -1535,9 +1556,58 @@ function renderAccountWaterfall(source) {
         `).join('')}
       </div>
       <p class="curve-note">${escapeHtml(complete
-        ? 'Esta es la grafica representativa de cuenta. La curva inferior es solo la muestra operativa detectada por la app.'
-        : 'Vista parcial por rate-limit temporal. Cuando BingX desbloquee el resumen, aqui apareceran fees, funding y realizados completos.')}</p>
+        ? 'Desglose mensual de cuenta. La curva inferior es la muestra detectada por la app.'
+        : 'Vista parcial por rate-limit temporal. El desglose completo vuelve cuando BingX desbloquee el resumen.')}</p>
     </section>
+  `;
+}
+
+function accountEquityValue(source, total = 0) {
+  const equity = finiteNumber(source.balance?.equity, null);
+  if (equity != null) {
+    return equity;
+  }
+  const balance = finiteNumber(source.balance?.balance, null);
+  return balance != null ? roundPnl(balance + total) : total;
+}
+
+function accountAssetCurve(source, equity, total = 0) {
+  const positions = performanceSourcePositions(source.key, currentReferenceLedger(), source).positions;
+  const items = equityCurveItems(positions);
+  const detectedTotal = items.at(-1)?.equity || 0;
+  const start = roundPnl(equity - (detectedTotal || total || 0));
+  const values = [start, ...items.map((item) => roundPnl(start + item.equity))];
+  if (values.length < 2 || values.at(-1) !== equity) {
+    values.push(equity);
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return { values, min, max };
+}
+
+function renderAssetSparkline(values, finalValue = 0, asset = 'USDT') {
+  const width = 100;
+  const height = 44;
+  const padding = 4;
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const range = maxValue - minValue || 1;
+  const coordinates = values.map((value, index) => {
+    const x = values.length === 1 ? 0 : (index / (values.length - 1)) * width;
+    const y = padding + ((maxValue - value) / range) * (height - padding * 2);
+    return { x, y };
+  });
+  const points = coordinates.map((point) => `${roundPnl(point.x)},${roundPnl(point.y)}`).join(' ');
+  const last = coordinates.at(-1) || { x: width, y: height / 2 };
+  const first = coordinates[0] || { x: 0, y: height / 2 };
+  const areaPoints = `${points} ${roundPnl(last.x)},${height - padding} ${roundPnl(first.x)},${height - padding}`;
+
+  return `
+    <svg class="asset-sparkline ${amountTone(finalValue)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${escapeAttribute(`Activos ${asset}`)}">
+      <polygon class="asset-spark-area" points="${escapeAttribute(areaPoints)}"></polygon>
+      <polyline class="asset-spark-line" points="${escapeAttribute(points)}"></polyline>
+      <circle class="asset-spark-point" cx="${roundPnl(last.x)}" cy="${roundPnl(last.y)}" r="1.8"></circle>
+    </svg>
   `;
 }
 

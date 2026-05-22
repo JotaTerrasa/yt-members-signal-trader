@@ -1374,6 +1374,139 @@ summary.dashboard-section-title {
   gap: 12px;
 }
 
+.asset-performance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr);
+  gap: 18px;
+  min-height: 220px;
+  padding: 18px;
+  border: 1px solid #263237;
+  border-radius: 8px;
+  background: #020707;
+  color: #f7fbff;
+}
+
+.asset-card-copy {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.asset-card-copy > span {
+  color: #d4e1e7;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.asset-card-copy > strong {
+  font-size: clamp(1.8rem, 3.4vw, 3.2rem);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.asset-card-copy > small {
+  color: #91a0a8;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.asset-card-copy > p {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.asset-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.asset-card-actions span {
+  display: inline-grid;
+  min-height: 34px;
+  place-items: center;
+  padding: 7px 14px;
+  border-radius: 7px;
+  background: #202426;
+  color: #f7fbff;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.asset-card-chart {
+  position: relative;
+  display: grid;
+  align-content: end;
+  min-height: 160px;
+  padding: 22px 8px 28px 0;
+}
+
+.asset-sparkline {
+  width: 100%;
+  height: 140px;
+  overflow: visible;
+}
+
+.asset-spark-area {
+  fill: rgba(25, 104, 255, 0.18);
+}
+
+.asset-spark-line {
+  fill: none;
+  stroke: #1677ff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.asset-spark-point {
+  fill: #1677ff;
+  stroke: #1677ff;
+  vector-effect: non-scaling-stroke;
+}
+
+.asset-chart-scale {
+  position: absolute;
+  right: 0;
+  top: 4px;
+  bottom: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #d4e1e7;
+  font-size: 0.72rem;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.asset-range-tabs {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(42px, 1fr));
+  gap: 8px;
+  color: #87949b;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.asset-range-tabs span {
+  min-height: 24px;
+  padding: 4px 6px;
+  border-radius: 7px;
+}
+
+.asset-range-tabs span.active {
+  background: #11181c;
+  color: #f7fbff;
+}
+
 .account-waterfall-panel {
   padding: 12px;
   border: 1px solid var(--line);
@@ -2325,6 +2458,7 @@ summary.dashboard-section-title {
   .performance-scenario-grid,
   .performance-position-grid,
   .performance-position-metrics,
+  .asset-performance-card,
   .waterfall-summary,
   .waterfall-row,
   .curve-timeline div,
@@ -2371,6 +2505,20 @@ summary.dashboard-section-title {
   .waterfall-row > strong {
     justify-self: start;
     text-align: left;
+  }
+
+  .asset-performance-card {
+    min-height: auto;
+    padding: 14px;
+  }
+
+  .asset-card-chart {
+    min-height: 170px;
+    padding-right: 0;
+  }
+
+  .asset-card-actions span {
+    flex: 1 1 120px;
   }
 
   .pnl-bar-row {
