@@ -39,6 +39,11 @@ const elements = {
   pnlModeLabel: document.querySelector('#pnl-mode-label'),
   pnlWinRate: document.querySelector('#pnl-win-rate'),
   pnlMonthlyRoi: document.querySelector('#pnl-monthly-roi'),
+  sheetSimPanel: document.querySelector('#sheet-sim-panel'),
+  sheetSimCapital: document.querySelector('#sheet-sim-capital'),
+  sheetSimRoi: document.querySelector('#sheet-sim-roi'),
+  sheetSimGain: document.querySelector('#sheet-sim-gain'),
+  sheetSimEquity: document.querySelector('#sheet-sim-equity'),
   pnlCurveStatus: document.querySelector('#pnl-curve-status'),
   pnlCurve: document.querySelector('#pnl-curve'),
   pnlChartStatus: document.querySelector('#pnl-chart-status'),
@@ -177,6 +182,8 @@ const appState = {
   pnlSource: '',
   performanceSource: '',
   performanceRange: '1D',
+  sheetSimCapital: storedSheetSimCapital(),
+  sheetSimTouched: false,
   pnlLoading: false,
   pnlError: '',
   simTouched: false,
@@ -253,6 +260,14 @@ function bindEvents() {
     await runAction(async () => {
       await loadPnl();
     });
+  });
+  elements.sheetSimCapital.addEventListener('input', () => {
+    const value = Number(elements.sheetSimCapital.value || 0);
+    appState.sheetSimTouched = true;
+    appState.sheetSimCapital = Number.isFinite(value) && value > 0 ? value : null;
+    storeSheetSimCapital(appState.sheetSimCapital);
+    const selectedSource = selectedPnlSource(pnlSourceCards());
+    renderSheetCapitalSimulator(selectedSource, sourceMonthlyRoi(selectedSource));
   });
   elements.pnlSourceGrid.addEventListener('click', (event) => {
     const button = event.target.closest('[data-pnl-source]');
@@ -835,6 +850,7 @@ function renderPnl() {
   elements.pnlMonthlyRoi.textContent = formatPercent(monthlyRoi);
   elements.pnlMonthlyRoi.className = amountClass(monthlyRoi);
   elements.pnlNote.textContent = sourceNoteText(selectedSource);
+  renderSheetCapitalSimulator(selectedSource, monthlyRoi);
 
   if (!configured) {
     elements.pnlStatus.textContent = 'Configura BingX para leer el PnL mensual.';
@@ -1423,6 +1439,57 @@ function sourceMonthlyRoiLabel(source = {}) {
 
 function sourceMonthlyRoiClass(source = {}) {
   return amountClass(sourceMonthlyRoi(source));
+}
+
+function renderSheetCapitalSimulator(source = {}, roi = sourceMonthlyRoi(source)) {
+  if (!elements.sheetSimPanel || !elements.sheetSimCapital) {
+    return;
+  }
+
+  const active = source.key === 'sheet';
+  elements.sheetSimPanel.classList.toggle('hidden', !active);
+  if (!active) {
+    return;
+  }
+
+  const baseline = sourceMonthlyRoiBaseline(source);
+  if (!appState.sheetSimTouched && !positiveFiniteNumber(appState.sheetSimCapital) && baseline) {
+    appState.sheetSimCapital = baseline;
+  }
+
+  const capital = positiveFiniteNumber(appState.sheetSimCapital, baseline || 10000);
+  const gain = Number.isFinite(Number(roi)) && capital ? roundPnl(capital * (Number(roi) / 100)) : null;
+  const equity = gain == null ? null : roundPnl(capital + gain);
+
+  if (document.activeElement !== elements.sheetSimCapital) {
+    elements.sheetSimCapital.value = capital ? String(roundPnl(capital)) : '';
+  }
+  elements.sheetSimRoi.textContent = formatPercent(roi);
+  elements.sheetSimRoi.className = amountClass(roi);
+  elements.sheetSimGain.textContent = formatOptionalMoney(gain, source.asset || 'USDT');
+  elements.sheetSimGain.className = amountClass(gain);
+  elements.sheetSimEquity.textContent = formatOptionalMoney(equity, source.asset || 'USDT');
+  elements.sheetSimEquity.className = amountClass(gain);
+}
+
+function storedSheetSimCapital() {
+  try {
+    return positiveFiniteNumber(window.localStorage?.getItem('futuresMagician.sheetSimCapital'));
+  } catch {
+    return null;
+  }
+}
+
+function storeSheetSimCapital(value) {
+  try {
+    if (positiveFiniteNumber(value)) {
+      window.localStorage?.setItem('futuresMagician.sheetSimCapital', String(value));
+    } else {
+      window.localStorage?.removeItem('futuresMagician.sheetSimCapital');
+    }
+  } catch {
+    // Local storage is optional; the simulator still works for this session.
+  }
 }
 
 function distanceLabel(value) {

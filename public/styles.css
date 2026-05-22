@@ -764,6 +764,49 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.sheet-sim-panel {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.1fr) repeat(3, minmax(130px, 0.8fr));
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid rgba(18, 106, 99, 0.24);
+  border-radius: 8px;
+  background: #f7fbfa;
+}
+
+.sheet-sim-panel label,
+.sheet-sim-panel > div {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  min-height: 68px;
+}
+
+.sheet-sim-panel span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sheet-sim-panel strong {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.sheet-sim-panel input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 900;
+}
+
 .pnl-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -2573,6 +2616,7 @@ summary.dashboard-section-title {
   .waterfall-row,
   .curve-timeline div,
   .pnl-summary,
+  .sheet-sim-panel,
   .pnl-hero-side,
   .curve-stats,
   .ops-metrics,
