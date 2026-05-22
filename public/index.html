@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=19">
+    <link rel="stylesheet" href="/styles.css?v=20">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=51" defer></script>
+    <script src="/app.js?v=52" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -710,18 +710,21 @@
             </div>
 
             <div class="pnl-table-wrap">
+              <div class="trade-section-header table-header">
+                <h3 id="performance-table-title">Resumen mensual</h3>
+                <span id="performance-table-status">Fuente seleccionada</span>
+              </div>
               <table class="pnl-table">
                 <thead>
                   <tr>
                     <th>Mes</th>
                     <th>Neto</th>
                     <th>Realizado</th>
-                    <th>Paper</th>
+                    <th>Flotante</th>
                     <th>Fees</th>
                     <th>Funding</th>
-                    <th>Ajustes</th>
                     <th>Cierres</th>
-                    <th>Test</th>
+                    <th>Ops.</th>
                   </tr>
                 </thead>
                 <tbody id="pnl-table"></tbody>

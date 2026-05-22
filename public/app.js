@@ -53,6 +53,8 @@ const elements = {
   historicalSignalTitle: document.querySelector('#historical-signal-title'),
   historicalSignalStatus: document.querySelector('#historical-signal-status'),
   historicalSignalList: document.querySelector('#historical-signal-list'),
+  performanceTableTitle: document.querySelector('#performance-table-title'),
+  performanceTableStatus: document.querySelector('#performance-table-status'),
   pnlSimNotional: document.querySelector('#pnl-sim-notional'),
   pnlSimTotal: document.querySelector('#pnl-sim-total'),
   pnlSimRealized: document.querySelector('#pnl-sim-realized'),
@@ -257,6 +259,7 @@ function bindEvents() {
     const source = selectedPerformanceSource(sources);
     renderPerformanceSourceGrid(sources, source.key);
     renderPerformanceOverview(source);
+    renderPerformanceTable(performanceTableRows(source, [], currentReferenceLedger()), source);
     renderPnlCurve();
     renderSimulation();
     renderPnlChart(performanceMonthlyRows());
@@ -789,7 +792,8 @@ function renderPnl() {
   }
 
   ensureSimulationDefault();
-  elements.pnlTable.innerHTML = rows.map(renderPnlRow).join('');
+  const performanceRows = performanceTableRows(performanceSource, rows, reference);
+  renderPerformanceTable(performanceRows, performanceSource);
   renderPnlCurve();
   renderSimulation();
   renderPnlChart(performanceMonthlyRows(rows));
@@ -871,13 +875,19 @@ function exchangeSourceWithPositions(source, positions, fallback) {
     status: appState.pnlSources?.error || 'No cargado'
   });
   const open = positions.filter((position) => position.status === 'open');
+  const closed = positions.filter((position) => position.status === 'closed');
   const floating = roundPnl(open.reduce((sum, position) => (
     sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
   ), 0));
   const exposure = roundPnl(open.reduce((sum, position) => (
     sum + Number(position.exposure || position.notional || 0)
   ), 0));
-  const realized = Number(base.realized || 0);
+  const closedRealized = roundPnl(closed.reduce((sum, position) => (
+    sum + Number(position.realizedPnl || position.paperPnl || 0)
+  ), 0));
+  const realized = Number(base.realized || 0) || closedRealized;
+  const closedTrades = Number(base.closedTrades || 0) || closed.length;
+  const records = Number(base.records || 0) || positions.length;
 
   return {
     ...base,
@@ -888,6 +898,10 @@ function exchangeSourceWithPositions(source, positions, fallback) {
     floating,
     exposure,
     openPositions: open.length,
+    closedTrades,
+    records,
+    winRate: base.winRate ?? calculateWinRate(closed),
+    realized,
     total: roundPnl(realized + floating)
   };
 }
@@ -1391,14 +1405,18 @@ function friendlyBingxError(message) {
 function renderPnlCurve() {
   const source = filteredSimulationSource();
   const targetNotional = Number(elements.pnlSimNotional.value || averagePositionNotional() || 0);
-  const positions = simulatedPositions(targetNotional, source.positions);
+  const actualSource = source.key === 'live' || source.key === 'vst';
+  const positions = actualSource ? source.positions : simulatedPositions(targetNotional, source.positions);
   const items = equityCurveItems(positions);
   const values = [0, ...items.map((item) => item.equity)];
   const finalValue = values.at(-1) || 0;
   const maxValue = Math.max(...values);
   const minValue = Math.min(...values);
   const drawdown = calculateMaxDrawdown(values);
-  elements.pnlCurveStatus.textContent = `${items.length} operaciones · ${source.label}`;
+  const curveStatusText = actualSource
+    ? `${items.length} puntos reales/detectados - ${source.label}`
+    : `${items.length} operaciones simuladas - ${source.label}`;
+  elements.pnlCurveStatus.textContent = curveStatusText;
 
   if (!items.length) {
     elements.pnlCurve.innerHTML = '<div class="pnl-chart-empty">Sin operaciones para graficar.</div>';
@@ -1425,6 +1443,23 @@ function renderPnlCurve() {
         <strong class="${amountClass(-drawdown)}">${escapeHtml(formatMoney(-drawdown, source.asset))}</strong>
       </div>
     </div>
+    ${actualSource ? renderCurveTimeline(items, source.asset) : ''}
+  `;
+}
+
+function renderCurveTimeline(items, asset = 'USDT') {
+  const recent = [...items].slice(-6).reverse();
+  return `
+    <div class="curve-timeline">
+      ${recent.map((item) => `
+        <div>
+          <span>${escapeHtml(formatShortDateTime(item.at))}</span>
+          <strong>${escapeHtml(item.symbol || '-')}</strong>
+          <small class="${amountClass(item.pnl)}">${escapeHtml(formatMoney(item.pnl, asset))}</small>
+          <em>${escapeHtml(item.status === 'open' ? 'abierta a mercado' : 'cerrada')}</em>
+        </div>
+      `).join('')}
+    </div>
   `;
 }
 
@@ -1446,7 +1481,7 @@ function renderPnlChart(rows) {
         <div class="pnl-bar-track" aria-hidden="true">
           <div class="pnl-bar ${amountTone(row.total)}" style="width: ${escapeAttribute(width)}%"></div>
         </div>
-        <strong class="${amountClass(row.total)}">${escapeHtml(formatUsdt(row.total))}</strong>
+        <strong class="${amountClass(row.total)}">${escapeHtml(formatMoney(row.total, row.asset || 'USDT'))}</strong>
       </div>
     `;
   }).join('');
@@ -1642,7 +1677,7 @@ function renderAmountBars(rows, metaFactory = () => '') {
 
 function dashboardPositions() {
   const reference = currentReferenceLedger();
-  const source = selectedPnlSource(pnlSourceCards(reference));
+  const source = selectedPerformanceSource(pnlSourceCards(reference));
   const positions = positionsForPnlSource(source.key, reference);
   if (positions.length) {
     return {
@@ -1686,6 +1721,12 @@ function performanceMonthlyRows(fallbackRows = []) {
   const reference = currentReferenceLedger();
   const source = selectedPerformanceSource(pnlSourceCards(reference));
   if (source.key === 'sheet') {
+    const historicalRows = (appState.pnl?.historical?.months || [])
+      .map((row) => createPnlRow(row.month, row.asset || source.asset || 'USDT', row))
+      .filter((row) => row.total || row.paperPnl || row.closedTrades || row.testOrders || row.month === currentMonthKey());
+    if (historicalRows.length) {
+      return historicalRows;
+    }
     return reference?.row ? [reference.row] : fallbackRows.filter((row) => row.month === currentMonthKey());
   }
 
@@ -1708,6 +1749,23 @@ function performanceMonthlyRows(fallbackRows = []) {
     }
     row.testOrders += 1;
     byMonth.set(month, row);
+  }
+
+  if (source.month && (source.available || source.openPositions || source.closedTrades || source.total || source.floating || source.realized)) {
+    const row = byMonth.get(source.month) || createPnlRow(source.month, source.asset || 'USDT', {});
+    row.asset = source.asset || row.asset || 'USDT';
+    row.total = roundPnl(Number(source.total || 0));
+    row.realized = roundPnl(Number(source.realized || 0));
+    row.paperPnl = row.total;
+    row.paperRealized = row.realized;
+    row.paperUnrealized = roundPnl(Number(source.floating || 0));
+    row.fees = roundPnl(Number(source.fees || 0));
+    row.funding = roundPnl(Number(source.funding || 0));
+    row.closedTrades = Number(source.closedTrades || row.closedTrades || 0);
+    row.closedPaperTrades = row.closedTrades;
+    row.openPaperTrades = Number(source.openPositions || row.openPaperTrades || 0);
+    row.testOrders = Number(source.records || row.testOrders || row.openPaperTrades + row.closedTrades || 0);
+    byMonth.set(source.month, row);
   }
 
   if (byMonth.size) {
@@ -1914,6 +1972,50 @@ function renderPnlBars(rows) {
   }).join('');
 }
 
+function performanceTableRows(source, fallbackRows = [], reference = currentReferenceLedger()) {
+  const rows = performanceMonthlyRows(fallbackRows)
+    .map((row) => createPnlRow(row.month, row.asset || source.asset || 'USDT', row))
+    .sort((a, b) => b.month.localeCompare(a.month));
+
+  if (rows.length) {
+    return rows.map((row) => ({
+      ...row,
+      sourceLabel: source.key === 'sheet'
+        ? (reference?.label || 'Google Sheet')
+        : source.label
+    }));
+  }
+
+  if (!source.month) {
+    return [];
+  }
+
+  return [createPnlRow(source.month, source.asset || 'USDT', {
+    total: source.total,
+    realized: source.realized,
+    paperPnl: source.total,
+    paperRealized: source.realized,
+    paperUnrealized: source.floating,
+    fees: source.fees,
+    funding: source.funding,
+    closedTrades: source.closedTrades,
+    testOrders: source.records || source.openPositions
+  })].map((row) => ({
+    ...row,
+    sourceLabel: source.label
+  }));
+}
+
+function renderPerformanceTable(rows, source) {
+  elements.performanceTableTitle.textContent = `Resumen mensual - ${source.label}`;
+  elements.performanceTableStatus.textContent = rows.length
+    ? `${rows.length} meses - ${source.modeLabel || source.label}`
+    : `Sin meses - ${source.modeLabel || source.label}`;
+  elements.pnlTable.innerHTML = rows.length
+    ? rows.map((row) => renderPnlRow(row, source)).join('')
+    : '<tr><td colspan="8">Sin datos para esta fuente.</td></tr>';
+}
+
 function renderLineSvg(values, finalValue) {
   const width = 100;
   const height = 44;
@@ -1942,21 +2044,25 @@ function renderLineSvg(values, finalValue) {
   `;
 }
 
-function renderPnlRow(row) {
+function renderPnlRow(row, source = null) {
+  const asset = row.asset || source?.asset || 'USDT';
+  const total = Number(row.total || row.paperPnl || 0);
+  const realized = Number(row.realized || row.paperRealized || 0);
+  const floating = Number(row.paperUnrealized || row.floating || 0);
+  const operationCount = Number(row.testOrders || row.records || (Number(row.openPaperTrades || 0) + Number(row.closedTrades || 0)) || 0);
   return `
     <tr>
       <td>
         <strong>${escapeHtml(formatMonth(row.month))}</strong>
-        <span>${escapeHtml(row.asset || 'USDT')}</span>
+        <span>${escapeHtml(row.sourceLabel || asset)}</span>
       </td>
-      <td class="${amountClass(row.total)}">${escapeHtml(formatUsdt(row.total))}</td>
-      <td class="${amountClass(row.realized)}">${escapeHtml(formatUsdt(row.realized))}</td>
-      <td class="${amountClass(row.paperPnl)}">${escapeHtml(formatUsdt(row.paperPnl))}</td>
-      <td class="${amountClass(row.fees)}">${escapeHtml(formatUsdt(row.fees))}</td>
-      <td class="${amountClass(row.funding)}">${escapeHtml(formatUsdt(row.funding))}</td>
-      <td class="${amountClass(row.adjustments)}">${escapeHtml(formatUsdt(row.adjustments))}</td>
+      <td class="${amountClass(total)}">${escapeHtml(formatMoney(total, asset))}</td>
+      <td class="${amountClass(realized)}">${escapeHtml(formatMoney(realized, asset))}</td>
+      <td class="${amountClass(floating)}">${escapeHtml(formatMoney(floating, asset))}</td>
+      <td class="${amountClass(row.fees)}">${escapeHtml(formatMoney(row.fees, asset))}</td>
+      <td class="${amountClass(row.funding)}">${escapeHtml(formatMoney(row.funding, asset))}</td>
       <td>${escapeHtml(row.closedTrades || 0)}</td>
-      <td>${escapeHtml(row.testOrders || 0)}</td>
+      <td>${escapeHtml(operationCount)}</td>
     </tr>
   `;
 }
@@ -2118,17 +2224,54 @@ function positionsForPnlSource(key, reference = currentReferenceLedger()) {
     const liveCurrent = (appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'dual')
       ? (appState.exchangePositions || []).filter((position) => position.source === 'demo')
       : [];
-    return liveCurrent.length ? liveCurrent : appState.pnlSources?.positions?.vst || [];
+    return uniquePositionsById(
+      liveCurrent,
+      appState.pnlSources?.positions?.vst || [],
+      closedExchangePositionsForSource('demo')
+    );
   }
 
   if (key === 'live') {
     const liveCurrent = (appState.bingx?.mode === 'live' || appState.bingx?.mode === 'dual')
       ? (appState.exchangePositions || []).filter((position) => position.source === 'live')
       : [];
-    return liveCurrent.length ? liveCurrent : appState.pnlSources?.positions?.live || [];
+    return uniquePositionsById(
+      liveCurrent,
+      appState.pnlSources?.positions?.live || [],
+      closedExchangePositionsForSource('live')
+    );
   }
 
   return exchangePositionMode() ? openExchangePositions() : openPaperPositions();
+}
+
+function uniquePositionsById(...collections) {
+  const byId = new Map();
+  for (const collection of collections) {
+    for (const position of collection || []) {
+      const key = exchangePositionKey(position);
+      if (!key || byId.has(key)) {
+        continue;
+      }
+      byId.set(key, position);
+    }
+  }
+  return [...byId.values()];
+}
+
+function closedExchangePositionsForSource(source) {
+  return (appState.trades || [])
+    .filter((event) => event.status === 'exchange_position_closed' && event.exchangePosition)
+    .map((event) => ({
+      ...event.exchangePosition,
+      source: event.exchangePosition.source || source,
+      status: 'closed',
+      closedAt: event.exchangePosition.closedAt || event.at,
+      paperPnl: Number(event.exchangePosition.paperPnl ?? event.exchangePosition.realizedPnl ?? 0),
+      realizedPnl: Number(event.exchangePosition.realizedPnl || event.exchangePosition.paperPnl || 0),
+      closeReason: event.exchangePosition.closeReason || event.reason || 'exchange_position_closed'
+    }))
+    .filter((position) => position.source === source);
 }
 
 function openExchangePositions() {
@@ -2151,19 +2294,27 @@ function closedPaperPositions() {
 function equityCurveItems(positions = appState.paperTrades || []) {
   const ordered = positions
     .filter((position) => Number.isFinite(Number(position.paperPnl)))
-    .sort((a, b) => Date.parse(a.closedAt || a.openedAt || 0) - Date.parse(b.closedAt || b.openedAt || 0));
+    .sort((a, b) => Date.parse(curvePositionTime(a) || 0) - Date.parse(curvePositionTime(b) || 0));
   let equity = 0;
   return ordered.map((position) => {
     const pnl = Number(position.paperPnl || 0);
     equity = roundPnl(equity + pnl);
     return {
       id: position.id,
-      at: position.closedAt || position.openedAt,
+      at: curvePositionTime(position),
       symbol: position.symbol,
+      status: position.status,
       pnl,
       equity
     };
   });
+}
+
+function curvePositionTime(position) {
+  if (position.status === 'open') {
+    return position.liveTickAt || position.updatedAt || new Date().toISOString();
+  }
+  return position.closedAt || position.openedAt;
 }
 
 function ensureSimulationDefault() {
@@ -3084,6 +3235,19 @@ function formatShortDay(value) {
     day: '2-digit',
     month: 'short'
   }).format(new Date(year, month - 1, day)).replace('.', '');
+}
+
+function formatShortDateTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return new Intl.DateTimeFormat('es', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date).replace('.', '');
 }
 
 function formatSourceMoney(value, source) {

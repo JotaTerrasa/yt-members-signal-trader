@@ -850,6 +850,10 @@ summary.dashboard-section-title {
   margin-bottom: 0;
 }
 
+.table-header {
+  padding: 0 0 10px;
+}
+
 .ops-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -1362,6 +1366,37 @@ summary.dashboard-section-title {
 .simulation-summary strong {
   font-size: 0.9rem;
   overflow-wrap: anywhere;
+}
+
+.curve-timeline {
+  display: grid;
+  gap: 7px;
+}
+
+.curve-timeline div {
+  display: grid;
+  grid-template-columns: 76px minmax(72px, 1fr) minmax(86px, auto) minmax(86px, auto);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.curve-timeline span,
+.curve-timeline em {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.curve-timeline strong,
+.curve-timeline small {
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
 .simulation-panel {
@@ -2150,6 +2185,7 @@ summary.dashboard-section-title {
   .performance-scenario-grid,
   .performance-position-grid,
   .performance-position-metrics,
+  .curve-timeline div,
   .pnl-summary,
   .pnl-hero-side,
   .curve-stats,
