@@ -186,7 +186,11 @@ export async function applyReferenceLedger(historical, { month = currentMonthKey
     positions,
     source: {
       ...(historical.source || {}),
-      referenceLedger: reference.source,
+      referenceLedger: {
+        ...reference.source,
+        startingCapital: reference.startingCapital,
+        equity: reference.equity
+      },
       alignedMonth: month
     },
     stats: {

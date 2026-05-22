@@ -689,6 +689,12 @@ textarea {
   font-weight: 800;
 }
 
+.pnl-source-card em {
+  font-style: normal;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
 .pnl-source-card div {
   display: flex;
   flex-wrap: wrap;

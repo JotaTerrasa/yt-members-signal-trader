@@ -38,6 +38,7 @@ const elements = {
   pnlClosedTrades: document.querySelector('#pnl-closed-trades'),
   pnlModeLabel: document.querySelector('#pnl-mode-label'),
   pnlWinRate: document.querySelector('#pnl-win-rate'),
+  pnlMonthlyRoi: document.querySelector('#pnl-monthly-roi'),
   pnlCurveStatus: document.querySelector('#pnl-curve-status'),
   pnlCurve: document.querySelector('#pnl-curve'),
   pnlChartStatus: document.querySelector('#pnl-chart-status'),
@@ -806,6 +807,7 @@ function renderPnl() {
   const displayPositions = positionsForPnlSource(selectedSource.key, reference);
   const displayClosedPositions = displayPositions.filter((position) => position.status === 'closed');
   const winRate = selectedSource.winRate ?? calculateWinRate(displayClosedPositions);
+  const monthlyRoi = sourceMonthlyRoi(selectedSource);
   const hasActivity = rows.some((row) => row.records || row.testOrders || row.liveOrders || row.paperPnl);
   const hasHistorical = Boolean(appState.pnl?.historical);
   const hasReference = Boolean(reference);
@@ -830,6 +832,8 @@ function renderPnl() {
   elements.pnlClosedTrades.textContent = String(selectedSource.closedTrades || closedPositions.length);
   elements.pnlModeLabel.textContent = selectedSource.modeLabel;
   elements.pnlWinRate.textContent = formatPercent(winRate);
+  elements.pnlMonthlyRoi.textContent = formatPercent(monthlyRoi);
+  elements.pnlMonthlyRoi.className = amountClass(monthlyRoi);
   elements.pnlNote.textContent = sourceNoteText(selectedSource);
 
   if (!configured) {
@@ -926,7 +930,9 @@ function sheetPnlSource(reference = currentReferenceLedger()) {
     openPositions: open.length,
     closedTrades: Number(row.closedTrades || closed.length),
     records: positions.length,
-    winRate: calculateWinRate(closed)
+    winRate: calculateWinRate(closed),
+    roiBaseline: positiveFiniteNumber(reference.startingCapital),
+    equity: positiveFiniteNumber(reference.equity)
   };
 }
 
@@ -963,7 +969,8 @@ function exchangeSourceWithPositions(source, positions, fallback) {
     records,
     winRate: base.winRate ?? calculateWinRate(closed),
     realized,
-    total: roundPnl(realized + floating)
+    total: roundPnl(realized + floating),
+    roiBaseline: positiveFiniteNumber(base.roiBaseline || base.baseline)
   };
 }
 
@@ -985,7 +992,9 @@ function emptyClientPnlSource({ key, label, modeLabel, asset, status = 'No dispo
     openPositions: 0,
     closedTrades: 0,
     records: 0,
-    winRate: null
+    winRate: null,
+    roiBaseline: null,
+    equity: null
   };
 }
 
@@ -1016,6 +1025,7 @@ function renderPnlSourceGrid(sources, selectedKey) {
         <span>${escapeHtml(source.label)}</span>
         <strong class="${sourcePrimaryClass(source)}">${escapeHtml(formatSourceMoney(sourcePrimaryValue(source), source))}</strong>
         <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(sourcePrimaryLabel(source))}</small>
+        <em class="${escapeAttribute(sourceMonthlyRoiClass(source))}">${escapeHtml(sourceMonthlyRoiLabel(source))}</em>
         ${lines.length ? `
           <div>
             ${lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
@@ -1079,6 +1089,14 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       value: formatOptionalMoney(source.total, asset),
       className: optionalAmountClass(source.total),
       detail: 'Realizado + flotante'
+    },
+    {
+      label: 'ROI mensual',
+      value: formatPercent(sourceMonthlyRoi(source)),
+      className: amountClass(sourceMonthlyRoi(source)),
+      detail: sourceMonthlyRoiBaseline(source)
+        ? `Base ${formatMoney(sourceMonthlyRoiBaseline(source), asset)}`
+        : 'Sin capital base'
     },
     {
       label: 'Realizado',
@@ -1356,6 +1374,55 @@ function finiteNumber(value, fallback = null) {
 
 function optionalAmountClass(value) {
   return value == null ? 'amount' : amountClass(value);
+}
+
+function positiveFiniteNumber(value, fallback = null) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function sourceMonthlyRoi(source = {}) {
+  const baseline = sourceMonthlyRoiBaseline(source);
+  const total = Number(source.total || 0);
+  if (!Number.isFinite(total) || !baseline) {
+    return null;
+  }
+  return (total / baseline) * 100;
+}
+
+function sourceMonthlyRoiBaseline(source = {}) {
+  const explicit = positiveFiniteNumber(source.roiBaseline);
+  if (explicit) {
+    return explicit;
+  }
+
+  const total = Number(source.total || 0);
+  const equity = positiveFiniteNumber(source.equity ?? source.balance?.equity);
+  if (equity && Number.isFinite(total)) {
+    const baseline = equity - total;
+    if (baseline > 0) {
+      return baseline;
+    }
+  }
+
+  const balance = positiveFiniteNumber(source.balance?.balance);
+  const realized = Number(source.realized || 0);
+  if (balance && Number.isFinite(realized)) {
+    const baseline = balance - realized;
+    if (baseline > 0) {
+      return baseline;
+    }
+  }
+
+  return null;
+}
+
+function sourceMonthlyRoiLabel(source = {}) {
+  return `ROI mes ${formatPercent(sourceMonthlyRoi(source))}`;
+}
+
+function sourceMonthlyRoiClass(source = {}) {
+  return amountClass(sourceMonthlyRoi(source));
 }
 
 function distanceLabel(value) {
@@ -2218,7 +2285,9 @@ function currentReferenceLedger() {
     row: createPnlRow(row.month, row.asset, row),
     positions,
     label: source.referenceLedger.label || formatMonth(month),
-    url: source.referenceLedger.url || ''
+    url: source.referenceLedger.url || '',
+    startingCapital: source.referenceLedger.startingCapital ?? null,
+    equity: source.referenceLedger.equity ?? null
   };
 }
 
