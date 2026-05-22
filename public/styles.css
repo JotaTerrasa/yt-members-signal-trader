@@ -1368,6 +1368,146 @@ summary.dashboard-section-title {
   overflow-wrap: anywhere;
 }
 
+.account-waterfall-panel,
+.detected-curve-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.account-waterfall-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.curve-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.curve-panel-header h4 {
+  margin: 0 0 4px;
+  font-size: 0.96rem;
+}
+
+.curve-panel-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.curve-panel-header > span,
+.curve-panel-header > strong {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-align: right;
+}
+
+.waterfall-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+}
+
+.waterfall-summary div {
+  display: grid;
+  gap: 4px;
+  min-height: 68px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.waterfall-summary span,
+.curve-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.waterfall-summary strong {
+  align-self: end;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.account-waterfall {
+  display: grid;
+  gap: 8px;
+}
+
+.waterfall-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) minmax(96px, auto);
+  gap: 10px;
+  align-items: center;
+}
+
+.waterfall-row > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.waterfall-row > strong {
+  justify-self: end;
+  font-size: 0.84rem;
+}
+
+.waterfall-track {
+  position: relative;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7eeec;
+}
+
+.waterfall-track::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(95, 114, 119, 0.42);
+}
+
+.waterfall-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  border-radius: inherit;
+  background: #98a6a3;
+}
+
+.waterfall-row.positive .waterfall-track i,
+.waterfall-row.final.positive .waterfall-track i {
+  background: var(--accent);
+}
+
+.waterfall-row.negative .waterfall-track i,
+.waterfall-row.final.negative .waterfall-track i {
+  background: var(--danger);
+}
+
+.waterfall-row.final .waterfall-track i {
+  background: var(--ink);
+}
+
+.curve-note {
+  margin: 0;
+  text-transform: none;
+}
+
 .curve-timeline {
   display: grid;
   gap: 7px;
@@ -2185,6 +2325,8 @@ summary.dashboard-section-title {
   .performance-scenario-grid,
   .performance-position-grid,
   .performance-position-metrics,
+  .waterfall-summary,
+  .waterfall-row,
   .curve-timeline div,
   .pnl-summary,
   .pnl-hero-side,
@@ -2217,6 +2359,18 @@ summary.dashboard-section-title {
   .pnl-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .curve-panel-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .curve-panel-header > span,
+  .curve-panel-header > strong,
+  .waterfall-row > strong {
+    justify-self: start;
+    text-align: left;
   }
 
   .pnl-bar-row {

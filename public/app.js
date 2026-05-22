@@ -1291,6 +1291,11 @@ function formatOptionalPercent(value) {
   return Number.isFinite(number) ? formatPercent(number) : '-';
 }
 
+function finiteNumber(value, fallback = null) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
 function optionalAmountClass(value) {
   return value == null ? 'amount' : amountClass(value);
 }
@@ -1404,6 +1409,7 @@ function friendlyBingxError(message) {
 
 function renderPnlCurve() {
   const source = filteredSimulationSource();
+  const accountSource = selectedPerformanceSource(pnlSourceCards(currentReferenceLedger()));
   const targetNotional = Number(elements.pnlSimNotional.value || averagePositionNotional() || 0);
   const actualSource = source.key === 'live' || source.key === 'vst';
   const positions = actualSource ? source.positions : simulatedPositions(targetNotional, source.positions);
@@ -1416,35 +1422,159 @@ function renderPnlCurve() {
   const curveStatusText = actualSource
     ? `${items.length} puntos reales/detectados - ${source.label}`
     : `${items.length} operaciones simuladas - ${source.label}`;
+  const curvePanelStatus = actualSource ? `${items.length} puntos detectados` : curveStatusText;
   elements.pnlCurveStatus.textContent = curveStatusText;
 
-  if (!items.length) {
+  if (!items.length && !actualSource) {
     elements.pnlCurve.innerHTML = '<div class="pnl-chart-empty">Sin operaciones para graficar.</div>';
     return;
   }
 
   elements.pnlCurve.innerHTML = `
-    ${renderLineSvg(values, finalValue)}
-    <div class="curve-stats">
-      <div>
-        <span>Neto</span>
-        <strong class="${amountClass(finalValue)}">${escapeHtml(formatMoney(finalValue, source.asset))}</strong>
+    ${actualSource ? renderAccountWaterfall(accountSource) : ''}
+    <section class="detected-curve-panel">
+      <div class="curve-panel-header">
+        <div>
+          <h4>${escapeHtml(actualSource ? 'Operaciones detectadas' : 'Curva simulada')}</h4>
+          <p>${escapeHtml(actualSource ? 'Muestra operativa casada por la app o marcada a mercado.' : 'Recalcula la muestra con el capital y filtros elegidos.')}</p>
+        </div>
+        <span>${escapeHtml(curvePanelStatus)}</span>
       </div>
-      <div>
-        <span>Maximo</span>
-        <strong class="${amountClass(maxValue)}">${escapeHtml(formatMoney(maxValue, source.asset))}</strong>
-      </div>
-      <div>
-        <span>Minimo</span>
-        <strong class="${amountClass(minValue)}">${escapeHtml(formatMoney(minValue, source.asset))}</strong>
-      </div>
-      <div>
-        <span>Drawdown</span>
-        <strong class="${amountClass(-drawdown)}">${escapeHtml(formatMoney(-drawdown, source.asset))}</strong>
-      </div>
-    </div>
-    ${actualSource ? renderCurveTimeline(items, source.asset) : ''}
+      ${items.length ? `
+        ${renderLineSvg(values, finalValue)}
+        <div class="curve-stats">
+          <div>
+            <span>Neto detectado</span>
+            <strong class="${amountClass(finalValue)}">${escapeHtml(formatMoney(finalValue, source.asset))}</strong>
+          </div>
+          <div>
+            <span>Maximo</span>
+            <strong class="${amountClass(maxValue)}">${escapeHtml(formatMoney(maxValue, source.asset))}</strong>
+          </div>
+          <div>
+            <span>Minimo</span>
+            <strong class="${amountClass(minValue)}">${escapeHtml(formatMoney(minValue, source.asset))}</strong>
+          </div>
+          <div>
+            <span>Drawdown</span>
+            <strong class="${amountClass(-drawdown)}">${escapeHtml(formatMoney(-drawdown, source.asset))}</strong>
+          </div>
+        </div>
+        ${actualSource ? renderCurveTimeline(items, source.asset) : ''}
+      ` : '<div class="pnl-chart-empty">Sin operaciones detectadas para graficar.</div>'}
+    </section>
   `;
+}
+
+function renderAccountWaterfall(source) {
+  const asset = source.asset || 'USDT';
+  const grossRealized = finiteNumber(source.grossRealized, null);
+  const realized = finiteNumber(source.realized, 0);
+  const fees = finiteNumber(source.fees, 0);
+  const funding = finiteNumber(source.funding, 0);
+  const floating = finiteNumber(source.floating, 0);
+  const total = finiteNumber(source.total, realized + floating);
+  const hasGross = grossRealized != null && Math.abs(grossRealized) > 0;
+  const steps = [
+    {
+      key: 'realized',
+      label: hasGross ? 'Cierres brutos' : 'Realizado neto',
+      value: hasGross ? grossRealized : realized
+    },
+    ...(hasGross ? [
+      { key: 'fees', label: 'Fees', value: fees },
+      { key: 'funding', label: 'Funding', value: funding }
+    ] : []),
+    { key: 'floating', label: 'Flotante vivo', value: floating }
+  ];
+  const bars = waterfallBars(steps, total);
+  const complete = !source.error;
+  const title = source.key === 'live'
+    ? (complete ? 'Rendimiento cuenta real mensual' : 'Cuenta real: resumen parcial')
+    : (complete ? 'Rendimiento cuenta VST mensual' : 'Cuenta VST: resumen parcial');
+  const subtitle = complete
+    ? (hasGross ? 'Desglose del mes con costes separados.' : 'Resumen mensual de cuenta; BingX no ha devuelto costes brutos separados ahora mismo.')
+    : 'BingX esta limitando el resumen completo; uso posiciones detectadas y flotante disponible.';
+
+  return `
+    <section class="account-waterfall-panel">
+      <div class="curve-panel-header">
+        <div>
+          <h4>${escapeHtml(title)}</h4>
+          <p>${escapeHtml(subtitle)}</p>
+        </div>
+        <strong class="${amountClass(total)}">${escapeHtml(formatMoney(total, asset))}</strong>
+      </div>
+      <div class="waterfall-summary">
+        <div>
+          <span>Realizado</span>
+          <strong class="${amountClass(realized)}">${escapeHtml(formatMoney(realized, asset))}</strong>
+        </div>
+        <div>
+          <span>Flotante</span>
+          <strong class="${amountClass(floating)}">${escapeHtml(formatMoney(floating, asset))}</strong>
+        </div>
+        <div>
+          <span>Fees</span>
+          <strong class="${amountClass(fees)}">${escapeHtml(formatMoney(fees, asset))}</strong>
+        </div>
+        <div>
+          <span>Funding</span>
+          <strong class="${amountClass(funding)}">${escapeHtml(formatMoney(funding, asset))}</strong>
+        </div>
+      </div>
+      <div class="account-waterfall">
+        ${bars.map((bar) => `
+          <div class="waterfall-row ${escapeAttribute(bar.final ? 'final' : amountTone(bar.value))}">
+            <span>${escapeHtml(bar.label)}</span>
+            <div class="waterfall-track" aria-hidden="true">
+              <i style="left: ${escapeAttribute(bar.left)}%; width: ${escapeAttribute(bar.width)}%;"></i>
+            </div>
+            <strong class="${amountClass(bar.value)}">${escapeHtml(formatMoney(bar.value, asset))}</strong>
+          </div>
+        `).join('')}
+      </div>
+      <p class="curve-note">${escapeHtml(complete
+        ? 'Esta es la grafica representativa de cuenta. La curva inferior es solo la muestra operativa detectada por la app.'
+        : 'Vista parcial por rate-limit temporal. Cuando BingX desbloquee el resumen, aqui apareceran fees, funding y realizados completos.')}</p>
+    </section>
+  `;
+}
+
+function waterfallBars(steps, total) {
+  let cumulative = 0;
+  const rawBars = steps.map((step) => {
+    const start = cumulative;
+    cumulative = roundPnl(cumulative + Number(step.value || 0));
+    return {
+      label: step.label,
+      value: Number(step.value || 0),
+      start,
+      end: cumulative,
+      final: false
+    };
+  });
+  rawBars.push({
+    label: 'Neto cuenta',
+    value: total,
+    start: 0,
+    end: total,
+    final: true
+  });
+
+  const maxAbs = Math.max(1, ...rawBars.flatMap((bar) => [Math.abs(bar.start), Math.abs(bar.end)]));
+  const min = -maxAbs;
+  const max = maxAbs;
+  const range = max - min || 1;
+  return rawBars.map((bar) => {
+    const start = Math.min(bar.start, bar.end);
+    const end = Math.max(bar.start, bar.end);
+    return {
+      ...bar,
+      left: roundPnl(((start - min) / range) * 100),
+      width: Math.max(2, roundPnl(((end - start) / range) * 100))
+    };
+  });
 }
 
 function renderCurveTimeline(items, asset = 'USDT') {
