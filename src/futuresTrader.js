@@ -292,6 +292,7 @@ export class FuturesTrader {
   async processPosts(posts, payload, options = {}) {
     const results = [];
     const filterSignal = typeof options.filterSignal === 'function' ? options.filterSignal : null;
+    const duplicateGuard = typeof options.duplicateGuard === 'function' ? options.duplicateGuard : null;
     const filteredReason = options.filteredReason || 'signal_filtered';
     for (const post of posts) {
       const signals = parseFuturesSignals(post.text || '').filter((signal) => signal.isSignal);
@@ -308,6 +309,18 @@ export class FuturesTrader {
             ...baseEvent,
             status: 'skipped',
             reason: filteredReason
+          }));
+          continue;
+        }
+
+        const duplicate = duplicateGuard?.(signal, { post, payload });
+        if (duplicate) {
+          results.push(this.emitTrade({
+            ...baseEvent,
+            status: 'skipped',
+            reason: duplicate.reason || 'duplicate_signal',
+            duplicateOf: duplicate.eventId || null,
+            duplicateAt: duplicate.at || null
           }));
           continue;
         }

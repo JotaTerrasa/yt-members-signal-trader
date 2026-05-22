@@ -23,6 +23,9 @@ const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
 const EXCHANGE_SYNC_POLL_MS = 30_000;
 const EXCHANGE_SYNC_MIN_INTERVAL_MS = 10_000;
+const EXCHANGE_SYNC_STALE_MS = 90_000;
+const EXCHANGE_SAFETY_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
 const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 5 * 60 * 1000;
 
@@ -72,7 +75,9 @@ let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
 let exchangeSyncInFlight = false;
 let lastExchangeSyncAt = 0;
+let lastExchangeSyncReason = '';
 const pendingExchangeClosures = new Map();
+const exchangeSafetyAlerts = new Map();
 
 const state = {
   browserOpen: false,
@@ -300,7 +305,13 @@ function filterIncomingPosts(payload = {}) {
 
 function tradingPlanForPayload(payload = {}) {
   if (payload.source !== 'telegram_web') {
-    return { enabled: true, reason: '', options: {} };
+    return {
+      enabled: true,
+      reason: '',
+      options: {
+        duplicateGuard: duplicateOpenSignalGuard
+      }
+    };
   }
 
   const telegramSource = configStore.getTelegramSource();
@@ -318,13 +329,33 @@ function tradingPlanForPayload(payload = {}) {
     reason: '',
     options: {
       filterSignal: (signal) => telegramSource.executeOpenSignals || isPositionManagementSignal(signal),
-      filteredReason: 'telegram_open_signals_disabled'
+      filteredReason: 'telegram_open_signals_disabled',
+      duplicateGuard: duplicateOpenSignalGuard
     }
   };
 }
 
 function isPositionManagementSignal(signal = {}) {
   return ['CLOSE', 'CLOSE_ALL', 'MOVE_SL_BE', 'SET_TAKE_PROFIT', 'SET_STOP_LOSS'].includes(signal.action);
+}
+
+function duplicateOpenSignalGuard(signal = {}) {
+  if (!signal.symbol || !signal.direction || isPositionManagementSignal(signal)) {
+    return null;
+  }
+
+  const duplicate = tradeEventStore.findRecentOpenSignal(signal, {
+    windowMs: DUPLICATE_SIGNAL_WINDOW_MS
+  });
+  if (!duplicate) {
+    return null;
+  }
+
+  return {
+    reason: 'duplicate_open_signal',
+    eventId: duplicate.eventId || null,
+    at: duplicate.at || null
+  };
 }
 
 function countParsedSignals(posts = []) {
@@ -418,13 +449,14 @@ const server = createServer(async (request, response) => {
         trades: state.trades,
         paperTrades: paperStore.list(),
         exchangePositions,
+        exchangeSafety: buildExchangeSafety(exchangePositions),
         risk: futuresTrader.riskSnapshot()
       });
     }
 
     if (requestUrl.pathname === '/api/bingx/open-positions' && request.method === 'GET') {
       const positions = await syncExchangePositions({ reason: 'api' });
-      return sendJson(response, { ok: true, positions });
+      return sendJson(response, { ok: true, positions, exchangeSafety: buildExchangeSafety(positions) });
     }
 
     if (requestUrl.pathname === '/api/bingx' && request.method === 'PUT') {
@@ -578,7 +610,12 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/risk' && request.method === 'GET') {
-      return sendJson(response, { ok: true, risk: futuresTrader.riskSnapshot(), bingx: configStore.getBingX() });
+      return sendJson(response, {
+        ok: true,
+        risk: futuresTrader.riskSnapshot(),
+        exchangeSafety: buildExchangeSafety(),
+        bingx: configStore.getBingX()
+      });
     }
 
     if (requestUrl.pathname === '/api/price-feed' && request.method === 'GET') {
@@ -678,6 +715,8 @@ const server = createServer(async (request, response) => {
         telegram: configStore.getTelegram(),
         telegramSource: configStore.getTelegramSource(),
         portfolio: configStore.getPortfolio(),
+        exchangeSafety: buildExchangeSafety(),
+        exchangePositions: exchangePositionsCache,
         stats: store.stats(),
         recentLogs: state.logs.slice(0, 80),
         recentEvents: state.trades.slice(0, 120),
@@ -810,6 +849,7 @@ function currentState() {
     running: scraper.running,
     telegramSource: configStore.getTelegramSource(),
     portfolio: configStore.getPortfolio(),
+    exchangeSafety: buildExchangeSafety(),
     stats: store.stats()
   };
 }
@@ -841,7 +881,12 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
     exchangePositionsCache = [];
     syncPriceSubscriptions(exchangePositionsCache);
     if (previous.length) {
-      broadcast('exchangePositions', { positions: exchangePositionsCache, closedPositions: previous, reason });
+      broadcast('exchangePositions', {
+        positions: exchangePositionsCache,
+        closedPositions: previous,
+        exchangeSafety: buildExchangeSafety(exchangePositionsCache),
+        reason
+      });
     }
     return exchangePositionsCache;
   }
@@ -856,14 +901,23 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
     }
     const next = await futuresTrader.getExchangeOpenPositions();
     lastExchangeSyncAt = Date.now();
+    lastExchangeSyncReason = reason;
     const closedCandidates = sourceChanged ? [] : detectClosedExchangePositions(previous, next);
     const closedPositions = confirmClosedExchangePositions(closedCandidates, next, reason);
     const visibleNext = mergeUnconfirmedExchangePositions(next, closedCandidates, closedPositions, reason);
     exchangePositionsCache = visibleNext;
     syncPriceSubscriptions(visibleNext);
+    evaluateExchangeSafety(visibleNext, reason).catch((error) => {
+      pushLog({ level: 'error', message: `BingX safety: ${error.message}`, at: new Date().toISOString() });
+    });
 
     if (reason !== 'poll' || sourceChanged || closedPositions.length || positionsChanged(previous, visibleNext)) {
-      broadcast('exchangePositions', { positions: visibleNext, closedPositions, reason });
+      broadcast('exchangePositions', {
+        positions: visibleNext,
+        closedPositions,
+        exchangeSafety: buildExchangeSafety(visibleNext),
+        reason
+      });
     }
 
     for (const position of closedPositions) {
@@ -994,6 +1048,163 @@ function exchangeSourcesForMode(mode) {
     return ['demo', 'live'];
   }
   return [mode === 'demo' ? 'demo' : 'live'];
+}
+
+function buildExchangeSafety(inputPositions = exchangePositionsCache) {
+  const config = configStore.getBingX();
+  const credentialsOk = Boolean(config.apiKeyConfigured && config.apiSecretConfigured);
+  const exchangeEnabled = Boolean(config.enabled && config.mode !== 'test' && credentialsOk);
+  const positions = Array.isArray(inputPositions) ? inputPositions : [];
+  const livePositions = positions.filter((position) => position.source === 'live' && position.status === 'open');
+  const demoPositions = positions.filter((position) => position.source === 'demo' && position.status === 'open');
+  const liveWithoutStopLoss = livePositions.filter((position) => !hasStopLossProtection(position));
+  const liveWithoutTakeProfit = livePositions.filter((position) => !hasTakeProfitProtection(position));
+  const demoWithoutStopLoss = demoPositions.filter((position) => !hasStopLossProtection(position));
+  const ageMs = lastExchangeSyncAt ? Date.now() - lastExchangeSyncAt : null;
+  const stale = exchangeEnabled && (ageMs === null || ageMs > EXCHANGE_SYNC_STALE_MS);
+  const missingRequiredStops = Boolean(config.requireStopLoss && usesLiveMode(config.mode) && liveWithoutStopLoss.length);
+  const level = !exchangeEnabled
+    ? 'idle'
+    : stale || missingRequiredStops ? 'warn' : 'ok';
+
+  return {
+    level,
+    mode: config.mode,
+    enabled: exchangeEnabled,
+    liveArmed: usesLiveMode(config.mode) && Boolean(config.liveConfirmed),
+    lastSyncAt: lastExchangeSyncAt ? new Date(lastExchangeSyncAt).toISOString() : null,
+    lastSyncReason: lastExchangeSyncReason,
+    ageSeconds: ageMs === null ? null : Math.max(0, Math.round(ageMs / 1000)),
+    stale,
+    staleAfterSeconds: Math.round(EXCHANGE_SYNC_STALE_MS / 1000),
+    real: exchangeSafetySummary(livePositions, liveWithoutStopLoss, liveWithoutTakeProfit, 'USDT'),
+    demo: exchangeSafetySummary(demoPositions, demoWithoutStopLoss, [], 'VST'),
+    checks: [
+      {
+        key: 'exchange-sync',
+        label: 'Reconciliacion BingX',
+        ok: exchangeEnabled && !stale,
+        detail: exchangeEnabled
+          ? (ageMs === null ? 'sin lectura' : `${Math.max(0, Math.round(ageMs / 1000))}s`)
+          : 'sin exchange activo'
+      },
+      {
+        key: 'live-armed',
+        label: 'Live real armado',
+        ok: !usesLiveMode(config.mode) || Boolean(config.liveConfirmed),
+        detail: usesLiveMode(config.mode) ? (config.liveConfirmed ? 'confirmado' : 'pendiente') : 'no aplica'
+      },
+      {
+        key: 'live-stop-loss',
+        label: 'SL real confirmado',
+        ok: !config.requireStopLoss || !liveWithoutStopLoss.length,
+        detail: `${Math.max(0, livePositions.length - liveWithoutStopLoss.length)}/${livePositions.length}`
+      },
+      {
+        key: 'live-take-profit',
+        label: 'TP real detectado',
+        ok: !livePositions.length || !liveWithoutTakeProfit.length,
+        detail: `${Math.max(0, livePositions.length - liveWithoutTakeProfit.length)}/${livePositions.length}`
+      },
+      {
+        key: 'duplicate-guard',
+        label: 'Anti-duplicados',
+        ok: true,
+        detail: `${Math.round(DUPLICATE_SIGNAL_WINDOW_MS / (60 * 60 * 1000))}h`
+      }
+    ]
+  };
+}
+
+function exchangeSafetySummary(positions, withoutStopLoss, withoutTakeProfit, asset) {
+  return {
+    asset,
+    openPositions: positions.length,
+    protectedStopLoss: Math.max(0, positions.length - withoutStopLoss.length),
+    protectedTakeProfit: Math.max(0, positions.length - withoutTakeProfit.length),
+    missingStopLoss: withoutStopLoss.length,
+    missingTakeProfit: withoutTakeProfit.length,
+    exposure: roundMoney(positions.reduce((sum, position) => (
+      sum + Number(position.exposure || position.notional || 0)
+    ), 0)),
+    floatingPnl: roundMoney(positions.reduce((sum, position) => (
+      sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
+    ), 0)),
+    withoutStopLoss: withoutStopLoss.map(publicExchangeSafetyPosition),
+    withoutTakeProfit: withoutTakeProfit.map(publicExchangeSafetyPosition)
+  };
+}
+
+function publicExchangeSafetyPosition(position) {
+  return {
+    id: position.id,
+    source: position.source,
+    symbol: position.symbol,
+    direction: position.direction,
+    entryPrice: position.entryPrice,
+    currentPrice: position.currentPrice,
+    unrealizedPnl: position.unrealizedPnl,
+    exposure: position.exposure || position.notional || 0
+  };
+}
+
+function hasStopLossProtection(position = {}) {
+  return Number(position.stopLoss || 0) > 0
+    || (Array.isArray(position.protectiveOrders) && position.protectiveOrders.some((order) => (
+      String(order.type || '').toUpperCase().includes('STOP')
+      && !String(order.type || '').toUpperCase().includes('TAKE_PROFIT')
+      && Number(order.stopPrice || 0) > 0
+    )));
+}
+
+function hasTakeProfitProtection(position = {}) {
+  return Number(position.takeProfit || 0) > 0
+    || (Array.isArray(position.protectiveOrders) && position.protectiveOrders.some((order) => (
+      String(order.type || '').toUpperCase().includes('TAKE_PROFIT')
+      && Number(order.stopPrice || 0) > 0
+    )));
+}
+
+async function evaluateExchangeSafety(positions = exchangePositionsCache, reason = 'poll') {
+  const config = configStore.getBingX();
+  if (!config.requireStopLoss || !usesLiveMode(config.mode)) {
+    return;
+  }
+
+  const missing = positions
+    .filter((position) => position.source === 'live' && position.status === 'open')
+    .filter((position) => !hasStopLossProtection(position));
+  if (!missing.length) {
+    return;
+  }
+
+  const key = `missing-live-sl:${missing.map((position) => `${position.symbol}:${position.direction}`).sort().join('|')}`;
+  const now = Date.now();
+  if (now - Number(exchangeSafetyAlerts.get(key) || 0) < EXCHANGE_SAFETY_ALERT_COOLDOWN_MS) {
+    return;
+  }
+  exchangeSafetyAlerts.set(key, now);
+
+  const details = [
+    `${missing.length} posicion(es) reales sin SL confirmado.`,
+    `Sync: ${reason}`,
+    ...missing.map((position) => (
+      `${position.symbol} ${position.direction || ''} entrada ${position.entryPrice || '-'} actual ${position.currentPrice || '-'}`
+    ))
+  ].join('\n');
+
+  pushLog({
+    level: 'warn',
+    message: `BingX real sin SL confirmado: ${missing.map((position) => position.symbol).join(', ')}.`,
+    at: new Date().toISOString()
+  });
+
+  await telegramNotifier.sendAlert('Riesgo BingX real', details)
+    .then((result) => {
+      if (result.sent) {
+        pushLog({ level: 'warn', message: 'Alerta de riesgo real enviada por Telegram.', at: new Date().toISOString() });
+      }
+    });
 }
 
 function usesLiveMode(mode) {

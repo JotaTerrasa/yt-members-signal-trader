@@ -60,6 +60,22 @@ export class TradeEventStore {
     await this.save();
     return cleared;
   }
+
+  findRecentOpenSignal(signal, { windowMs = 12 * 60 * 60 * 1000 } = {}) {
+    const target = tradeSignalFingerprint(signal);
+    if (!target) {
+      return null;
+    }
+
+    const cutoff = Date.now() - Number(windowMs || 0);
+    return this.list().find((event) => {
+      const timestamp = Date.parse(event.at || 0);
+      return Number.isFinite(timestamp)
+        && timestamp >= cutoff
+        && isOpeningExecutionStatus(event.status)
+        && tradeSignalFingerprint(event.signal) === target;
+    }) || null;
+  }
 }
 
 function tradeEventId(event = {}) {
@@ -84,4 +100,28 @@ function firstOrderId(value) {
     value.exchangePosition?.id
   ];
   return candidates.find(Boolean) || '';
+}
+
+function tradeSignalFingerprint(signal = {}) {
+  if (!signal?.symbol || !signal?.direction || signal.action) {
+    return '';
+  }
+
+  return [
+    signal.symbol,
+    signal.direction,
+    signal.entry?.type || '',
+    signal.entry?.price || '',
+    signal.stopLoss || '',
+    Array.isArray(signal.takeProfits) ? signal.takeProfits.join(',') : '',
+    signal.leverage || '',
+    signal.notionalUSDT || ''
+  ].join('|').toUpperCase();
+}
+
+function isOpeningExecutionStatus(status) {
+  const value = String(status || '');
+  return value === 'test_order_sent'
+    || value === 'demo_order_sent'
+    || value === 'live_order_sent';
 }

@@ -939,6 +939,59 @@ summary.dashboard-section-title {
   gap: 8px;
 }
 
+.exchange-safety-panel {
+  border-color: rgba(36, 91, 155, 0.18);
+}
+
+.exchange-safety-checks {
+  display: grid;
+  gap: 6px;
+}
+
+.exchange-safety-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.exchange-safety-check svg {
+  width: 17px;
+  height: 17px;
+}
+
+.exchange-safety-check.ok {
+  color: var(--accent-strong);
+}
+
+.exchange-safety-check.missing {
+  color: var(--danger);
+}
+
+.exchange-safety-check strong {
+  justify-self: end;
+  font-size: 0.76rem;
+}
+
+.exchange-safety-warning,
+.exchange-safety-empty {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff5f3;
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.exchange-safety-empty {
+  background: var(--panel-strong);
+  color: var(--muted);
+}
+
 .pnl-chart {
   display: grid;
   gap: 10px;
@@ -2211,6 +2264,17 @@ summary.dashboard-section-title {
 .position-card-footer {
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.position-card-footer span.positive,
+.position-card-footer span.negative,
+.position-card-footer span.warn {
+  font-weight: 900;
+}
+
+.position-card-footer span.warn,
+.warn {
+  color: var(--gold);
 }
 
 .trade-table-wrap {

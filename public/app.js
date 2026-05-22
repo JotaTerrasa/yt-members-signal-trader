@@ -79,6 +79,9 @@ const elements = {
   healthMetrics: document.querySelector('#health-metrics'),
   riskStatus: document.querySelector('#risk-status'),
   riskMetrics: document.querySelector('#risk-metrics'),
+  exchangeSafetyStatus: document.querySelector('#exchange-safety-status'),
+  exchangeSafetyMetrics: document.querySelector('#exchange-safety-metrics'),
+  exchangeSafetyChecks: document.querySelector('#exchange-safety-checks'),
   dualOpsPanel: document.querySelector('#dual-ops-panel'),
   dualOpsStatus: document.querySelector('#dual-ops-status'),
   dualOpsMetrics: document.querySelector('#dual-ops-metrics'),
@@ -171,6 +174,7 @@ const appState = {
   trades: [],
   paperTrades: [],
   exchangePositions: [],
+  exchangeSafety: null,
   risk: null,
   logs: []
 };
@@ -480,6 +484,7 @@ async function loadBingx() {
   appState.trades = response.trades || appState.trades;
   appState.paperTrades = response.paperTrades || appState.paperTrades;
   appState.exchangePositions = response.exchangePositions || appState.exchangePositions;
+  appState.exchangeSafety = response.exchangeSafety || appState.exchangeSafety;
   appState.risk = response.risk || appState.risk;
   renderBingx(response.bingx);
   if (response.bingx?.apiKeyConfigured && response.bingx?.apiSecretConfigured) {
@@ -554,6 +559,7 @@ function connectEvents() {
     appState.state = JSON.parse(event.data);
     appState.logs = appState.state.logs || appState.logs;
     appState.trades = appState.state.trades || appState.trades;
+    appState.exchangeSafety = appState.state.exchangeSafety || appState.exchangeSafety;
     renderState();
     renderLogs();
     renderPnl();
@@ -624,6 +630,7 @@ function connectEvents() {
   source.addEventListener('exchangePositions', (event) => {
     const payload = JSON.parse(event.data);
     appState.exchangePositions = payload.positions || [];
+    appState.exchangeSafety = payload.exchangeSafety || appState.exchangeSafety;
     renderPnl();
   });
 
@@ -809,6 +816,7 @@ function renderPnl() {
   renderLiveReadiness();
   renderHealthPanel();
   renderRiskPanel(openPositions, closedPositions);
+  renderExchangeSafetyPanel();
   renderDualOpsPanel();
   renderTickerPnl();
   renderDailyPnl();
@@ -1844,6 +1852,55 @@ function renderRiskPanel(openPositions = openPaperPositions(), closedPositions =
   ].map(renderOpsMetric).join('');
 }
 
+function renderExchangeSafetyPanel() {
+  if (!elements.exchangeSafetyStatus || !elements.exchangeSafetyMetrics || !elements.exchangeSafetyChecks) {
+    return;
+  }
+
+  const safety = appState.exchangeSafety || {};
+  const real = safety.real || {};
+  const level = safety.level || 'idle';
+  const missingSl = Number(real.missingStopLoss || 0);
+  const missingTp = Number(real.missingTakeProfit || 0);
+  const status = level === 'ok'
+    ? 'Real cubierto'
+    : level === 'warn'
+      ? missingSl ? 'Falta SL real' : 'Revisar sync'
+      : 'Sin exchange activo';
+
+  elements.exchangeSafetyStatus.textContent = status;
+  elements.exchangeSafetyStatus.className = amountClass(level === 'ok' ? 1 : level === 'warn' ? -1 : 0);
+  elements.exchangeSafetyMetrics.innerHTML = [
+    ['Sync', safety.ageSeconds === null || safety.ageSeconds === undefined ? '-' : `${safety.ageSeconds}s`, safety.stale ? 'negative' : safety.enabled ? 'positive' : ''],
+    ['Real abiertas', String(real.openPositions || 0), missingSl ? 'negative' : ''],
+    ['Exposicion real', formatMoney(real.exposure || 0, real.asset || 'USDT'), ''],
+    ['Flotante real', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)]
+  ].map(renderOpsMetric).join('');
+
+  const checks = Array.isArray(safety.checks) ? safety.checks : [];
+  elements.exchangeSafetyChecks.innerHTML = checks.length
+    ? checks.map((check) => `
+      <div class="exchange-safety-check ${check.ok ? 'ok' : 'missing'}">
+        <i data-lucide="${check.ok ? 'check' : 'triangle-alert'}"></i>
+        <span>${escapeHtml(check.label)}</span>
+        <strong>${escapeHtml(check.detail || '')}</strong>
+      </div>
+    `).join('')
+    : '<div class="exchange-safety-empty">Activa BingX real o dual para reconciliar posiciones.</div>';
+
+  if (missingSl || missingTp) {
+    const missing = [
+      missingSl ? `${missingSl} sin SL` : '',
+      missingTp ? `${missingTp} sin TP` : ''
+    ].filter(Boolean).join(' · ');
+    elements.exchangeSafetyChecks.insertAdjacentHTML('beforeend', `
+      <div class="exchange-safety-warning">
+        ${escapeHtml(missing)}
+      </div>
+    `);
+  }
+}
+
 function renderTickerPnl() {
   const { positions, label } = dashboardPositions();
   const rows = [...groupPositions(positions, (position) => position.symbol || '-').entries()]
@@ -2370,6 +2427,8 @@ function renderOpenPositionCard(position) {
   const stopSummary = stopPrices.length
     ? `Stops ${stopPrices.length}: ${stopPrices.map(formatPrice).join(', ')}`
     : 'Stops 0';
+  const stopProtected = hasPositionStopLoss(position);
+  const takeProfitProtected = hasPositionTakeProfit(position);
   const entryLabel = position.source === 'demo' || position.source === 'live'
     ? 'Entrada media'
     : 'Entrada';
@@ -2410,10 +2469,27 @@ function renderOpenPositionCard(position) {
         <span>Margen ${escapeHtml(formatPositionMoney(position.notional, position))}</span>
         <span>Exposicion ${escapeHtml(formatPositionMoney(position.exposure || position.notional, position))}</span>
         <span>${escapeHtml(stopSummary)}</span>
+        <span class="${escapeAttribute(stopProtected ? 'positive' : 'negative')}">${escapeHtml(stopProtected ? 'SL confirmado' : 'SL pendiente')}</span>
+        <span class="${escapeAttribute(takeProfitProtected ? 'positive' : 'warn')}">${escapeHtml(takeProfitProtected ? 'TP confirmado' : 'TP pendiente')}</span>
         <span>${escapeHtml(formatDuration(position.openedAt, position.closedAt))}</span>
       </div>
     </article>
   `;
+}
+
+function hasPositionStopLoss(position = {}) {
+  return Number(position.stopLoss || 0) > 0
+    || (Array.isArray(position.protectiveOrders) && position.protectiveOrders.some((order) => {
+      const type = String(order.type || '').toUpperCase();
+      return type.includes('STOP') && !type.includes('TAKE_PROFIT') && Number(order.stopPrice || 0) > 0;
+    }));
+}
+
+function hasPositionTakeProfit(position = {}) {
+  return Number(position.takeProfit || 0) > 0
+    || (Array.isArray(position.protectiveOrders) && position.protectiveOrders.some((order) => (
+      String(order.type || '').toUpperCase().includes('TAKE_PROFIT') && Number(order.stopPrice || 0) > 0
+    )));
 }
 
 function positionQuantity(position) {
@@ -2500,7 +2576,7 @@ function uniquePositionsById(...collections) {
 
 function closedExchangePositionsForSource(source) {
   return (appState.trades || [])
-    .filter((event) => event.status === 'exchange_position_closed' && event.exchangePosition)
+    .filter((event) => String(event.status || '').startsWith('exchange_') && String(event.status || '').endsWith('_closed') && event.exchangePosition)
     .map((event) => ({
       ...event.exchangePosition,
       source: event.exchangePosition.source || source,
