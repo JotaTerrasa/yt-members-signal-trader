@@ -25,6 +25,7 @@ const elements = {
   pnlStatus: document.querySelector('#pnl-status'),
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
   performanceSourceGrid: document.querySelector('#performance-source-grid'),
+  performanceOverview: document.querySelector('#performance-overview'),
   pnlMonthLabel: document.querySelector('#pnl-month-label'),
   pnlTotalMonth: document.querySelector('#pnl-total-month'),
   pnlHeroDetail: document.querySelector('#pnl-hero-detail'),
@@ -252,7 +253,10 @@ function bindEvents() {
       return;
     }
     appState.performanceSource = button.dataset.performanceSource;
-    renderPerformanceSourceGrid(pnlSourceCards(currentReferenceLedger()), appState.performanceSource);
+    const sources = pnlSourceCards(currentReferenceLedger());
+    const source = selectedPerformanceSource(sources);
+    renderPerformanceSourceGrid(sources, source.key);
+    renderPerformanceOverview(source);
     renderPnlCurve();
     renderSimulation();
     renderPnlChart(performanceMonthlyRows());
@@ -742,7 +746,9 @@ function renderPnl() {
 
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
   renderPnlSourceGrid(sources, selectedSource.key);
-  renderPerformanceSourceGrid(sources, selectedPerformanceSource(sources).key);
+  const performanceSource = selectedPerformanceSource(sources);
+  renderPerformanceSourceGrid(sources, performanceSource.key);
+  renderPerformanceOverview(performanceSource, reference);
   elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
   elements.pnlTotalMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
   elements.pnlHeroDetail.textContent = sourceHeroDetail(selectedSource);
@@ -970,6 +976,327 @@ function renderPerformanceSourceGrid(sources, selectedKey) {
       </button>
     `;
   }).join('');
+}
+
+function renderPerformanceOverview(source = selectedPerformanceSource(), reference = currentReferenceLedger()) {
+  if (!elements.performanceOverview) {
+    return;
+  }
+
+  const sourcePositions = performanceSourcePositions(source.key, reference, source);
+  const positions = sourcePositions.positions || [];
+  const open = positions.filter((position) => position.status === 'open');
+  const closed = positions.filter((position) => position.status === 'closed');
+  const asset = sourcePositions.asset || source.asset || 'USDT';
+  const balance = source.balance || {};
+  const fees = Number(source.fees || 0);
+  const funding = Number(source.funding || 0);
+  const costs = roundPnl(fees + funding);
+  const winRate = source.winRate ?? calculateWinRate(closed);
+  const scenario = performanceScenario(open);
+  const closedCount = Number(source.closedTrades || closed.length || 0);
+  const statusLine = [
+    source.status,
+    `${open.length} abiertas`,
+    `${closedCount} cerradas`
+  ].filter(Boolean).join(' / ');
+
+  const accountMetrics = [
+    {
+      label: source.key === 'live' ? 'Neto real' : 'Neto',
+      value: formatOptionalMoney(source.total, asset),
+      className: optionalAmountClass(source.total),
+      detail: 'Realizado + flotante'
+    },
+    {
+      label: 'Realizado',
+      value: formatOptionalMoney(source.realized, asset),
+      className: optionalAmountClass(source.realized),
+      detail: `${closedCount} cierres`
+    },
+    {
+      label: 'Flotante',
+      value: formatOptionalMoney(source.floating, asset),
+      className: optionalAmountClass(source.floating),
+      detail: `${open.length} posiciones abiertas`
+    },
+    {
+      label: 'Costes',
+      value: formatOptionalMoney(costs, asset),
+      className: optionalAmountClass(costs),
+      detail: `Fees ${formatOptionalMoney(fees, asset)} / funding ${formatOptionalMoney(funding, asset)}`
+    },
+    {
+      label: 'Equity cuenta',
+      value: formatOptionalMoney(balance.equity, asset),
+      className: 'amount',
+      detail: `Balance ${formatOptionalMoney(balance.balance, asset)}`
+    },
+    {
+      label: 'Margen libre',
+      value: formatOptionalMoney(balance.availableMargin, asset),
+      className: 'amount',
+      detail: `Usado ${formatOptionalMoney(balance.usedMargin, asset)}`
+    },
+    {
+      label: 'Exposicion viva',
+      value: formatOptionalMoney(source.exposure, asset),
+      className: 'amount',
+      detail: `${source.openPositions || open.length} abiertas`
+    },
+    {
+      label: 'Win rate',
+      value: formatPercent(winRate),
+      className: 'amount',
+      detail: Number.isFinite(winRate) ? 'Cierres con PnL' : 'Sin muestra cerrada'
+    }
+  ];
+
+  const scenarioMetrics = [
+    {
+      label: 'Ahora mismo',
+      value: formatOptionalMoney(scenario.currentPnl, asset),
+      className: optionalAmountClass(scenario.currentPnl),
+      detail: 'PnL flotante vivo'
+    },
+    {
+      label: 'Si todo va a TP',
+      value: formatOptionalMoney(scenario.pnlAtTakeProfit, asset),
+      className: optionalAmountClass(scenario.pnlAtTakeProfit),
+      detail: scenario.takeProfitCount ? `${scenario.takeProfitCount}/${open.length} con TP` : 'Sin TP cargado'
+    },
+    {
+      label: 'Si saltan los SL',
+      value: formatOptionalMoney(scenario.pnlAtStopLoss, asset),
+      className: optionalAmountClass(scenario.pnlAtStopLoss),
+      detail: scenario.stopLossCount ? `${scenario.stopLossCount}/${open.length} con SL` : 'Sin SL cargado'
+    },
+    {
+      label: 'Liq. mas cercana',
+      value: formatOptionalPercent(scenario.minLiquidationDistancePct),
+      className: liquidationClass(scenario.minLiquidationDistancePct),
+      detail: scenario.minLiquidationSymbol || 'Sin dato de liquidacion'
+    }
+  ];
+
+  elements.performanceOverview.innerHTML = `
+    <div class="performance-overview-header">
+      <div>
+        <span class="performance-pill source-${escapeAttribute(source.key)}">${escapeHtml(source.modeLabel || source.label)}</span>
+        <h3>${escapeHtml(source.key === 'live' ? 'Control de futuros reales' : `Control ${source.label}`)}</h3>
+        <p>${escapeHtml(statusLine || 'Sin actividad cargada')}</p>
+      </div>
+      <div class="performance-safety ${scenario.stopLossCount === open.length && open.length ? 'ok' : 'warn'}">
+        <strong>${escapeHtml(open.length ? `${scenario.stopLossCount}/${open.length}` : '0')}</strong>
+        <span>con stop loss</span>
+      </div>
+    </div>
+
+    <div class="performance-kpi-grid">
+      ${accountMetrics.map(renderPerformanceMetric).join('')}
+    </div>
+
+    <div class="performance-scenario-grid">
+      ${scenarioMetrics.map(renderPerformanceMetric).join('')}
+    </div>
+
+    <section class="performance-position-section">
+      <div class="trade-section-header">
+        <h3>Posiciones vivas</h3>
+        <span>${escapeHtml(open.length ? 'Estimacion bruta sin comisiones' : 'Sin posiciones abiertas')}</span>
+      </div>
+      <div class="performance-position-grid">
+        ${open.length ? open.map((position) => renderPerformancePositionCard(position, asset)).join('') : '<div class="empty-state compact">No hay posiciones abiertas en esta fuente.</div>'}
+      </div>
+    </section>
+  `;
+}
+
+function renderPerformanceMetric(metric) {
+  return `
+    <div class="performance-metric">
+      <span>${escapeHtml(metric.label)}</span>
+      <strong class="${escapeAttribute(metric.className || 'amount')}">${escapeHtml(metric.value)}</strong>
+      <small>${escapeHtml(metric.detail || '')}</small>
+    </div>
+  `;
+}
+
+function renderPerformancePositionCard(position, asset = positionAsset(position)) {
+  const sideClass = escapeAttribute(String(position.direction || '').toLowerCase());
+  const pnl = positionCurrentPnl(position);
+  const takeProfitPnl = positionOutcomeAtPrice(position, position.takeProfit);
+  const stopLossPnl = positionOutcomeAtPrice(position, position.stopLoss);
+  const takeProfitDistance = priceDistancePercent(position.currentPrice, position.takeProfit);
+  const stopLossDistance = priceDistancePercent(position.currentPrice, position.stopLoss);
+  const liquidationPrice = positionLiquidationPrice(position);
+  const liquidationDistance = priceDistancePercent(position.currentPrice, liquidationPrice);
+  const margin = positionMargin(position);
+  const exposure = positionExposure(position);
+  const quantity = positionQuantity(position);
+  const baseAsset = positionBaseAsset(position.symbol);
+
+  return `
+    <article class="performance-position-card ${sideClass}">
+      <div class="performance-position-top">
+        <div>
+          <span class="side ${sideClass}">${escapeHtml(position.direction || '-')}</span>
+          <strong>${escapeHtml(position.symbol || '-')}</strong>
+          <small>${escapeHtml(`${formatLeverage(position.leverage)} / ${quantity ? `${formatQuantity(quantity)} ${baseAsset}` : 'cantidad -'}`)}</small>
+        </div>
+        <strong class="${amountClass(pnl)}">${escapeHtml(formatMoney(pnl, asset))}</strong>
+      </div>
+      <div class="performance-price-row">
+        <span>Entrada ${escapeHtml(formatPrice(position.entryPrice))}</span>
+        <span>Actual ${escapeHtml(formatPrice(position.currentPrice))}</span>
+        <span>Margen ${escapeHtml(formatOptionalMoney(margin, asset))}</span>
+        <span>Expo. ${escapeHtml(formatOptionalMoney(exposure, asset))}</span>
+      </div>
+      <div class="performance-position-metrics">
+        <div>
+          <span>TP ${escapeHtml(formatPrice(position.takeProfit))}</span>
+          <strong class="${optionalAmountClass(takeProfitPnl)}">${escapeHtml(formatOptionalMoney(takeProfitPnl, asset))}</strong>
+          <small>${escapeHtml(distanceLabel(takeProfitDistance))}</small>
+        </div>
+        <div>
+          <span>SL ${escapeHtml(formatPrice(position.stopLoss))}</span>
+          <strong class="${optionalAmountClass(stopLossPnl)}">${escapeHtml(formatOptionalMoney(stopLossPnl, asset))}</strong>
+          <small>${escapeHtml(distanceLabel(stopLossDistance))}</small>
+        </div>
+        <div>
+          <span>Liquidacion ${escapeHtml(formatPrice(liquidationPrice))}</span>
+          <strong class="${liquidationClass(liquidationDistance)}">${escapeHtml(formatOptionalPercent(liquidationDistance))}</strong>
+          <small>distancia</small>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function performanceScenario(positions = []) {
+  let currentPnl = 0;
+  let pnlAtTakeProfit = 0;
+  let pnlAtStopLoss = 0;
+  let takeProfitCount = 0;
+  let stopLossCount = 0;
+  let minLiquidationDistancePct = null;
+  let minLiquidationSymbol = '';
+
+  for (const position of positions) {
+    currentPnl += positionCurrentPnl(position);
+
+    const tpPnl = positionOutcomeAtPrice(position, position.takeProfit);
+    if (tpPnl != null) {
+      pnlAtTakeProfit += tpPnl;
+      takeProfitCount += 1;
+    }
+
+    const slPnl = positionOutcomeAtPrice(position, position.stopLoss);
+    if (slPnl != null) {
+      pnlAtStopLoss += slPnl;
+      stopLossCount += 1;
+    }
+
+    const liqDistance = priceDistancePercent(position.currentPrice, positionLiquidationPrice(position));
+    if (liqDistance != null && (minLiquidationDistancePct == null || liqDistance < minLiquidationDistancePct)) {
+      minLiquidationDistancePct = liqDistance;
+      minLiquidationSymbol = position.symbol || '';
+    }
+  }
+
+  return {
+    currentPnl: roundPnl(currentPnl),
+    pnlAtTakeProfit: takeProfitCount ? roundPnl(pnlAtTakeProfit) : null,
+    pnlAtStopLoss: stopLossCount ? roundPnl(pnlAtStopLoss) : null,
+    takeProfitCount,
+    stopLossCount,
+    minLiquidationDistancePct,
+    minLiquidationSymbol
+  };
+}
+
+function positionCurrentPnl(position) {
+  return roundPnl(Number(position.unrealizedPnl ?? position.paperPnl ?? position.realizedPnl ?? 0));
+}
+
+function positionOutcomeAtPrice(position, exitPrice) {
+  const price = Number(exitPrice);
+  const entry = Number(position.entryPrice || position.raw?.avgPrice);
+  const quantity = positionQuantity(position);
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(entry) || entry <= 0 || !quantity) {
+    return null;
+  }
+
+  const direction = String(position.direction || position.raw?.positionSide || '').toUpperCase();
+  const multiplier = direction === 'SHORT' ? -1 : 1;
+  return roundPnl((price - entry) * quantity * multiplier);
+}
+
+function positionLiquidationPrice(position) {
+  const value = Number(position.liquidationPrice || position.raw?.liquidationPrice);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function positionMargin(position) {
+  const value = Number(position.raw?.initialMargin ?? position.notional ?? position.raw?.margin);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function positionExposure(position) {
+  const value = Number(position.exposure ?? position.raw?.positionValue);
+  if (Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  const quantity = positionQuantity(position);
+  const currentPrice = Number(position.currentPrice || position.raw?.markPrice);
+  return quantity && Number.isFinite(currentPrice) ? roundPnl(quantity * currentPrice) : null;
+}
+
+function priceDistancePercent(fromPrice, targetPrice) {
+  const from = Number(fromPrice);
+  const target = Number(targetPrice);
+  if (!Number.isFinite(from) || from <= 0 || !Number.isFinite(target) || target <= 0) {
+    return null;
+  }
+  return Math.abs(((target - from) / from) * 100);
+}
+
+function formatOptionalMoney(value, asset = 'USDT') {
+  if (value == null || value === '') {
+    return '-';
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? formatMoney(number, asset) : '-';
+}
+
+function formatOptionalPercent(value) {
+  if (value == null || value === '') {
+    return '-';
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? formatPercent(number) : '-';
+}
+
+function optionalAmountClass(value) {
+  return value == null ? 'amount' : amountClass(value);
+}
+
+function distanceLabel(value) {
+  return value == null ? 'sin distancia' : `${formatOptionalPercent(value)} desde actual`;
+}
+
+function liquidationClass(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return 'amount';
+  }
+  if (number < 2) {
+    return 'amount negative';
+  }
+  if (number < 5) {
+    return 'amount warn';
+  }
+  return 'amount positive';
 }
 
 function sourcePrimaryValue(source) {

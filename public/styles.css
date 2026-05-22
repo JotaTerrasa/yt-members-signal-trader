@@ -1057,6 +1057,219 @@ summary.dashboard-section-title {
   opacity: 0.72;
 }
 
+.performance-overview {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.performance-overview-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, auto);
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.performance-overview-header h3 {
+  margin: 6px 0 4px;
+  font-size: 1rem;
+}
+
+.performance-overview-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.performance-pill {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.performance-pill.source-live {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.performance-safety {
+  display: grid;
+  place-items: center;
+  min-width: 132px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  text-align: center;
+}
+
+.performance-safety strong {
+  font-size: 1.2rem;
+}
+
+.performance-safety span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.performance-safety.ok {
+  border-color: rgba(15, 118, 110, 0.34);
+}
+
+.performance-safety.warn {
+  border-color: rgba(196, 122, 16, 0.42);
+}
+
+.performance-kpi-grid,
+.performance-scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.performance-scenario-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.performance-metric {
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.performance-kpi-grid .performance-metric {
+  background: var(--panel-strong);
+}
+
+.performance-metric span,
+.performance-metric small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.performance-metric strong {
+  align-self: end;
+  font-size: 0.96rem;
+  overflow-wrap: anywhere;
+}
+
+.performance-position-section {
+  display: grid;
+  gap: 10px;
+}
+
+.performance-position-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.performance-position-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #98a6a3;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.performance-position-card.long {
+  border-left-color: var(--accent);
+}
+
+.performance-position-card.short {
+  border-left-color: var(--danger);
+}
+
+.performance-position-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.performance-position-top > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.performance-position-top strong {
+  overflow-wrap: anywhere;
+}
+
+.performance-position-top small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.performance-price-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.performance-price-row span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.performance-position-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.performance-position-metrics div {
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.performance-position-metrics span,
+.performance-position-metrics small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.performance-position-metrics strong {
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
 .equity-svg {
   width: 100%;
   height: 180px;
@@ -1860,6 +2073,10 @@ summary.dashboard-section-title {
   color: var(--danger);
 }
 
+.amount.warn {
+  color: var(--gold);
+}
+
 @media (max-width: 1180px) {
   .layout {
     grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
@@ -1928,6 +2145,11 @@ summary.dashboard-section-title {
   .tool-panel,
   .pnl-source-grid,
   .performance-source-grid,
+  .performance-overview-header,
+  .performance-kpi-grid,
+  .performance-scenario-grid,
+  .performance-position-grid,
+  .performance-position-metrics,
   .pnl-summary,
   .pnl-hero-side,
   .curve-stats,
