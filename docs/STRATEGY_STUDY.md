@@ -22,6 +22,12 @@ Optional window:
 npm run study:strategy -- --days 30
 ```
 
+Offline/local-only run:
+
+```bash
+npm run study:strategy -- --days 30 --offline
+```
+
 Outputs are private and ignored by Git:
 Outputs with raw research data are private and ignored by Git:
 
@@ -42,6 +48,10 @@ docs/strategy-reports/strategy-study-YYYY-MM-DD-HH-MM-SS.md
 - `.data/posts.json`: scraped YouTube and Telegram Web items.
 - `.data/trade-events.json`: persisted app trade events from this version onward.
 - BingX live real order history via read-only API calls.
+
+If BingX order history cannot be reached, the report still generates with a
+Data Quality warning and falls back to local trade events. That keeps the daily
+automation alive without hiding that the sample is less complete.
 
 ## Interpretation
 

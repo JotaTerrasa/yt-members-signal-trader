@@ -9,6 +9,7 @@ const dataDir = join(rootDir, '.data');
 const outputDir = join(dataDir, 'strategy-study');
 const gitReportDir = join(rootDir, 'docs', 'strategy-reports');
 const days = clampInteger(argValue('--days'), 1, 365, 14);
+const offline = hasFlag('--offline') || process.env.STRATEGY_STUDY_OFFLINE === '1';
 const now = Date.now();
 const startTime = now - days * 24 * 60 * 60 * 1000;
 
@@ -22,8 +23,10 @@ const [config, postsData, tradeEventsData] = await Promise.all([
 ]);
 
 const signals = extractSignals(postsData.posts || []);
-const { history: liveOrders, openOrders: liveOpenOrders } = await fetchLiveOrders(config.bingx, { startTime, endTime: now });
-const positions = buildPositionStudy(liveOrders, liveOpenOrders);
+const liveOrderResult = await fetchLiveOrders(config.bingx, { startTime, endTime: now, offline });
+const { history: liveOrders, openOrders: liveOpenOrders } = liveOrderResult;
+const localPositions = buildPositionsFromTradeEvents(tradeEventsData.events || []);
+const positions = liveOrders.length ? buildPositionStudy(liveOrders, liveOpenOrders) : localPositions;
 const openPositions = positions.filter((position) => position.status === 'open');
 const closedPositions = positions.filter((position) => position.status === 'closed');
 const signalStats = summarizeSignals(signals);
@@ -46,6 +49,12 @@ const study = {
     openPositions: openPositions.length,
     persistedTradeEvents: tradeEventsData.events?.length || 0
   },
+  dataQuality: {
+    orderHistorySource: liveOrders.length ? 'bingx_order_history' : 'local_trade_events',
+    orderHistoryAvailable: liveOrderResult.available,
+    warning: liveOrderResult.warning,
+    localFallbackPositions: liveOrders.length ? 0 : localPositions.length
+  },
   signalStats,
   performance,
   playbook,
@@ -67,12 +76,27 @@ console.log(JSON.stringify({
   json: join(outputDir, 'strategy-study.json'),
   gitBackup: join(gitReportDir, snapshotName),
   sample: study.sample,
+  dataQuality: study.dataQuality,
   performance: study.performance
 }, null, 2));
 
-async function fetchLiveOrders(bingx = {}, { startTime, endTime }) {
+async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false }) {
+  if (offline) {
+    return {
+      history: [],
+      openOrders: [],
+      available: false,
+      warning: 'Offline mode enabled; BingX live order history was not requested.'
+    };
+  }
+
   if (!bingx.apiKey || !bingx.apiSecret) {
-    return { history: [], openOrders: [] };
+    return {
+      history: [],
+      openOrders: [],
+      available: false,
+      warning: 'BingX credentials are not configured; live order history was not requested.'
+    };
   }
 
   const client = new BingXClient({
@@ -83,28 +107,39 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime }) {
 
   const rows = [];
   const maxWindowMs = 7 * 24 * 60 * 60 * 1000 - 1000;
-  for (let cursor = startTime; cursor < endTime; cursor += maxWindowMs) {
-    const chunkEnd = Math.min(endTime, cursor + maxWindowMs);
-    const response = await client.request('GET', '/openApi/swap/v2/trade/allOrders', {
-      startTime: cursor,
-      endTime: chunkEnd,
-      limit: 1000
-    });
-    const chunkRows = response?.data?.orders || response?.data || [];
-    if (Array.isArray(chunkRows)) {
-      rows.push(...chunkRows);
+  try {
+    for (let cursor = startTime; cursor < endTime; cursor += maxWindowMs) {
+      const chunkEnd = Math.min(endTime, cursor + maxWindowMs);
+      const response = await client.request('GET', '/openApi/swap/v2/trade/allOrders', {
+        startTime: cursor,
+        endTime: chunkEnd,
+        limit: 1000
+      });
+      const chunkRows = response?.data?.orders || response?.data || [];
+      if (Array.isArray(chunkRows)) {
+        rows.push(...chunkRows);
+      }
     }
-  }
 
-  const [openOrdersResponse] = await Promise.all([
-    client.getOpenOrders().catch(() => ({ data: [] }))
-  ]);
-  const openRows = openOrdersResponse?.data?.orders || openOrdersResponse?.data || [];
-  const byId = new Map(rows.map((order) => [String(order.orderId || order.orderID || ''), order]));
-  return {
-    history: [...byId.values()].map(normalizeOrder).sort((left, right) => left.time - right.time),
-    openOrders: Array.isArray(openRows) ? openRows.map(normalizeOrder) : []
-  };
+    const [openOrdersResponse] = await Promise.all([
+      client.getOpenOrders().catch(() => ({ data: [] }))
+    ]);
+    const openRows = openOrdersResponse?.data?.orders || openOrdersResponse?.data || [];
+    const byId = new Map(rows.map((order) => [String(order.orderId || order.orderID || ''), order]));
+    return {
+      history: [...byId.values()].map(normalizeOrder).sort((left, right) => left.time - right.time),
+      openOrders: Array.isArray(openRows) ? openRows.map(normalizeOrder) : [],
+      available: true,
+      warning: null
+    };
+  } catch (error) {
+    return {
+      history: [],
+      openOrders: [],
+      available: false,
+      warning: `BingX live order history unavailable: ${safeErrorMessage(error)}`
+    };
+  }
 }
 
 function extractSignals(posts = []) {
@@ -204,6 +239,57 @@ function buildPositionStudy(orders = [], openOrders = []) {
   }).sort((left, right) => Date.parse(left.openedAt || 0) - Date.parse(right.openedAt || 0));
 }
 
+function buildPositionsFromTradeEvents(events = []) {
+  const byPosition = new Map();
+  for (const event of events) {
+    const exchangePosition = event.exchangePosition;
+    if (!exchangePosition?.id) {
+      continue;
+    }
+    byPosition.set(exchangePosition.id, { event, exchangePosition });
+  }
+
+  return [...byPosition.values()].map(({ event, exchangePosition }) => {
+    const status = exchangePosition.status || (String(event.status || '').includes('closed') ? 'closed' : 'open');
+    const entryQty = finiteOrNull(exchangePosition.quantity) || 0;
+    const avgEntry = finiteOrNull(exchangePosition.entryPrice);
+    const avgExit = finiteOrNull(exchangePosition.closePrice) || finiteOrNull(exchangePosition.currentPrice);
+    const netPnl = firstFinite(
+      exchangePosition.paperPnl,
+      exchangePosition.unrealizedPnl,
+      exchangePosition.realizedPnl,
+      exchangePosition.raw?.realisedProfit,
+      0
+    );
+
+    return {
+      positionID: exchangePosition.id,
+      symbol: exchangePosition.symbol || '',
+      direction: exchangePosition.direction || '',
+      status,
+      outcome: status === 'closed' ? event.reason || event.status || 'LOCAL_EVENT_CLOSE' : 'OPEN',
+      openedAt: exchangePosition.openedAt || null,
+      closedAt: status === 'closed' ? exchangePosition.closedAt || event.at || null : null,
+      entryType: 'LOCAL_EVENT',
+      entryQty,
+      exitQty: status === 'closed' ? entryQty : 0,
+      avgEntry,
+      avgExit,
+      firstStop: finiteOrNull(exchangePosition.stopLoss),
+      firstTp: finiteOrNull(exchangePosition.takeProfit),
+      leverage: finiteOrNull(exchangePosition.leverage),
+      grossPnl: netPnl,
+      commission: 0,
+      netPnl,
+      riskDistancePct: avgEntry && exchangePosition.stopLoss ? Math.abs(avgEntry - exchangePosition.stopLoss) / avgEntry * 100 : null,
+      rewardDistancePct: avgEntry && exchangePosition.takeProfit ? Math.abs(exchangePosition.takeProfit - avgEntry) / avgEntry * 100 : null,
+      orders: [],
+      currentProtectiveOrders: exchangePosition.protectiveOrders || [],
+      protectiveOrderCount: Array.isArray(exchangePosition.protectiveOrders) ? exchangePosition.protectiveOrders.length : 0
+    };
+  }).sort((left, right) => Date.parse(left.openedAt || 0) - Date.parse(right.openedAt || 0));
+}
+
 function summarizeSignals(signals = []) {
   const byAction = countBy(signals, (signal) => signal.action);
   const opens = signals.filter((signal) => signal.action === 'OPEN');
@@ -285,6 +371,15 @@ function renderMarkdown(study) {
   lines.push('');
   lines.push(`Generated: ${study.generatedAt}`);
   lines.push(`Window: ${study.window.startAt} to ${study.window.endAt} (${study.window.days} days)`);
+  lines.push('');
+  lines.push('## Data Quality');
+  lines.push('');
+  lines.push(`- Order history source: ${study.dataQuality.orderHistorySource}`);
+  lines.push(`- BingX order history available: ${study.dataQuality.orderHistoryAvailable ? 'yes' : 'no'}`);
+  lines.push(`- Local fallback positions: ${study.dataQuality.localFallbackPositions}`);
+  if (study.dataQuality.warning) {
+    lines.push(`- Warning: ${study.dataQuality.warning}`);
+  }
   lines.push('');
   lines.push('## Sample');
   lines.push('');
@@ -426,9 +521,28 @@ function finiteOrNull(value) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function firstFinite(...values) {
+  for (const value of values) {
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue)) {
+      return numberValue;
+    }
+  }
+  return null;
+}
+
 function argValue(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : null;
+}
+
+function hasFlag(name) {
+  return process.argv.includes(name);
+}
+
+function safeErrorMessage(error) {
+  const message = error?.message || String(error);
+  return message.replace(/(apiKey|apiSecret|signature|X-BX-APIKEY)=?[^&\s]*/gi, '$1=[redacted]');
 }
 
 function clampInteger(value, min, max, fallback) {
