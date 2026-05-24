@@ -1919,8 +1919,8 @@ function liveReadiness() {
   const items = [
     {
       key: 'monitor',
-      label: 'Monitor live leyendo',
-      ok: Boolean(appState.state?.running && appState.state?.phase === 'live' && health.level === 'ok')
+      label: 'Monitor live activo',
+      ok: Boolean(appState.state?.running && appState.state?.phase === 'live' && !health.stale && !health.lastError)
     },
     {
       key: 'telegram',
