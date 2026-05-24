@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore } from './configStore.js';
@@ -19,6 +19,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const rootDir = resolve(__dirname, '..');
 const publicDir = join(rootDir, 'public');
 const dataDir = join(rootDir, '.data');
+const backupDir = join(dataDir, 'backups');
 const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
 const EXCHANGE_SYNC_POLL_MS = 30_000;
@@ -31,6 +32,10 @@ const EXCHANGE_ORPHAN_GRACE_MS = 20_000;
 const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
 const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 5 * 60 * 1000;
+const PNL_CACHE_TTL_MS = 45_000;
+const PNL_BACKOFF_DEFAULT_MS = 5 * 60 * 1000;
+const PNL_BACKOFF_MAX_MS = 15 * 60 * 1000;
+const REDACTED_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -72,6 +77,17 @@ const futuresTrader = new FuturesTrader({
 const clients = new Set();
 let pnlCache = null;
 let pnlSourcesCache = null;
+let pnlLastGood = null;
+let pnlSourcesLastGood = null;
+let pnlBackoffUntil = 0;
+let pnlBackoffReason = '';
+let backupTimer = null;
+let lastBackupStatus = {
+  lastRunAt: null,
+  nextRunAt: null,
+  lastFile: null,
+  lastError: null
+};
 const lastPriceBroadcast = new Map();
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
@@ -598,24 +614,35 @@ const server = createServer(async (request, response) => {
       }
 
       const months = requestUrl.searchParams.get('months') || 3;
-      if (pnlCache && pnlCache.months === String(months) && Date.now() - pnlCache.at < 45000) {
-        return sendJson(response, { ok: true, pnl: pnlCache.pnl, cached: true });
+      if (pnlCache && pnlCache.months === String(months) && Date.now() - pnlCache.at < PNL_CACHE_TTL_MS) {
+        return sendJson(response, { ok: true, ...pnlCache.payload, cached: true });
+      }
+
+      const cooldown = pnlBackoffInfo();
+      if (cooldown.active) {
+        const payload = await cachedOrPaperPnlPayload({ months, warning: cooldown.reason, cooldownUntil: cooldown.until });
+        pnlCache = { months: String(months), at: Date.now(), payload };
+        return sendJson(response, { ok: true, ...payload, cached: true, backoff: true });
       }
 
       try {
         const pnl = await futuresTrader.getMonthlyPnl({ months });
-        pnlCache = { months: String(months), at: Date.now(), pnl };
+        clearPnlBackoff();
+        const payload = { pnl };
+        pnlCache = { months: String(months), at: Date.now(), payload };
+        pnlLastGood = { months: String(months), at: Date.now(), pnl };
         return sendJson(response, { ok: true, pnl });
       } catch (error) {
-        const pnl = await futuresTrader.getPaperOnlyPnl({ months, warning: error.message });
-        pnlCache = { months: String(months), at: Date.now(), pnl };
-        pushLog({ level: 'warn', message: `BingX PnL no disponible, usando paper local: ${error.message}`, at: new Date().toISOString() });
-        return sendJson(response, { ok: true, pnl, warning: error.message });
+        const cooldownUntil = startPnlBackoff(error);
+        const payload = await cachedOrPaperPnlPayload({ months, warning: error.message, cooldownUntil });
+        pnlCache = { months: String(months), at: Date.now(), payload };
+        pushLog({ level: 'warn', message: `BingX PnL no disponible, usando cache/backoff: ${safePublicMessage(error.message)}`, at: new Date().toISOString() });
+        return sendJson(response, { ok: true, ...payload });
       }
     }
 
     if (requestUrl.pathname === '/api/bingx/pnl-sources' && request.method === 'GET') {
-      if (pnlSourcesCache && Date.now() - pnlSourcesCache.at < 45000) {
+      if (pnlSourcesCache && Date.now() - pnlSourcesCache.at < PNL_CACHE_TTL_MS) {
         return sendJson(response, { ...pnlSourcesCache.payload, cached: true });
       }
 
@@ -637,10 +664,42 @@ const server = createServer(async (request, response) => {
         return sendJson(response, payload);
       }
 
+      const cooldown = pnlBackoffInfo();
+      if (cooldown.active) {
+        const payload = pnlSourcesLastGood ? {
+          ...pnlSourcesLastGood.payload,
+          cached: true,
+          stale: true,
+          warning: cooldown.reason,
+          cooldownUntil: new Date(cooldown.until).toISOString()
+        } : {
+          ok: true,
+          month: currentMonthKey(),
+          sources: {
+            vst: emptyPnlSource('vst', 'Futuros VST', 'Demo VST', 'VST', sourceErrorStatus(cooldown.reason)),
+            live: emptyPnlSource('live', 'Futuros reales', 'Live real', 'USDT', sourceErrorStatus(cooldown.reason))
+          },
+          positions: {
+            vst: [],
+            live: []
+          },
+          cached: true,
+          stale: false,
+          warning: cooldown.reason,
+          cooldownUntil: new Date(cooldown.until).toISOString()
+        };
+        pnlSourcesCache = { at: Date.now(), payload };
+        return sendJson(response, payload);
+      }
+
       const [vst, live] = await Promise.all([
         exchangePnlSource({ key: 'vst', mode: 'demo', label: 'Futuros VST', modeLabel: 'Demo VST', asset: 'VST' }),
         exchangePnlSource({ key: 'live', mode: 'live', label: 'Futuros reales', modeLabel: 'Live real', asset: 'USDT' })
       ]);
+      const sourceWarning = [vst.source?.error, live.source?.error]
+        .filter(Boolean)
+        .find((message) => /frequency|rate|100410|limit/i.test(message));
+      const cooldownUntil = sourceWarning ? startPnlBackoff(new Error(sourceWarning)) : 0;
 
       const payload = {
         ok: true,
@@ -652,9 +711,14 @@ const server = createServer(async (request, response) => {
         positions: {
           vst: vst.positions,
           live: live.positions
-        }
+        },
+        warning: sourceWarning || '',
+        cooldownUntil: cooldownUntil ? new Date(cooldownUntil).toISOString() : null
       };
       pnlSourcesCache = { at: Date.now(), payload };
+      if (!sourceWarning) {
+        pnlSourcesLastGood = { at: Date.now(), payload };
+      }
       return sendJson(response, payload);
     }
 
@@ -754,6 +818,32 @@ const server = createServer(async (request, response) => {
       });
     }
 
+    if (requestUrl.pathname === '/api/strategy-study/latest' && request.method === 'GET') {
+      const strategyStudy = await loadLatestStrategyStudy();
+      return sendJson(response, { ok: true, ...strategyStudy });
+    }
+
+    if (requestUrl.pathname === '/api/operational-status' && request.method === 'GET') {
+      return sendJson(response, {
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        health: buildHealth(),
+        exchangeSafety: buildExchangeSafety(),
+        incidents: buildIncidentSnapshot(),
+        backup: lastBackupStatus,
+        pnlBackoff: pnlBackoffInfo()
+      });
+    }
+
+    if (requestUrl.pathname === '/api/backup/redacted' && request.method === 'GET') {
+      const backup = await buildRedactedBackup();
+      response.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': `attachment; filename="futures-magician-backup-${backup.generatedAt.slice(0, 10)}.json"`
+      });
+      return response.end(JSON.stringify(backup, null, 2));
+    }
+
     if (requestUrl.pathname === '/api/audit' && request.method === 'GET') {
       return sendJson(response, {
         ok: true,
@@ -827,6 +917,7 @@ server.listen(port, () => {
   resumeMonitorOnStartup().catch((error) => {
     pushLog({ level: 'error', message: `Auto-resume monitor: ${error.message}`, at: new Date().toISOString() });
   });
+  scheduleAutomaticRedactedBackup();
 });
 
 setInterval(() => {
@@ -962,6 +1053,323 @@ function currentState() {
     exchangeSafety: buildExchangeSafety(),
     stats: store.stats()
   };
+}
+
+async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
+  const lastGood = pnlLastGood && pnlLastGood.months === String(months) ? pnlLastGood.pnl : null;
+  if (lastGood) {
+    return {
+      pnl: {
+        ...lastGood,
+        warning
+      },
+      warning,
+      stale: true,
+      cooldownUntil: new Date(cooldownUntil).toISOString(),
+      lastGoodAt: new Date(pnlLastGood.at).toISOString()
+    };
+  }
+
+  const pnl = await futuresTrader.getPaperOnlyPnl({ months, warning });
+  return {
+    pnl,
+    warning,
+    stale: false,
+    cooldownUntil: new Date(cooldownUntil).toISOString()
+  };
+}
+
+function pnlBackoffInfo() {
+  const active = pnlBackoffUntil > Date.now();
+  return {
+    active,
+    until: pnlBackoffUntil,
+    reason: active ? pnlBackoffReason : ''
+  };
+}
+
+function startPnlBackoff(error) {
+  const message = safePublicMessage(error?.message || String(error));
+  const until = parsePnlBackoffUntil(message);
+  pnlBackoffUntil = Math.max(pnlBackoffUntil, until);
+  pnlBackoffReason = message;
+  return pnlBackoffUntil;
+}
+
+function clearPnlBackoff() {
+  pnlBackoffUntil = 0;
+  pnlBackoffReason = '';
+}
+
+function parsePnlBackoffUntil(message = '') {
+  const now = Date.now();
+  const match = String(message).match(/unblocked after\s+(\d{10,})/i);
+  const parsed = match ? Number(match[1]) : 0;
+  if (Number.isFinite(parsed) && parsed > now) {
+    return Math.min(parsed, now + PNL_BACKOFF_MAX_MS);
+  }
+  return now + PNL_BACKOFF_DEFAULT_MS;
+}
+
+async function loadLatestStrategyStudy() {
+  const [study, markdown] = await Promise.all([
+    readJsonFile(join(dataDir, 'strategy-study', 'strategy-study.json'), null),
+    readTextFile(join(rootDir, 'docs', 'strategy-reports', 'latest.md'), '')
+  ]);
+
+  return {
+    generatedAt: study?.generatedAt || null,
+    reportAvailable: Boolean(study || markdown),
+    study: study ? summarizeStrategyStudy(study) : null,
+    markdown: markdown ? markdown.slice(0, 40_000) : ''
+  };
+}
+
+function summarizeStrategyStudy(study = {}) {
+  const closed = Number(study.performance?.closedTrades || 0);
+  const winRate = study.performance?.winRate == null ? null : Number(study.performance.winRate) * 100;
+  return {
+    generatedAt: study.generatedAt || null,
+    window: study.window || null,
+    sample: study.sample || {},
+    dataQuality: study.dataQuality || {},
+    performance: {
+      closedTrades: closed,
+      openTrades: Number(study.performance?.openTrades || 0),
+      wins: Number(study.performance?.wins || 0),
+      losses: Number(study.performance?.losses || 0),
+      netPnl: roundMoney(study.performance?.netPnl || 0),
+      grossPnl: roundMoney(study.performance?.grossPnl || 0),
+      commission: roundMoney(study.performance?.commission || 0),
+      averageWin: roundMoney(study.performance?.averageWin || 0),
+      averageLoss: roundMoney(study.performance?.averageLoss || 0),
+      winRate,
+      profitFactor: study.performance?.profitFactor == null ? null : Number(study.performance.profitFactor),
+      outcomes: study.performance?.outcomes || {}
+    },
+    signalStats: {
+      total: Number(study.signalStats?.total || 0),
+      openCount: Number(study.signalStats?.openCount || 0),
+      managementCount: Number(study.signalStats?.managementCount || 0),
+      byAction: study.signalStats?.byAction || {},
+      symbols: study.signalStats?.symbols || {},
+      averageLeverage: study.signalStats?.averageLeverage ?? null,
+      averageStopDistancePct: study.signalStats?.averageStopDistancePct ?? null,
+      averageRewardDistancePct: study.signalStats?.averageRewardDistancePct ?? null
+    },
+    playbook: {
+      commonPackSizes: study.playbook?.commonPackSizes || {},
+      entryTypes: study.playbook?.entryTypes || {},
+      managementActions: study.playbook?.managementActions || {},
+      liveOutcomesBySymbol: study.playbook?.liveOutcomesBySymbol || {}
+    },
+    statisticalStatus: statisticalStatusLabel(closed)
+  };
+}
+
+async function buildRedactedBackup() {
+  const strategyStudy = await loadLatestStrategyStudy();
+  const snapshot = currentState();
+  snapshot.logs = (snapshot.logs || []).map((log) => ({
+    ...log,
+    message: safePublicMessage(log.message)
+  }));
+  return {
+    generatedAt: new Date().toISOString(),
+    redacted: true,
+    redaction: 'API keys, API secrets, bot tokens and chat identifiers are omitted.',
+    config: redactedConfig(),
+    state: snapshot,
+    health: buildHealth(),
+    risk: futuresTrader.riskSnapshot(),
+    exchangeSafety: buildExchangeSafety(),
+    stats: store.stats(),
+    posts: store.list(),
+    tradeEvents: tradeEventStore.list(1000),
+    paperTrades: paperStore.list(),
+    strategyStudy: strategyStudy.study,
+    recentLogs: state.logs.slice(0, 200).map((log) => ({
+      ...log,
+      message: safePublicMessage(log.message)
+    }))
+  };
+}
+
+function redactedConfig() {
+  const telegram = configStore.getTelegram();
+  const bingx = configStore.getBingX();
+  const {
+    botTokenPreview,
+    chatId,
+    ...telegramSafe
+  } = telegram;
+  const {
+    apiKeyPreview,
+    apiSecretPreview,
+    ...bingxSafe
+  } = bingx;
+
+  return {
+    telegram: {
+      ...telegramSafe,
+      chatIdConfigured: Boolean(chatId)
+    },
+    telegramSource: configStore.getTelegramSource(),
+    monitor: configStore.getMonitor(),
+    portfolio: configStore.getPortfolio(),
+    bingx: bingxSafe
+  };
+}
+
+async function readJsonFile(filePath, fallback = null) {
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return fallback;
+    }
+    throw error;
+  }
+}
+
+async function readTextFile(filePath, fallback = '') {
+  try {
+    return await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return fallback;
+    }
+    throw error;
+  }
+}
+
+function safePublicMessage(message = '') {
+  return String(message)
+    .replace(/(apiKey|apiSecret|signature|X-BX-APIKEY)=?[^&\s]*/gi, '$1=[redacted]')
+    .replace(/[A-Za-z0-9_-]{24,}/g, '[redacted]');
+}
+
+function statisticalStatusLabel(closedTrades) {
+  if (closedTrades < 30) {
+    return `Muestra exploratoria (${closedTrades} cierres): no es estadisticamente significativa.`;
+  }
+  if (closedTrades < 100) {
+    return `Muestra direccional pero fragil (${closedTrades} cierres): seguir acumulando antes de automatizar.`;
+  }
+  return `Muestra suficiente para empezar a contrastar hipotesis (${closedTrades} cierres), con validacion fuera de muestra.`;
+}
+
+function buildIncidentSnapshot() {
+  const logs = state.logs || [];
+  const incidents = logs
+    .map(classifyIncidentLog)
+    .filter(Boolean)
+    .slice(0, 30);
+  const counts = incidents.reduce((summary, incident) => {
+    summary.total += 1;
+    summary[incident.level] = (summary[incident.level] || 0) + 1;
+    summary.byType[incident.type] = (summary.byType[incident.type] || 0) + 1;
+    return summary;
+  }, {
+    total: 0,
+    warn: 0,
+    error: 0,
+    info: 0,
+    byType: {}
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    windowHours: 24,
+    counts,
+    items: incidents
+  };
+}
+
+function classifyIncidentLog(log = {}) {
+  const at = Date.parse(log.at || 0);
+  if (!Number.isFinite(at) || Date.now() - at > 24 * 60 * 60 * 1000) {
+    return null;
+  }
+
+  const message = String(log.message || '');
+  const level = String(log.level || 'info');
+  const rules = [
+    [/No se detectaron mensajes Telegram/i, 'telegram_web_empty', 'Telegram Web sin mensajes visibles'],
+    [/No se detectaron posts|YouTube no esta devolviendo posts/i, 'youtube_empty', 'YouTube sin posts visibles'],
+    [/BingX PnL no disponible|Rate-limit PnL|frequency limit|100410/i, 'bingx_pnl_rate_limit', 'BingX PnL en rate-limit'],
+    [/BingX sync|BingX safety|BingX posiciones/i, 'bingx_sync', 'Reconciliacion BingX'],
+    [/Health:|Telegram health|Alerta scraper/i, 'monitor_health', 'Salud del monitor'],
+    [/Auto-resume monitor/i, 'auto_resume', 'Auto-resume monitor'],
+    [/Backup redacted/i, 'backup', 'Backup automatico']
+  ];
+  const matched = rules.find(([pattern]) => pattern.test(message));
+  if (!matched && level !== 'error') {
+    return null;
+  }
+
+  return {
+    at: new Date(at).toISOString(),
+    level: level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info',
+    type: matched?.[1] || 'error',
+    title: matched?.[2] || 'Error',
+    message: safePublicMessage(message)
+  };
+}
+
+function scheduleAutomaticRedactedBackup() {
+  if (backupTimer) {
+    clearInterval(backupTimer);
+  }
+
+  const nextRunAt = new Date(Date.now() + REDACTED_BACKUP_INTERVAL_MS).toISOString();
+  lastBackupStatus = {
+    ...lastBackupStatus,
+    nextRunAt
+  };
+
+  setTimeout(() => {
+    writeAutomaticRedactedBackup('startup').catch((error) => {
+      lastBackupStatus.lastError = safePublicMessage(error.message);
+      pushLog({ level: 'error', message: `Backup redacted: ${safePublicMessage(error.message)}`, at: new Date().toISOString() });
+    });
+  }, 10_000).unref();
+
+  backupTimer = setInterval(() => {
+    writeAutomaticRedactedBackup('daily').catch((error) => {
+      lastBackupStatus.lastError = safePublicMessage(error.message);
+      pushLog({ level: 'error', message: `Backup redacted: ${safePublicMessage(error.message)}`, at: new Date().toISOString() });
+    });
+  }, REDACTED_BACKUP_INTERVAL_MS);
+  backupTimer.unref();
+}
+
+async function writeAutomaticRedactedBackup(reason = 'scheduled') {
+  await mkdir(backupDir, { recursive: true });
+  const backup = await buildRedactedBackup();
+  const day = backup.generatedAt.slice(0, 10);
+  const snapshotPath = join(backupDir, `futures-magician-backup-${day}.json`);
+  const latestPath = join(backupDir, 'latest-redacted.json');
+  const payload = `${JSON.stringify({
+    ...backup,
+    automaticReason: reason
+  }, null, 2)}\n`;
+  await Promise.all([
+    writeFile(snapshotPath, payload),
+    writeFile(latestPath, payload)
+  ]);
+  lastBackupStatus = {
+    lastRunAt: backup.generatedAt,
+    nextRunAt: new Date(Date.now() + REDACTED_BACKUP_INTERVAL_MS).toISOString(),
+    lastFile: snapshotPath,
+    lastError: null
+  };
+  pushLog({
+    level: 'info',
+    message: `Backup redacted generado: ${snapshotPath}`,
+    at: new Date().toISOString()
+  });
+  return lastBackupStatus;
 }
 
 function syncPriceSubscriptions(exchangePositionsOrSymbols) {
@@ -2219,6 +2627,9 @@ async function shutdown() {
   }
   clients.clear();
   priceFeed.destroy();
+  if (backupTimer) {
+    clearInterval(backupTimer);
+  }
   await scraper.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1000).unref();

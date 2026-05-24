@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=28">
+    <link rel="stylesheet" href="/styles.css?v=31">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=61" defer></script>
+    <script src="/app.js?v=64" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -519,6 +519,21 @@
 
             <div class="real-mode-banner" id="real-mode-banner"></div>
 
+            <div class="guard-dashboard" id="guard-dashboard">
+              <div class="trade-section-header">
+                <h3>Guardia nocturna</h3>
+                <span id="guard-status">Sin datos</span>
+              </div>
+              <div class="guard-metrics" id="guard-metrics"></div>
+              <div class="incident-panel">
+                <div class="trade-section-header">
+                  <h3>Incidencias 24h</h3>
+                  <span id="incident-status">0 incidencias</span>
+                </div>
+                <div class="incident-list" id="incident-list"></div>
+              </div>
+            </div>
+
 	            <div id="pnl-empty" class="empty-state hidden">
               Configura BingX para leer el PnL mensual.
             </div>
@@ -547,6 +562,14 @@
                   <span id="health-status">Sin datos</span>
                 </div>
                 <div class="ops-metrics" id="health-metrics"></div>
+              </div>
+              <div class="ops-panel telegram-watch-panel" id="telegram-watch-panel">
+                <div class="trade-section-header">
+                  <h3>Watchdog Telegram Web</h3>
+                  <span id="telegram-watch-status">Sin datos</span>
+                </div>
+                <div class="ops-metrics" id="telegram-watch-metrics"></div>
+                <div class="exchange-safety-checks" id="telegram-watch-checks"></div>
               </div>
               <div class="ops-panel" id="risk-panel">
                 <div class="trade-section-header">
@@ -602,6 +625,33 @@
                   Sin posiciones reales abiertas.
                 </div>
                 <div class="position-grid" id="open-positions-list"></div>
+              </div>
+
+              <div class="trade-section strategy-study-section">
+                <div class="trade-section-header">
+                  <h3>Estudio estrategico</h3>
+                  <span id="strategy-study-status">Sin informe</span>
+                </div>
+                <div class="audit-actions">
+                  <a class="icon-link" href="/api/strategy-study/latest" title="Ver estudio JSON" target="_blank" rel="noreferrer">
+                    <i data-lucide="line-chart"></i>
+                    <span>Estudio JSON</span>
+                  </a>
+                  <a class="icon-link" href="/api/backup/redacted" title="Descargar backup sin credenciales">
+                    <i data-lucide="archive"></i>
+                    <span>Backup seguro</span>
+                  </a>
+                </div>
+                <div class="strategy-study-grid" id="strategy-study-grid"></div>
+                <div class="strategy-study-insights" id="strategy-study-insights"></div>
+              </div>
+
+              <div class="trade-section real-lifecycle-section">
+                <div class="trade-section-header">
+                  <h3>Linea de vida real</h3>
+                  <span id="real-lifecycle-status">0 senales</span>
+                </div>
+                <div class="real-lifecycle-list" id="real-lifecycle-list"></div>
               </div>
 
               <div class="trade-section">

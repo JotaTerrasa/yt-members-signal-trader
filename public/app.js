@@ -77,6 +77,10 @@ const elements = {
   pnlSimMetrics: document.querySelector('#pnl-sim-metrics'),
   pnlNote: document.querySelector('#pnl-note'),
   realModeBanner: document.querySelector('#real-mode-banner'),
+  guardStatus: document.querySelector('#guard-status'),
+  guardMetrics: document.querySelector('#guard-metrics'),
+  incidentStatus: document.querySelector('#incident-status'),
+  incidentList: document.querySelector('#incident-list'),
   pnlEmpty: document.querySelector('#pnl-empty'),
   liveReadinessStatus: document.querySelector('#live-readiness-status'),
   liveReadinessList: document.querySelector('#live-readiness-list'),
@@ -84,6 +88,9 @@ const elements = {
   disarmLive: document.querySelector('#disarm-live'),
   healthStatus: document.querySelector('#health-status'),
   healthMetrics: document.querySelector('#health-metrics'),
+  telegramWatchStatus: document.querySelector('#telegram-watch-status'),
+  telegramWatchMetrics: document.querySelector('#telegram-watch-metrics'),
+  telegramWatchChecks: document.querySelector('#telegram-watch-checks'),
   riskStatus: document.querySelector('#risk-status'),
   riskMetrics: document.querySelector('#risk-metrics'),
   exchangeSafetyStatus: document.querySelector('#exchange-safety-status'),
@@ -102,6 +109,11 @@ const elements = {
   openPositionsStatus: document.querySelector('#open-positions-status'),
   openPositionsEmpty: document.querySelector('#open-positions-empty'),
   openPositionsList: document.querySelector('#open-positions-list'),
+  realLifecycleStatus: document.querySelector('#real-lifecycle-status'),
+  realLifecycleList: document.querySelector('#real-lifecycle-list'),
+  strategyStudyStatus: document.querySelector('#strategy-study-status'),
+  strategyStudyGrid: document.querySelector('#strategy-study-grid'),
+  strategyStudyInsights: document.querySelector('#strategy-study-insights'),
   tradeHistoryStatus: document.querySelector('#trade-history-status'),
   tradeHistoryEmpty: document.querySelector('#trade-history-empty'),
   tradeHistoryList: document.querySelector('#trade-history-list'),
@@ -187,11 +199,14 @@ const appState = {
   sheetSimTouched: false,
   pnlLoading: false,
   pnlError: '',
+  pnlMeta: null,
   simTouched: false,
   trades: [],
   paperTrades: [],
   exchangePositions: [],
   exchangeSafety: null,
+  strategyStudy: null,
+  operationalStatus: null,
   risk: null,
   logs: []
 };
@@ -200,7 +215,7 @@ init();
 
 async function init() {
   bindEvents();
-  await Promise.all([loadState(), loadPosts(), loadTelegram(), loadTelegramSource(), loadBingx()]);
+  await Promise.all([loadState(), loadPosts(), loadTelegram(), loadTelegramSource(), loadStrategyStudy(), loadOperationalStatus(), loadBingx()]);
   connectEvents();
   window.lucide?.createIcons();
 }
@@ -516,6 +531,7 @@ async function loadState() {
   appState.logs = state.logs || appState.logs;
   renderState();
   renderLogs();
+  renderTelegramWatchPanel();
 }
 
 async function loadPosts() {
@@ -543,6 +559,30 @@ async function loadTelegramSource() {
   const response = await fetchJson('/api/telegram-source');
   appState.telegramSource = response.telegramSource;
   renderTelegramSource(response.telegramSource);
+  renderTelegramWatchPanel();
+}
+
+async function loadStrategyStudy() {
+  try {
+    const response = await fetchJson('/api/strategy-study/latest');
+    appState.strategyStudy = response.study || null;
+  } catch (error) {
+    appState.strategyStudy = {
+      error: error.message
+    };
+  }
+  renderStrategyStudy();
+}
+
+async function loadOperationalStatus() {
+  try {
+    appState.operationalStatus = await fetchJson('/api/operational-status');
+  } catch (error) {
+    appState.operationalStatus = {
+      error: error.message
+    };
+  }
+  renderGuardDashboard();
 }
 
 async function loadBingx() {
@@ -582,6 +622,12 @@ async function loadPnl() {
     ]);
     const historical = historicalResponse.historical;
     appState.pnlSources = sourcesResponse;
+    appState.pnlMeta = {
+      cached: Boolean(sourcesResponse.cached),
+      stale: Boolean(sourcesResponse.stale),
+      warning: sourcesResponse.warning || '',
+      cooldownUntil: sourcesResponse.cooldownUntil || null
+    };
     appState.pnl = {
       ...(appState.pnl || {}),
       months: appState.pnl?.months || [],
@@ -597,6 +643,14 @@ async function loadPnl() {
           historical
         };
         appState.pnlError = response.warning || response.pnl?.warning || '';
+        appState.pnlMeta = {
+          ...(appState.pnlMeta || {}),
+          cached: Boolean(response.cached),
+          stale: Boolean(response.stale),
+          warning: response.warning || response.pnl?.warning || '',
+          cooldownUntil: response.cooldownUntil || appState.pnlMeta?.cooldownUntil || null,
+          lastGoodAt: response.lastGoodAt || null
+        };
         appState.paperTrades = response.pnl?.paper?.positions || appState.paperTrades;
       } catch (error) {
         appState.pnl = {
@@ -604,6 +658,10 @@ async function loadPnl() {
           historical
         };
         appState.pnlError = error.message;
+        appState.pnlMeta = {
+          ...(appState.pnlMeta || {}),
+          warning: error.message
+        };
       }
     } else {
       appState.pnl = {
@@ -641,6 +699,9 @@ function connectEvents() {
     appState.logs.unshift(JSON.parse(event.data));
     appState.logs = appState.logs.slice(0, 200);
     renderLogs();
+    renderTelegramWatchPanel();
+    renderRealModeBanner();
+    loadOperationalStatus().catch(() => renderGuardDashboard());
   });
 
   source.addEventListener('telegram', (event) => {
@@ -653,6 +714,7 @@ function connectEvents() {
     const payload = JSON.parse(event.data);
     appState.telegramSource = payload.telegramSource;
     renderTelegramSource(payload.telegramSource);
+    renderTelegramWatchPanel();
   });
 
   source.addEventListener('bingx', (event) => {
@@ -699,6 +761,7 @@ function connectEvents() {
     appState.exchangePositions = payload.positions || [];
     appState.exchangeSafety = payload.exchangeSafety || appState.exchangeSafety;
     renderPnl();
+    loadOperationalStatus().catch(() => renderGuardDashboard());
   });
 
   source.addEventListener('price', (event) => {
@@ -779,11 +842,14 @@ function renderPost(post) {
   const memberBadge = post.isMembersOnly ? '<span class="member-badge">Miembros</span>' : '';
   const sourceBadge = post.source === 'telegram_web' ? '<span class="source-badge telegram-web">Telegram</span>' : '';
   const poll = post.pollOptions?.length ? `<span>Encuesta: ${escapeHtml(post.pollOptions.join(' / '))}</span>` : '';
+  const sourceName = post.source === 'telegram_web'
+    ? 'Telegram Web'
+    : post.isMembersOnly ? 'Canal miembros' : 'Fuente';
 
   return `
     <article class="post-card">
       <div class="post-meta">
-        <strong>${escapeHtml(post.author || post.channelName || 'Canal')}</strong>
+        <strong>${escapeHtml(sourceName)}</strong>
         <span>${escapeHtml(post.publishedText || 'Sin fecha visible')}</span>
         ${memberBadge}
         ${sourceBadge}
@@ -830,6 +896,7 @@ function renderPnl() {
   const hasLocalPaper = (appState.paperTrades || []).length > 0;
   const hasPaperActivity = rows.some((row) => row.testOrders || row.openPaperTrades || row.closedPaperTrades || row.paperPnl || row.paperUnrealized);
   const hasBingxActivity = rows.some((row) => row.records || row.liveOrders);
+  const cooldownText = pnlCooldownText();
 
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
   renderPnlSourceGrid(sources, selectedSource.key);
@@ -860,6 +927,9 @@ function renderPnl() {
   } else if (appState.pnlLoading) {
     elements.pnlStatus.textContent = 'Leyendo PnL de BingX...';
     elements.pnlEmpty.classList.add('hidden');
+  } else if (cooldownText) {
+    elements.pnlStatus.textContent = `${cooldownText}. Usando ultimo dato disponible.`;
+    elements.pnlEmpty.classList.add('hidden');
   } else if (appState.pnlError) {
     const friendlyError = friendlyBingxError(appState.pnlError);
     elements.pnlStatus.textContent = hasLocalPaper
@@ -886,13 +956,17 @@ function renderPnl() {
   renderPnlChart(performanceMonthlyRows(rows));
   renderLiveReadiness();
   renderRealModeBanner();
+  renderGuardDashboard();
   renderHealthPanel();
+  renderTelegramWatchPanel();
   renderRiskPanel(openPositions, closedPositions);
   renderExchangeSafetyPanel();
   renderTickerPnl();
   renderDailyPnl();
   renderHistoricalPnl();
   renderOpenPositions(openPositions);
+  renderStrategyStudy();
+  renderRealLifecycle();
   renderTradeHistory();
   renderRealAuditTable();
   elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
@@ -1997,6 +2071,181 @@ function renderHealthPanel() {
   ].map(renderOpsMetric).join('');
 }
 
+function renderGuardDashboard() {
+  if (!elements.guardStatus || !elements.guardMetrics || !elements.incidentStatus || !elements.incidentList) {
+    return;
+  }
+
+  const status = appState.operationalStatus || {};
+  const health = status.health || appState.state?.health || {};
+  const safety = status.exchangeSafety || appState.exchangeSafety || {};
+  const real = safety.real || {};
+  const source = appState.telegramSource || {};
+  const backup = status.backup || {};
+  const incidents = status.incidents?.items || buildClientIncidents();
+  const critical = incidents.filter((incident) => incident.level === 'error').length;
+  const warns = incidents.filter((incident) => incident.level === 'warn').length;
+  const liveReady = Boolean(appState.state?.running && appState.state?.phase === 'live' && health.level === 'ok' && !health.stale);
+  const exchangeReady = safety.level === 'ok' && !safety.stale;
+  const telegramReady = Boolean(source.enabled && source.url && source.executeSignals && source.liveConfirmed);
+  const guardOk = liveReady && exchangeReady && telegramReady && !critical;
+  const lastTrade = (appState.trades || [])[0] || null;
+  const cooldown = pnlCooldownText();
+
+  elements.guardStatus.textContent = guardOk
+    ? 'Guardia estable'
+    : critical ? `${critical} criticas` : 'Revisar avisos';
+  elements.guardStatus.className = guardOk ? 'amount positive' : critical ? 'amount negative' : 'amount warn';
+  elements.guardMetrics.innerHTML = [
+    ['Live', liveReady ? 'activo' : 'revisar', liveReady ? 'positive' : 'negative'],
+    ['Telegram Web', telegramReady ? 'gestion ok' : 'revisar', telegramReady ? 'positive' : 'warn'],
+    ['BingX sync', safety.ageSeconds == null ? '-' : `${safety.ageSeconds}s`, exchangeReady ? 'positive' : 'negative'],
+    ['Abiertas real', `${real.openPositions || 0}`, real.missingStopLoss ? 'negative' : 'positive'],
+    ['Flotante', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)],
+    ['PnL historico', cooldown ? cooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : 'ok', cooldown ? 'warn' : 'positive'],
+    ['Backup auto', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
+    ['Ultimo evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
+  ].map(renderOpsMetric).join('');
+
+  elements.incidentStatus.textContent = incidents.length
+    ? `${incidents.length} incidencias (${warns} avisos)`
+    : '0 incidencias';
+  elements.incidentStatus.className = critical ? 'amount negative' : warns ? 'amount warn' : 'amount positive';
+  elements.incidentList.innerHTML = incidents.length
+    ? incidents.slice(0, 8).map(renderIncidentItem).join('')
+    : '<div class="empty-state compact">Sin incidencias relevantes en las ultimas 24h.</div>';
+}
+
+function renderIncidentItem(incident = {}) {
+  return `
+    <div class="incident-item ${escapeAttribute(incident.level || 'info')}">
+      <span>${escapeHtml(formatShortDateTime(incident.at))}</span>
+      <strong>${escapeHtml(incident.title || incident.type || 'Incidencia')}</strong>
+      <small>${escapeHtml(truncateText(incident.message || '', 140))}</small>
+    </div>
+  `;
+}
+
+function buildClientIncidents() {
+  const cutoff = Date.now() - 24 * unitMs.hour;
+  return (appState.logs || [])
+    .filter((log) => Date.parse(log.at || 0) >= cutoff)
+    .map((log) => {
+      const message = String(log.message || '');
+      const rules = [
+        [/No se detectaron mensajes Telegram/i, 'telegram_web_empty', 'Telegram Web sin mensajes visibles'],
+        [/No se detectaron posts|YouTube no esta devolviendo posts/i, 'youtube_empty', 'YouTube sin posts visibles'],
+        [/BingX PnL no disponible|Rate-limit PnL|frequency limit|100410/i, 'bingx_pnl_rate_limit', 'BingX PnL en rate-limit'],
+        [/BingX sync|BingX safety|BingX posiciones/i, 'bingx_sync', 'Reconciliacion BingX'],
+        [/Health:|Telegram health|Alerta scraper/i, 'monitor_health', 'Salud del monitor'],
+        [/Backup redacted/i, 'backup', 'Backup automatico']
+      ];
+      const matched = rules.find(([pattern]) => pattern.test(message));
+      if (!matched && log.level !== 'error') {
+        return null;
+      }
+      return {
+        at: log.at,
+        level: log.level === 'error' ? 'error' : log.level === 'warn' ? 'warn' : 'info',
+        type: matched?.[1] || 'error',
+        title: matched?.[2] || 'Error',
+        message
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 30);
+}
+
+function backupStatusText(backup = {}) {
+  if (backup.lastError) {
+    return 'error';
+  }
+  if (backup.lastRunAt) {
+    return humanLogAge(backup.lastRunAt);
+  }
+  if (backup.nextRunAt) {
+    return 'programado';
+  }
+  return 'pendiente';
+}
+
+function renderTelegramWatchPanel() {
+  if (!elements.telegramWatchStatus || !elements.telegramWatchMetrics || !elements.telegramWatchChecks) {
+    return;
+  }
+
+  const source = appState.telegramSource || {};
+  const active = Boolean(source.enabled && source.url);
+  const lastRefresh = latestAppLog((log) => String(log.message || '').includes('Telegram Web refrescado'));
+  const lastMissing = latestAppLog((log) => String(log.message || '').includes('No se detectaron mensajes Telegram'));
+  const missingLastHour = countAppLogs((log) => String(log.message || '').includes('No se detectaron mensajes Telegram'), 60);
+  const pnlLimit = latestAppLog((log) => String(log.message || '').includes('BingX PnL no disponible'));
+  const pnlCooldown = pnlCooldownText();
+  const refreshSeconds = Number(source.refreshSeconds || 0);
+  const refreshAge = secondsSinceIso(lastRefresh?.at);
+  const refreshStale = active
+    && refreshSeconds > 0
+    && Number.isFinite(refreshAge)
+    && refreshAge > Math.max(refreshSeconds * 2.5, 900);
+  const recentMissing = active
+    && lastMissing
+    && Number.isFinite(secondsSinceIso(lastMissing.at))
+    && secondsSinceIso(lastMissing.at) < 30 * unitMs.minute / 1000;
+  const needsLiveConfirm = usesLiveMode(appState.bingx?.mode) && source.executeSignals;
+  const status = !active
+    ? 'Desactivado'
+    : refreshStale || recentMissing ? 'Revisar lectura' : 'Fuente activa';
+
+  elements.telegramWatchStatus.textContent = status;
+  elements.telegramWatchStatus.className = !active
+    ? 'amount'
+    : refreshStale || recentMissing ? 'amount warn' : 'amount positive';
+  elements.telegramWatchMetrics.innerHTML = [
+    ['Modo', active ? source.executeSignals ? 'Gestion' : 'Solo lectura' : 'off', active ? 'positive' : ''],
+    ['Aperturas', source.executeOpenSignals ? 'habilitadas' : 'bloqueadas', source.executeOpenSignals ? 'warn' : 'positive'],
+    ['Recarga', refreshSeconds ? `${refreshSeconds}s` : '-', refreshStale ? 'negative' : active ? 'positive' : ''],
+    ['Ultimo refresh', lastRefresh ? humanLogAge(lastRefresh.at) : '-', refreshStale ? 'negative' : lastRefresh ? 'positive' : ''],
+    ['Sin mensajes 1h', String(missingLastHour), missingLastHour ? 'warn' : 'positive'],
+    ['PnL BingX', pnlCooldown ? pnlCooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600 ? `limit ${humanLogAge(pnlLimit.at)}` : 'ok', pnlCooldown || (pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600) ? 'warn' : 'positive']
+  ].map(renderOpsMetric).join('');
+
+  const checks = [
+    {
+      label: 'Canal configurado',
+      ok: active,
+      detail: active ? 'ok' : 'falta URL'
+    },
+    {
+      label: 'Cierres/TP/SL',
+      ok: Boolean(source.executeSignals),
+      detail: source.executeSignals ? 'activos' : 'off'
+    },
+    {
+      label: 'Confirmacion live',
+      ok: !needsLiveConfirm || Boolean(source.liveConfirmed),
+      detail: needsLiveConfirm ? source.liveConfirmed ? 'ok' : 'pendiente' : 'no aplica'
+    },
+    {
+      label: 'Lectura reciente',
+      ok: active && !refreshStale && !recentMissing,
+      detail: recentMissing ? humanLogAge(lastMissing.at) : refreshStale ? 'stale' : 'ok'
+    },
+    {
+      label: 'Aperturas desde Telegram',
+      ok: !source.executeOpenSignals,
+      detail: source.executeOpenSignals ? 'habilitadas' : 'bloqueadas'
+    }
+  ];
+
+  elements.telegramWatchChecks.innerHTML = checks.map((check) => `
+    <div class="exchange-safety-check ${check.ok ? 'ok' : 'missing'}">
+      <i data-lucide="${check.ok ? 'check' : 'triangle-alert'}"></i>
+      <span>${escapeHtml(check.label)}</span>
+      <strong>${escapeHtml(check.detail)}</strong>
+    </div>
+  `).join('');
+}
+
 function renderRealModeBanner() {
   if (!elements.realModeBanner) {
     return;
@@ -2008,6 +2257,7 @@ function renderRealModeBanner() {
   const telegram = appState.telegram || {};
   const lastLiveEvent = (appState.trades || []).find((event) => eventAccountKey(event) === 'live' || String(event.status || '').startsWith('live_'));
   const lastError = (appState.trades || []).find((event) => event.status === 'error');
+  const pnlLimit = latestAppLog((log) => String(log.message || '').includes('BingX PnL no disponible'));
   const real = safety.real || {};
   const active = usesLiveMode(bingx.mode) && bingx.liveConfirmed;
   elements.realModeBanner.classList.toggle('active', active);
@@ -2038,6 +2288,10 @@ function renderRealModeBanner() {
       <strong>${escapeHtml(`${health.level === 'ok' ? 'YT ok' : 'YT revisar'} - ${telegram.enabled ? 'TG ok' : 'TG off'}`)}</strong>
     </div>
     <div>
+      <span>Datos PnL</span>
+      <strong>${escapeHtml(pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600 ? `Rate limit ${humanLogAge(pnlLimit.at)}` : 'BingX ok')}</strong>
+    </div>
+    <div>
       <span>Real abierto</span>
       <strong>${escapeHtml(`${real.openPositions || 0} - ${formatMoney(real.floatingPnl || 0, real.asset || 'USDT')}`)}</strong>
     </div>
@@ -2052,6 +2306,7 @@ function renderRiskPanel(openPositions = openPaperPositions(), closedPositions =
   const dailyLimit = Number(config.maxDailyLossUSDT || 0);
   const monthlyLimit = Number(config.maxMonthlyLossUSDT || 0);
   const dailyOrders = dailyOpeningExecutions();
+  const missingHardLimits = maxDailyOrders <= 0 || dailyLimit <= 0 || monthlyLimit <= 0;
   const blocked = (maxOpen > 0 && risk.openPositions >= maxOpen)
     || (dailyLimit > 0 && risk.dailyPnl <= -Math.abs(dailyLimit))
     || (monthlyLimit > 0 && risk.monthlyPnl <= -Math.abs(monthlyLimit))
@@ -2059,8 +2314,10 @@ function renderRiskPanel(openPositions = openPaperPositions(), closedPositions =
     || config.entriesPaused
     || config.managementOnly;
 
-  elements.riskStatus.textContent = blocked ? 'Bloqueo local activo' : 'Local dentro de limites';
-  elements.riskStatus.className = amountClass(blocked ? -1 : 1);
+  elements.riskStatus.textContent = blocked
+    ? 'Bloqueo local activo'
+    : missingHardLimits ? 'Limites sin tope duro' : 'Local dentro de limites';
+  elements.riskStatus.className = blocked ? 'amount negative' : missingHardLimits ? 'amount warn' : 'amount positive';
   const dailyText = dailyLimit > 0
     ? `${formatUsdt(risk.dailyPnl)} / -${formatUsdt(dailyLimit)}`
     : `${formatUsdt(risk.dailyPnl)} / sin limite`;
@@ -2070,10 +2327,10 @@ function renderRiskPanel(openPositions = openPaperPositions(), closedPositions =
 
   elements.riskMetrics.innerHTML = [
     ['Abiertas local', `${risk.openPositions}/${maxOpen || '-'}`, maxOpen > 0 && risk.openPositions >= maxOpen ? 'negative' : ''],
-    ['Ordenes dia', `${dailyOrders}/${maxDailyOrders || '-'}`, maxDailyOrders > 0 && dailyOrders >= maxDailyOrders ? 'negative' : ''],
+    ['Ordenes dia', `${dailyOrders}/${maxDailyOrders || 'sin limite'}`, maxDailyOrders > 0 && dailyOrders >= maxDailyOrders ? 'negative' : maxDailyOrders > 0 ? 'positive' : 'warn'],
     ['Exposicion local', formatUsdt(risk.openExposure), ''],
-    ['PnL dia local', dailyText, risk.dailyPnl < 0 ? 'negative' : 'positive'],
-    ['PnL mes local', monthlyText, risk.monthlyPnl < 0 ? 'negative' : 'positive']
+    ['PnL dia local', dailyText, dailyLimit <= 0 ? 'warn' : risk.dailyPnl < 0 ? 'negative' : 'positive'],
+    ['PnL mes local', monthlyText, monthlyLimit <= 0 ? 'warn' : risk.monthlyPnl < 0 ? 'negative' : 'positive']
   ].map(renderOpsMetric).join('');
 }
 
@@ -2200,6 +2457,79 @@ function renderOpsMetric([label, value, className]) {
       <strong class="${escapeAttribute(className || '')}">${escapeHtml(value)}</strong>
     </div>
   `;
+}
+
+function latestAppLog(predicate) {
+  return [...(appState.logs || [])]
+    .filter((log) => {
+      try {
+        return predicate(log);
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0))[0] || null;
+}
+
+function countAppLogs(predicate, minutes = 60) {
+  const cutoff = Date.now() - Math.max(1, Number(minutes || 60)) * unitMs.minute;
+  return (appState.logs || []).filter((log) => {
+    const time = Date.parse(log.at || 0);
+    if (!Number.isFinite(time) || time < cutoff) {
+      return false;
+    }
+    try {
+      return predicate(log);
+    } catch {
+      return false;
+    }
+  }).length;
+}
+
+function secondsSinceIso(value) {
+  const time = Date.parse(value || 0);
+  if (!Number.isFinite(time)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, Math.round((Date.now() - time) / 1000));
+}
+
+function humanLogAge(value) {
+  const seconds = secondsSinceIso(value);
+  if (!Number.isFinite(seconds)) {
+    return '-';
+  }
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h`;
+}
+
+function pnlCooldownText() {
+  const cooldownUntil = appState.pnlMeta?.cooldownUntil;
+  if (!cooldownUntil) {
+    return '';
+  }
+  const until = Date.parse(cooldownUntil);
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    return '';
+  }
+  const time = new Date(until).toLocaleTimeString('es-ES', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  return `BingX PnL en cooldown hasta ${time}`;
+}
+
+function topObjectEntries(value = {}, limit = 4) {
+  return Object.entries(value || {})
+    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0))
+    .slice(0, limit);
 }
 
 function renderAmountBars(rows, metaFactory = () => '') {
@@ -3121,6 +3451,145 @@ function renderRealAuditTable() {
   elements.realAuditTable.innerHTML = events.length
     ? events.map(renderRealAuditRow).join('')
     : '<tr><td colspan="9">Sin eventos reales auditables todavia.</td></tr>';
+}
+
+function renderRealLifecycle() {
+  if (!elements.realLifecycleStatus || !elements.realLifecycleList) {
+    return;
+  }
+
+  const groups = groupedSignalEvents()
+    .map((group) => ({
+      ...group,
+      rows: group.rows.filter((row) => row.live)
+    }))
+    .filter((group) => group.rows.length)
+    .slice(0, 6);
+
+  elements.realLifecycleStatus.textContent = groups.length
+    ? `${groups.length} senales recientes`
+    : '0 senales';
+  elements.realLifecycleList.innerHTML = groups.length
+    ? groups.map(renderRealLifecycleGroup).join('')
+    : '<div class="empty-state compact">Sin senales reales auditables todavia.</div>';
+}
+
+function renderStrategyStudy() {
+  if (!elements.strategyStudyStatus || !elements.strategyStudyGrid || !elements.strategyStudyInsights) {
+    return;
+  }
+
+  const study = appState.strategyStudy;
+  if (!study) {
+    elements.strategyStudyStatus.textContent = 'Cargando';
+    elements.strategyStudyGrid.innerHTML = '<div class="empty-state compact">Cargando estudio...</div>';
+    elements.strategyStudyInsights.innerHTML = '';
+    return;
+  }
+
+  if (study.error) {
+    elements.strategyStudyStatus.textContent = 'No disponible';
+    elements.strategyStudyGrid.innerHTML = `<div class="empty-state compact">${escapeHtml(study.error)}</div>`;
+    elements.strategyStudyInsights.innerHTML = '';
+    return;
+  }
+
+  const perf = study.performance || {};
+  const sample = study.sample || {};
+  const signal = study.signalStats || {};
+  const quality = study.dataQuality || {};
+  elements.strategyStudyStatus.textContent = study.generatedAt
+    ? `Actualizado ${formatShortDateTime(study.generatedAt)}`
+    : 'Informe cargado';
+  elements.strategyStudyGrid.innerHTML = [
+    ['Cierres reales', String(perf.closedTrades || 0), perf.closedTrades >= 100 ? 'positive' : 'warn'],
+    ['Win rate', formatPercent(perf.winRate), amountClass(Number(perf.winRate || 0) - 50)],
+    ['Profit factor', formatRatio(perf.profitFactor), Number(perf.profitFactor || 0) >= 1 ? 'positive' : 'negative'],
+    ['Neto cerrado', formatMoney(perf.netPnl || 0, 'USDT'), amountClass(perf.netPnl || 0)],
+    ['Senales parseadas', String(sample.parsedSignals || signal.total || 0), ''],
+    ['Gestion vs aperturas', `${signal.managementCount || 0}/${signal.openCount || 0}`, signal.managementCount ? 'positive' : 'warn'],
+    ['Fuente historico', quality.orderHistoryAvailable ? 'BingX ok' : 'fallback local', quality.orderHistoryAvailable ? 'positive' : 'warn'],
+    ['Comisiones', formatMoney(perf.commission || 0, 'USDT'), amountClass(perf.commission || 0)]
+  ].map(renderOpsMetric).join('');
+
+  const outcomes = topObjectEntries(perf.outcomes, 4)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(' | ') || '-';
+  const symbols = topObjectEntries(signal.symbols, 4)
+    .map(([key, value]) => `${key.replace('-USDT', '')}: ${value}`)
+    .join(' | ') || '-';
+  const management = topObjectEntries(study.playbook?.managementActions, 4)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(' | ') || '-';
+
+  elements.strategyStudyInsights.innerHTML = `
+    <div>
+      <strong>Estado estadistico</strong>
+      <span>${escapeHtml(study.statisticalStatus || 'Sin conclusion todavia.')}</span>
+    </div>
+    <div>
+      <strong>Resultados</strong>
+      <span>${escapeHtml(outcomes)}</span>
+    </div>
+    <div>
+      <strong>Simbolos mas usados</strong>
+      <span>${escapeHtml(symbols)}</span>
+    </div>
+    <div>
+      <strong>Gestion detectada</strong>
+      <span>${escapeHtml(management)}</span>
+    </div>
+  `;
+}
+
+function renderRealLifecycleGroup(group) {
+  const totals = signalGroupTotals(group);
+  const postLink = group.postUrl
+    ? `<a href="${escapeAttribute(group.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    : '';
+  return `
+    <article class="real-lifecycle-card">
+      <div class="real-lifecycle-header">
+        <div>
+          <strong>${escapeHtml(signalGroupTitle(group))}</strong>
+          <span>${escapeHtml(formatDateTime(group.at))}</span>
+        </div>
+        <div class="signal-group-status">
+          <span class="${escapeAttribute(totals.liveClass)}">Real ${escapeHtml(totals.live)}</span>
+          ${postLink}
+        </div>
+      </div>
+      <div class="real-lifecycle-rows">
+        ${group.rows.map(renderRealLifecycleRow).join('')}
+      </div>
+    </article>
+  `;
+}
+
+function renderRealLifecycleRow(row) {
+  const event = row.live || {};
+  const status = String(event.status || '');
+  const steps = orderLifecycleText(event).split(' > ').filter(Boolean);
+  const failed = eventTone(event) === 'negative' || status === 'blocked' || status === 'error';
+  return `
+    <div class="real-lifecycle-row">
+      <div class="real-lifecycle-symbol">
+        <strong>${escapeHtml(row.symbol || event.signal?.symbol || '-')}</strong>
+        <span>${escapeHtml(row.direction || event.signal?.direction || event.signal?.action || '-')}</span>
+      </div>
+      <div class="real-lifecycle-steps">
+        ${steps.map((step, index) => {
+          const isLast = index === steps.length - 1;
+          const cls = failed && isLast ? 'failed' : 'done';
+          return `<span class="${escapeAttribute(cls)}">${escapeHtml(step)}</span>`;
+        }).join('')}
+      </div>
+      <div class="real-lifecycle-result ${escapeAttribute(eventTone(event))}">
+        <strong>${escapeHtml(tradeStatusLabel(event.status))}</strong>
+        <span>${escapeHtml(event.reason ? reasonLabel(event.reason) : eventAmountText(event, 'live') || '-')}</span>
+      </div>
+    </div>
+  `;
 }
 
 function renderRealAuditRow(event) {

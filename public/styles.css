@@ -1026,8 +1026,90 @@ summary.dashboard-section-title {
   overflow-wrap: anywhere;
 }
 
+.guard-dashboard {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(36, 91, 155, 0.18);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.guard-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+  gap: 8px;
+}
+
+.guard-metrics > div {
+  display: grid;
+  gap: 4px;
+  min-height: 62px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.guard-metrics span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.guard-metrics strong {
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.incident-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.incident-list {
+  display: grid;
+  gap: 6px;
+}
+
+.incident-item {
+  display: grid;
+  grid-template-columns: 82px minmax(128px, 0.7fr) minmax(0, 1.6fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.incident-item span,
+.incident-item small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.incident-item strong {
+  font-size: 0.82rem;
+}
+
+.incident-item.warn strong {
+  color: var(--gold);
+}
+
+.incident-item.error strong {
+  color: var(--danger);
+}
+
 .exchange-safety-panel {
   border-color: rgba(36, 91, 155, 0.18);
+}
+
+.telegram-watch-panel {
+  border-color: rgba(15, 118, 110, 0.22);
 }
 
 .exchange-safety-checks {
@@ -1093,6 +1175,162 @@ summary.dashboard-section-title {
   border-color: var(--gold);
   color: #604412;
   background: #fff6de;
+}
+
+.real-lifecycle-section {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-study-section {
+  display: grid;
+  gap: 12px;
+}
+
+.strategy-study-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 8px;
+}
+
+.strategy-study-grid > div {
+  display: grid;
+  gap: 4px;
+  min-height: 62px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.strategy-study-grid span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.strategy-study-grid strong {
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.strategy-study-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.strategy-study-insights div {
+  display: grid;
+  gap: 5px;
+  min-height: 74px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.strategy-study-insights strong {
+  font-size: 0.82rem;
+}
+
+.strategy-study-insights span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.real-lifecycle-list {
+  display: grid;
+  gap: 10px;
+}
+
+.real-lifecycle-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.real-lifecycle-header,
+.real-lifecycle-row {
+  display: grid;
+  gap: 10px;
+}
+
+.real-lifecycle-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.real-lifecycle-header > div:first-child,
+.real-lifecycle-symbol,
+.real-lifecycle-result {
+  display: grid;
+  gap: 3px;
+}
+
+.real-lifecycle-header strong,
+.real-lifecycle-symbol strong,
+.real-lifecycle-result strong {
+  font-size: 0.9rem;
+}
+
+.real-lifecycle-header span,
+.real-lifecycle-symbol span,
+.real-lifecycle-result span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.real-lifecycle-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.real-lifecycle-row {
+  grid-template-columns: minmax(108px, 0.7fr) minmax(0, 2fr) minmax(118px, 0.9fr);
+  align-items: center;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.real-lifecycle-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.real-lifecycle-steps span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.real-lifecycle-steps span.failed {
+  border-color: rgba(189, 59, 53, 0.22);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.real-lifecycle-result.negative strong {
+  color: var(--danger);
+}
+
+.real-lifecycle-result.positive strong {
+  color: var(--accent-strong);
 }
 
 .pnl-chart {
@@ -3333,6 +3571,12 @@ h1 {
   }
 
   .telegram-actions.two-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .real-lifecycle-header,
+  .real-lifecycle-row,
+  .incident-item {
     grid-template-columns: 1fr;
   }
 }
