@@ -90,7 +90,7 @@ export class BingXClient {
     const signedPayload = `${encoded}&signature=${signature}`;
     const urls = API_BASE_URLS[this.environment] || API_BASE_URLS['prod-live'];
 
-    let lastNetworkError = null;
+    const networkAttempts = [];
     for (const baseUrl of urls) {
       const url = method === 'POST' ? `${baseUrl}${path}` : `${baseUrl}${path}?${signedPayload}`;
       try {
@@ -111,21 +111,24 @@ export class BingXClient {
         }
         return body;
       } catch (error) {
-        if (!isNetworkOrTimeout(error) || baseUrl === urls[urls.length - 1]) {
+        if (!isNetworkOrTimeout(error)) {
           throw error;
         }
-        lastNetworkError = error;
+        networkAttempts.push({ baseUrl, error });
+        if (baseUrl === urls[urls.length - 1]) {
+          throw buildNetworkError('BingX no respondio por red', networkAttempts);
+        }
       }
     }
 
-    throw lastNetworkError || new Error('BingX no respondio.');
+    throw buildNetworkError('BingX no respondio por red', networkAttempts);
   }
 
   async publicRequest(path, payload = {}) {
     const encoded = buildEncodedQuery(payload);
     const urls = API_BASE_URLS[this.environment] || API_BASE_URLS['prod-live'];
 
-    let lastNetworkError = null;
+    const networkAttempts = [];
     for (const baseUrl of urls) {
       const url = encoded ? `${baseUrl}${path}?${encoded}` : `${baseUrl}${path}`;
       try {
@@ -140,14 +143,17 @@ export class BingXClient {
         }
         return body;
       } catch (error) {
-        if (!isNetworkOrTimeout(error) || baseUrl === urls[urls.length - 1]) {
+        if (!isNetworkOrTimeout(error)) {
           throw error;
         }
-        lastNetworkError = error;
+        networkAttempts.push({ baseUrl, error });
+        if (baseUrl === urls[urls.length - 1]) {
+          throw buildNetworkError('BingX no respondio por red', networkAttempts);
+        }
       }
     }
 
-    throw lastNetworkError || new Error('BingX no respondio.');
+    throw buildNetworkError('BingX no respondio por red', networkAttempts);
   }
 }
 
@@ -155,6 +161,33 @@ function isNetworkOrTimeout(error) {
   return error instanceof TypeError
     || error?.name === 'AbortError'
     || error?.name === 'TimeoutError';
+}
+
+function buildNetworkError(prefix, attempts = []) {
+  const details = attempts
+    .map(({ baseUrl, error }) => `${new URL(baseUrl).host}: ${describeNetworkError(error)}`)
+    .join('; ');
+  const message = details ? `${prefix}: ${details}` : prefix;
+  const wrapped = new Error(message);
+  wrapped.cause = attempts.at(-1)?.error;
+  return wrapped;
+}
+
+function describeNetworkError(error) {
+  const code = error?.cause?.code || error?.code || '';
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return 'timeout tras 10s';
+  }
+  if (code === 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY') {
+    return 'certificado local no confiable (UNABLE_TO_GET_ISSUER_CERT_LOCALLY)';
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return `DNS ${code}`;
+  }
+  if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED') {
+    return `conexion ${code}`;
+  }
+  return [error?.message || String(error), code].filter(Boolean).join(' ');
 }
 
 async function parseJsonResponse(response) {

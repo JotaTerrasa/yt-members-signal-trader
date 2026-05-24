@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { BingXClient } from '../src/bingxClient.js';
 import { parseFuturesSignals } from '../src/futuresSignalParser.js';
@@ -8,6 +9,7 @@ const rootDir = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dataDir = join(rootDir, '.data');
 const outputDir = join(dataDir, 'strategy-study');
 const gitReportDir = join(rootDir, 'docs', 'strategy-reports');
+const bingxReadRetries = 3;
 const days = clampInteger(argValue('--days'), 1, 365, 14);
 const offline = hasFlag('--offline') || process.env.STRATEGY_STUDY_OFFLINE === '1';
 const now = Date.now();
@@ -110,10 +112,12 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
   try {
     for (let cursor = startTime; cursor < endTime; cursor += maxWindowMs) {
       const chunkEnd = Math.min(endTime, cursor + maxWindowMs);
-      const response = await client.request('GET', '/openApi/swap/v2/trade/allOrders', {
+      const response = await retryBingXRead(() => client.request('GET', '/openApi/swap/v2/trade/allOrders', {
         startTime: cursor,
         endTime: chunkEnd,
         limit: 1000
+      }), {
+        label: `order history ${new Date(cursor).toISOString()}-${new Date(chunkEnd).toISOString()}`
       });
       const chunkRows = response?.data?.orders || response?.data || [];
       if (Array.isArray(chunkRows)) {
@@ -122,7 +126,7 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
     }
 
     const [openOrdersResponse] = await Promise.all([
-      client.getOpenOrders().catch(() => ({ data: [] }))
+      retryBingXRead(() => client.getOpenOrders(), { label: 'open orders' }).catch(() => ({ data: [] }))
     ]);
     const openRows = openOrdersResponse?.data?.orders || openOrdersResponse?.data || [];
     const byId = new Map(rows.map((order) => [String(order.orderId || order.orderID || ''), order]));
@@ -140,6 +144,22 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
       warning: `BingX live order history unavailable: ${safeErrorMessage(error)}`
     };
   }
+}
+
+async function retryBingXRead(task, { label }) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= bingxReadRetries; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (attempt < bingxReadRetries) {
+        await sleep(750 * attempt);
+      }
+    }
+  }
+
+  throw new Error(`${label} failed after ${bingxReadRetries} attempts: ${safeErrorMessage(lastError)}`);
 }
 
 function extractSignals(posts = []) {
