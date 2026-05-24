@@ -7,6 +7,7 @@ La aplicacion esta pensada para ejecutarse en tu propia maquina. Las sesiones we
 ## Indice
 
 - [Que hace](#que-hace)
+- [Arquitectura](#arquitectura)
 - [Modos de BingX](#modos-de-bingx)
 - [Requisitos](#requisitos)
 - [Instalacion rapida](#instalacion-rapida)
@@ -35,6 +36,51 @@ La aplicacion esta pensada para ejecutarse en tu propia maquina. Las sesiones we
 - Muestra PnL real, Google Sheet de referencia, ROI mensual, historial auditable, linea de vida de senales e incidencias.
 - Genera informes de estudio estrategico para aprender patrones de la operativa.
 - Genera backups redacted sin credenciales.
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+  operator["Operador local"] --> ui["UI local<br/>public/index.html<br/>public/app.js"]
+  ui <--> api["Node HTTP API + SSE<br/>src/server.js"]
+  api --> config[".data/config.json<br/>configuracion y secretos locales"]
+  api --> stores[".data/*.json<br/>posts, eventos, trades, backups"]
+  api --> pm2["PM2 / npm run dev<br/>proceso en segundo plano"]
+
+  subgraph sources["Fuentes de senales"]
+    youtube["YouTube members posts"] --> scraper["Playwright Chromium<br/>src/youtubeScraper.js"]
+    telegramWeb["Telegram Web channel"] --> scraper
+  end
+
+  scraper --> parser["Parser de senales<br/>src/futuresSignalParser.js"]
+  parser --> trader["Motor de futuros<br/>src/futuresTrader.js"]
+  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>limites, antiguedad y modo real"]
+  risk --> bingxClient["Cliente BingX REST<br/>src/bingxClient.js"]
+  bingxClient <--> bingx["BingX Futures"]
+
+  api --> priceWs["Precios WebSocket<br/>src/bingxPriceWebSocket.js"]
+  priceWs <--> bingx
+  api --> reconcile["Reconciliacion real<br/>posiciones, SL/TP y ordenes huerfanas"]
+  reconcile <--> bingx
+
+  api --> notifier["Alertas Telegram<br/>src/telegramNotifier.js"]
+  notifier --> telegramBot["Telegram Bot"]
+
+  api --> sheet["Google Sheet / referencia<br/>src/referenceLedger.js"]
+  api --> study["Estudio estrategico<br/>scripts/strategyStudy.js"]
+  study --> reports["docs/strategy-reports/"]
+  api --> backup["Backup redacted<br/>.data/backups/"]
+```
+
+Flujo principal:
+
+1. La UI configura fuentes, Telegram, BingX, limites y modo de ejecucion a traves de la API local.
+2. Playwright mantiene sesiones persistentes en `.yt-profile/` y lee YouTube/Telegram Web.
+3. El parser convierte texto libre en eventos operables: apertura, cierre, TP, SL, break even o cierre total.
+4. El motor de futuros valida cada senal antes de enviarla: stop loss, duplicados, limites, antiguedad, modo y bloqueo local.
+5. BingX ejecuta o reconcilia segun el modo activo; la app compara periodicamente estado local contra estado real.
+6. Telegram Bot avisa de senales, ejecuciones, errores, descuadres, salud del monitor y acciones criticas.
+7. Los stores locales, backups redacted e informes permiten auditar lo ocurrido sin subir secretos al repo.
 
 ## Modos de BingX
 
