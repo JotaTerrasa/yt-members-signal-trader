@@ -435,7 +435,7 @@ export class FuturesTrader {
       ? await this.paperStore.closeAll({ percent: closePercent, reason: 'close_all', post, phase })
       : [];
     const exchangeClose = config.mode !== 'test'
-      ? await this.closeAllExchangePositions({ client: this.client(config), closePercent })
+      ? await this.closeAllExchangePositions({ client: this.client(config), config, closePercent })
       : null;
 
     const event = this.emitTrade({
@@ -483,7 +483,7 @@ export class FuturesTrader {
       ? await this.paperStore.closeBySymbol({ symbol: signal.symbol, price: closePrice, percent: closePercent, reason: 'youtube_close', post, phase })
       : [];
     const exchangeClose = config.mode !== 'test'
-      ? await this.closeExchangePositions({ client, signal, closePercent })
+      ? await this.closeExchangePositions({ client, config, signal, closePercent })
       : null;
 
     const event = this.emitTrade({
@@ -977,7 +977,7 @@ export class FuturesTrader {
     });
   }
 
-  async closeExchangePositions({ client, signal, closePercent = 100 }) {
+  async closeExchangePositions({ client, config = null, signal, closePercent = 100 }) {
     const response = await client.getPositions(signal.symbol);
     const positions = (Array.isArray(response.data) ? response.data : [])
       .filter((position) => position.symbol === signal.symbol)
@@ -1027,10 +1027,17 @@ export class FuturesTrader {
       });
     }
 
-    return { positions, orders };
+    const protectiveCleanup = percent >= 99.9
+      ? await this.cancelProtectiveOrdersForClosedPositions({ client, positions })
+      : { canceled: [], skipped: [] };
+    if (config && protectiveCleanup.canceled.length) {
+      this.openOrdersCache.delete(openOrdersCacheKey(config));
+    }
+
+    return { positions, orders, protectiveCleanup };
   }
 
-  async closeAllExchangePositions({ client, closePercent = 100 }) {
+  async closeAllExchangePositions({ client, config = null, closePercent = 100 }) {
     const response = await client.getPositions();
     const positions = (Array.isArray(response.data) ? response.data : [])
       .filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
@@ -1088,7 +1095,56 @@ export class FuturesTrader {
       });
     }
 
-    return { positions, orders };
+    const protectiveCleanup = percent >= 99.9
+      ? await this.cancelProtectiveOrdersForClosedPositions({ client, positions })
+      : { canceled: [], skipped: [] };
+    if (config && protectiveCleanup.canceled.length) {
+      this.openOrdersCache.delete(openOrdersCacheKey(config));
+    }
+
+    return { positions, orders, protectiveCleanup };
+  }
+
+  async cancelProtectiveOrdersForClosedPositions({ client, positions = [] }) {
+    const canceled = [];
+    const skipped = [];
+    const symbols = [...new Set(positions.map((position) => position.symbol).filter(Boolean))];
+
+    for (const symbol of symbols) {
+      const response = await client.getOpenOrders(symbol).catch((error) => {
+        this.log(`BingX ordenes protectoras ${symbol}: ${error.message}`, 'warn');
+        return { data: [] };
+      });
+      const openOrders = extractOpenOrders(response).map((order) => normalizeOpenOrder(order));
+      const symbolPositions = positions.filter((position) => normalizeSymbol(position.symbol) === normalizeSymbol(symbol));
+      const protectiveOrders = openOrders.filter((order) => symbolPositions.some((position) => (
+        protectiveOrdersForPosition(position, [order]).orders.length
+      )));
+
+      for (const order of protectiveOrders) {
+        const orderId = order.orderId || order.orderID;
+        const clientOrderIdValue = order.clientOrderId || order.clientOrderID;
+        if (!order.symbol || (!orderId && !clientOrderIdValue)) {
+          skipped.push({ order, reason: 'missing_order_id' });
+          continue;
+        }
+        try {
+          canceled.push({
+            order,
+            response: await client.cancelOrder({
+              symbol: order.symbol,
+              orderId,
+              clientOrderId: clientOrderIdValue
+            })
+          });
+        } catch (error) {
+          skipped.push({ order, reason: error.message });
+          this.log(`BingX cancelar protectora ${order.symbol}: ${error.message}`, 'warn');
+        }
+      }
+    }
+
+    return { canceled, skipped };
   }
 
   async emergencyCloseAllRealPositions({ closePercent = 100 } = {}) {
@@ -1099,7 +1155,7 @@ export class FuturesTrader {
     if (!config.enabled || !config.liveConfirmed) {
       throw new Error('Live real no esta armado.');
     }
-    return this.closeAllExchangePositions({ client: this.client(config), closePercent });
+    return this.closeAllExchangePositions({ client: this.client(config), config, closePercent });
   }
 
   async cancelAllRealOpenOrders() {

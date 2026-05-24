@@ -163,11 +163,13 @@ Cierres:
 - `CLOSE` por simbolo cierra la posicion de ese ticker.
 - `CLOSE_ALL` cierra todas las posiciones abiertas.
 - Cierres parciales respetan el porcentaje detectado.
+- En cierres completos, la app intenta cancelar despues los SL/TP protectores asociados a esa posicion.
 
 Notas:
 
 - BingX usa IDs de orden largos; el cliente los conserva como string para evitar redondeo.
 - El replay de una senal live requiere confirmacion explicita.
+- Las alertas de SL/ordenes huerfanas tienen una pequena ventana de gracia tras aperturas y cierres para evitar falsos positivos mientras BingX confirma la posicion y sus protectoras.
 
 ## 9. Reejecutar una senal fallida
 

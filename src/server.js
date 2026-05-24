@@ -25,6 +25,9 @@ const EXCHANGE_SYNC_POLL_MS = 30_000;
 const EXCHANGE_SYNC_MIN_INTERVAL_MS = 10_000;
 const EXCHANGE_SYNC_STALE_MS = 90_000;
 const EXCHANGE_SAFETY_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+const EXCHANGE_ORDER_SETTLE_SYNC_DELAY_MS = 5_000;
+const EXCHANGE_PROTECTION_GRACE_MS = 20_000;
+const EXCHANGE_ORPHAN_GRACE_MS = 20_000;
 const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
 const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 5 * 60 * 1000;
@@ -61,10 +64,8 @@ const futuresTrader = new FuturesTrader({
     pnlSourcesCache = null;
     recordTradeEvent(event);
     notifyTradeCriticalEvent(event);
-    syncExchangePositions({ reason: event.status || 'trade' }).catch((error) => {
-      pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
-      syncPriceSubscriptions();
-    });
+    markExchangeSafetyGrace(event);
+    scheduleExchangeSyncForTrade(event);
     broadcast('state', state);
   }
 });
@@ -81,6 +82,8 @@ let lastExchangeSyncAt = 0;
 let lastExchangeSyncReason = '';
 const pendingExchangeClosures = new Map();
 const exchangeSafetyAlerts = new Map();
+const liveProtectionGraceUntil = new Map();
+const liveOrphanGraceUntil = new Map();
 
 const state = {
   browserOpen: false,
@@ -1045,6 +1048,90 @@ async function syncExchangePositions({ reason = 'poll' } = {}) {
   }
 }
 
+function scheduleExchangeSyncForTrade(event = {}) {
+  const reason = event.status || 'trade';
+  const runSync = () => {
+    syncExchangePositions({ reason }).catch((error) => {
+      pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
+      syncPriceSubscriptions();
+    });
+  };
+
+  if (shouldDelayExchangeSync(event)) {
+    setTimeout(runSync, EXCHANGE_ORDER_SETTLE_SYNC_DELAY_MS).unref();
+    return;
+  }
+
+  runSync();
+}
+
+function shouldDelayExchangeSync(event = {}) {
+  const status = String(event.status || '');
+  return event.executionMode === 'live' && (
+    status === 'live_order_sent'
+    || status === 'live_close_sent'
+    || status.includes('close_all')
+  );
+}
+
+function markExchangeSafetyGrace(event = {}) {
+  if (!isLiveCriticalEvent(event)) {
+    return;
+  }
+
+  const status = String(event.status || '');
+  if (status === 'live_order_sent' && event.signal?.symbol) {
+    const key = exchangeSafetyPositionKey(event.signal.symbol, event.signal.direction);
+    liveProtectionGraceUntil.set(key, Date.now() + EXCHANGE_PROTECTION_GRACE_MS);
+  }
+
+  if (status === 'live_close_sent' || status.includes('close_all')) {
+    const positions = event.exchangeClose?.positions || [];
+    for (const position of positions) {
+      liveOrphanGraceUntil.set(
+        exchangeSafetyPositionKey(position.symbol, position.positionSide || position.direction || exchangePositionSide(position)),
+        Date.now() + EXCHANGE_ORPHAN_GRACE_MS
+      );
+    }
+    if (!positions.length && event.signal?.symbol) {
+      liveOrphanGraceUntil.set(exchangeSafetyPositionKey(event.signal.symbol, '*'), Date.now() + EXCHANGE_ORPHAN_GRACE_MS);
+    }
+  }
+}
+
+function exchangeSafetyPositionKey(symbol, direction = '*') {
+  return `${normalizePositionSymbol(symbol)}:${String(direction || '*').toUpperCase()}`;
+}
+
+function exchangePositionSide(position = {}) {
+  const explicit = String(position.positionSide || '').toUpperCase();
+  if (explicit === 'LONG' || explicit === 'SHORT') {
+    return explicit;
+  }
+  const amount = Number(position.positionAmt || position.quantity || 0);
+  return amount < 0 ? 'SHORT' : 'LONG';
+}
+
+function graceActive(map, key) {
+  const until = Number(map.get(key) || 0);
+  if (until <= Date.now()) {
+    if (until) {
+      map.delete(key);
+    }
+    return false;
+  }
+  return true;
+}
+
+function liveProtectionGraceActive(position = {}) {
+  return graceActive(liveProtectionGraceUntil, exchangeSafetyPositionKey(position.symbol, position.direction));
+}
+
+function liveOrphanGraceActive(order = {}) {
+  return graceActive(liveOrphanGraceUntil, exchangeSafetyPositionKey(order.symbol, order.positionSide))
+    || graceActive(liveOrphanGraceUntil, exchangeSafetyPositionKey(order.symbol, '*'));
+}
+
 function detectClosedExchangePositions(previous, next) {
   const openKeys = new Set(next.map(exchangePositionIdentityKey));
   return previous.filter((position) => !openKeys.has(exchangePositionIdentityKey(position)));
@@ -1428,10 +1515,11 @@ async function evaluateExchangeSafety(positions = exchangePositionsCache, reason
 }
 
 async function alertMissingLiveStops(missing, reason) {
-  if (!missing.length) {
+  const actionable = missing.filter((position) => !liveProtectionGraceActive(position));
+  if (!actionable.length) {
     return;
   }
-  const key = `missing-live-sl:${missing.map((position) => `${position.symbol}:${position.direction}`).sort().join('|')}`;
+  const key = `missing-live-sl:${actionable.map((position) => `${position.symbol}:${position.direction}`).sort().join('|')}`;
   const now = Date.now();
   if (now - Number(exchangeSafetyAlerts.get(key) || 0) < EXCHANGE_SAFETY_ALERT_COOLDOWN_MS) {
     return;
@@ -1439,16 +1527,16 @@ async function alertMissingLiveStops(missing, reason) {
   exchangeSafetyAlerts.set(key, now);
 
   const details = [
-    `${missing.length} posicion(es) reales sin SL confirmado.`,
+    `${actionable.length} posicion(es) reales sin SL confirmado.`,
     `Sync: ${reason}`,
-    ...missing.map((position) => (
+    ...actionable.map((position) => (
       `${position.symbol} ${position.direction || ''} entrada ${position.entryPrice || '-'} actual ${position.currentPrice || '-'}`
     ))
   ].join('\n');
 
   pushLog({
     level: 'warn',
-    message: `BingX real sin SL confirmado: ${missing.map((position) => position.symbol).join(', ')}.`,
+    message: `BingX real sin SL confirmado: ${actionable.map((position) => position.symbol).join(', ')}.`,
     at: new Date().toISOString()
   });
 
@@ -1461,23 +1549,24 @@ async function alertMissingLiveStops(missing, reason) {
 }
 
 async function alertOrphanLiveOrders(orphanOrders, reason) {
-  if (!orphanOrders.length) {
+  const actionable = orphanOrders.filter((order) => !liveOrphanGraceActive(order));
+  if (!actionable.length) {
     return;
   }
-  const key = `orphan-live-orders:${orphanOrders.map((order) => `${order.symbol}:${order.orderId || order.clientOrderId}`).sort().join('|')}`;
+  const key = `orphan-live-orders:${actionable.map((order) => `${order.symbol}:${order.orderId || order.clientOrderId}`).sort().join('|')}`;
   const now = Date.now();
   if (now - Number(exchangeSafetyAlerts.get(key) || 0) < EXCHANGE_SAFETY_ALERT_COOLDOWN_MS) {
     return;
   }
   exchangeSafetyAlerts.set(key, now);
   const details = [
-    `${orphanOrders.length} orden(es) protectoras reales sin posicion asociada.`,
+    `${actionable.length} orden(es) protectoras reales sin posicion asociada.`,
     `Sync: ${reason}`,
-    ...orphanOrders.map((order) => `${order.symbol} ${order.type || ''} ${order.stopPrice || ''}`.trim())
+    ...actionable.map((order) => `${order.symbol} ${order.type || ''} ${order.stopPrice || ''}`.trim())
   ].join('\n');
   pushLog({
     level: 'warn',
-    message: `BingX real con ordenes huerfanas: ${orphanOrders.map((order) => order.symbol).join(', ')}.`,
+    message: `BingX real con ordenes huerfanas: ${actionable.map((order) => order.symbol).join(', ')}.`,
     at: new Date().toISOString()
   });
   await telegramNotifier.sendAlert('Descuadre BingX real', details).catch((error) => {
