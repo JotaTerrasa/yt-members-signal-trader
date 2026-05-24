@@ -19,6 +19,8 @@ const baseSymbolAliases = new Map([
 const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const takeProfitLineStartPattern = /^\W*(TPS?|TAKE\s*PROFITS?|TAKE\s*PROFIT|OBJETIVOS?|TARGETS?)\b/i;
+const listPrefixPattern = /^\W*(?:(?:PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SEPTIMO|OCTAVO|NOVENO|DECIMO|FIRST|SECOND|THIRD|\d+)\s*[:.)-]\s*)/i;
+const symbolPricePattern = /\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:(?:A|AL|EN|TO|AT|@|=|->)\s*)?(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi;
 const stopLossLineStartPattern = /^\W*(?:MODIFICACI[OÓ]N|MODIFICAR|MODIF|CAMBIO|CAMBIAR|AJUSTE|AJUSTAR)?\s*(?:SL|STOP|STOPLOSS|STOP\s+LOSS|STOPS)\b/i;
 
 export function parseFuturesSignal(text) {
@@ -175,7 +177,7 @@ function parseCloseTargetsFromLine(line) {
     return [];
   }
 
-  const normalized = normalize(text);
+  const normalized = stripListPrefix(text);
   const headerLine = isCloseHeaderLine(normalized);
   const body = headerLine
     ? normalized
@@ -232,7 +234,7 @@ function parseTakeProfitSignals(raw) {
 }
 
 function isTakeProfitHeaderLine(line) {
-  return takeProfitLineStartPattern.test(normalize(line).trim());
+  return takeProfitLineStartPattern.test(stripListPrefix(line));
 }
 
 function isTakeProfitBoundaryLine(line, offset) {
@@ -249,7 +251,7 @@ function parseTakeProfitTargetsFromLine(line) {
     return [];
   }
 
-  const normalized = normalize(text);
+  const normalized = stripListPrefix(text);
   const headerLine = isTakeProfitHeaderLine(normalized);
   const body = headerLine
     ? normalized.replace(takeProfitLineStartPattern, ' ')
@@ -259,7 +261,7 @@ function parseTakeProfitTargetsFromLine(line) {
     return [];
   }
 
-  const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi)];
+  const matches = [...body.matchAll(symbolPricePattern)];
   return matches
     .map((match) => ({
       baseSymbol: normalizeBaseSymbol(match[1]),
@@ -298,7 +300,7 @@ function parseStopLossModificationSignals(raw) {
 }
 
 function isStopLossModificationHeaderLine(line) {
-  const normalized = normalize(line).trim();
+  const normalized = stripListPrefix(line);
   if (!stopLossLineStartPattern.test(normalized)) {
     return false;
   }
@@ -324,7 +326,7 @@ function parseStopLossTargetsFromLine(line) {
     return [];
   }
 
-  const normalized = normalize(text);
+  const normalized = stripListPrefix(text);
   const headerLine = isStopLossModificationHeaderLine(normalized);
   const body = headerLine
     ? normalized.replace(stopLossLineStartPattern, ' ')
@@ -334,7 +336,7 @@ function parseStopLossTargetsFromLine(line) {
     return [];
   }
 
-  const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi)];
+  const matches = [...body.matchAll(symbolPricePattern)];
   return matches
     .map((match) => ({
       baseSymbol: normalizeBaseSymbol(match[1]),
@@ -710,5 +712,9 @@ function normalize(value) {
   return String(value || '')
     .toUpperCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, ' ');
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function stripListPrefix(value) {
+  return normalize(value).trim().replace(listPrefixPattern, '').trim();
 }

@@ -85,9 +85,12 @@ BTC 78350
 ETH 2165
 SOL 88.6
 SUI 1.159
+Segundo: take profits
+BTC 78711
+ETH 2182
 ```
 
-Cuando aparece una seccion `TPS`, cada linea `SIMBOLO PRECIO` se convierte en `SET_TAKE_PROFIT`.
+Cuando aparece una seccion `TPS` o `take profits`, cada linea `SIMBOLO PRECIO` se convierte en `SET_TAKE_PROFIT`. El encabezado puede venir precedido por `Primero:`, `Segundo:`, `1.` o formatos similares.
 
 ## Modificacion de stop loss
 
@@ -104,6 +107,7 @@ Tambien detecta:
 ```text
 SL ETH 2115
 STOP LOSS SOL 86.5
+Primero: modificacion sl btc a 76200
 ```
 
 Resultado: `SET_STOP_LOSS`.
