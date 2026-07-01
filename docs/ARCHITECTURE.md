@@ -2,25 +2,94 @@
 
 Futures Magician es un servidor Node.js local con frontend estatico, scraping por Playwright, persistencia en JSON local y conexiones opcionales a Telegram y BingX.
 
-## Flujo principal
+## Vista de contenedores
+
+```mermaid
+flowchart TB
+  user["Operador local"] --> browser["Browser UI<br/>http://localhost:5178"]
+  browser <--> server["Node HTTP API + SSE<br/>src/server.js"]
+
+  subgraph local["Maquina local"]
+    server --> static["public/index.html<br/>public/app.js<br/>public/styles.css"]
+    server --> data[".data/*.json<br/>config, posts, eventos,<br/>paper, backups"]
+    server --> profile[".yt-profile/<br/>sesiones Chromium"]
+  end
+
+  subgraph ingestion["Ingestion"]
+    server --> scraper["YouTubePostsScraper<br/>src/youtubeScraper.js"]
+    scraper <--> youtube["YouTube members posts"]
+    scraper <--> telegramWeb["Telegram Web"]
+    scraper --> store["PostStore<br/>src/store.js"]
+  end
+
+  subgraph trading["Trading y riesgo"]
+    server --> trader["FuturesTrader<br/>src/futuresTrader.js"]
+    trader --> parser["futuresSignalParser<br/>texto -> senal"]
+    trader --> bingxClient["BingXClient<br/>REST firmado"]
+    trader --> paper["PaperTradeStore<br/>test/paper local"]
+    server --> priceWs["BingXPriceWebSocket<br/>precios"]
+  end
+
+  bingxClient <--> bingx["BingX Futures<br/>demo VST / live USDT"]
+  priceWs <--> bingx
+
+  subgraph reference["Referencia y estudio"]
+    server --> ledger["referenceLedger<br/>Google Sheet"]
+    ledger <--> sheet["Google Sheets gviz"]
+    server --> study["strategyStudy<br/>scripts/strategyStudy.js"]
+    study --> reports["docs/strategy-reports"]
+  end
+
+  server --> telegramBot["TelegramNotifier<br/>alertas bot"]
+  telegramBot --> telegram["Telegram Bot API"]
+```
+
+## Secuencia de una senal
+
+```mermaid
+sequenceDiagram
+  participant Source as YouTube / Telegram Web
+  participant Scraper as youtubeScraper.js
+  participant Store as PostStore
+  participant Server as server.js
+  participant Parser as futuresSignalParser.js
+  participant Trader as futuresTrader.js
+  participant BingX as BingX REST
+  participant UI as Frontend/SSE
+  participant Bot as Telegram Bot
+
+  Source->>Scraper: Publicacion o mensaje visible
+  Scraper->>Store: upsert post/mensaje
+  Scraper->>Server: evento posts
+  Server->>Parser: parsear texto
+  Parser-->>Server: senales normalizadas
+  Server->>Trader: processPosts
+  Trader->>Trader: validar modo, SL, duplicado, riesgo y antiguedad
+  alt modo test
+    Trader->>Store: paper/local event
+  else demo/live/dual
+    Trader->>BingX: order / close / TP / SL
+    BingX-->>Trader: respuesta exchange
+  end
+  Trader-->>Server: trade event
+  Server->>UI: SSE state/trade/log
+  Server->>Bot: alerta si procede
+```
+
+## Modelo de datos local
 
 ```mermaid
 flowchart LR
-  UI["Frontend localhost"] --> API["src/server.js"]
-  API --> Scraper["YouTubePostsScraper"]
-  Scraper --> YouTube["YouTube posts"]
-  Scraper --> TelegramWeb["Telegram Web"]
-  Scraper --> Store["PostStore .data/posts.json"]
-  API --> TelegramBot["TelegramNotifier"]
-  API --> Trader["FuturesTrader"]
-  Trader --> Parser["futuresSignalParser"]
-  Trader --> BingX["BingX REST"]
-  Trader --> Paper["PaperTradeStore"]
-  API --> Ledger["referenceLedger"]
-  Ledger --> Sheet["Google Sheet portfolio"]
-  API --> WS["BingXPriceWebSocket"]
-  WS --> Paper
+  config[".data/config.json<br/>configuracion y secretos"] --> server["server.js"]
+  posts[".data/posts.json<br/>posts/mensajes"] --> server
+  events[".data/trade-events.json<br/>eventos auditables"] --> server
+  paper[".data/paper-trades.json<br/>paper/test"] --> server
+  study[".data/strategy-study/*.json/md<br/>informe runtime"] --> server
+  backups[".data/backups/*.json<br/>backup redacted"] --> server
+  profile[".yt-profile/<br/>sesiones web"] --> scraper["youtubeScraper.js"]
 ```
+
+Regla de seguridad: `.data/` y `.yt-profile/` son runtime local y no forman parte del repositorio.
 
 ## Componentes
 

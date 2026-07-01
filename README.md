@@ -20,6 +20,7 @@ La aplicacion esta pensada para ejecutarse en tu propia maquina. Las sesiones we
 - [Endpoints utiles](#endpoints-utiles)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Datos locales](#datos-locales)
+- [Guia para Codex](#guia-para-codex)
 - [Troubleshooting](#troubleshooting)
 - [Documentacion ampliada](#documentacion-ampliada)
 
@@ -150,6 +151,13 @@ Arranca la app:
 pm2 start npm --name yt-members-signal-trader -- run dev
 pm2 save
 pm2 status yt-members-signal-trader
+```
+
+En Windows, si PM2 interpreta mal los argumentos de `npm`, arranca el servidor directamente:
+
+```powershell
+pm2 start src/server.js --name yt-members-signal-trader --cwd "C:\ruta\yt-members-signal-trader"
+pm2 save
 ```
 
 Ver logs:
@@ -419,6 +427,21 @@ Contenido importante:
 
 No borres `.yt-profile/` salvo que quieras reiniciar sesiones web.
 
+## Guia para Codex
+
+El repositorio incluye [AGENTS.md](AGENTS.md), que es la guia operativa para Codex y otros agentes de codigo.
+
+Resume:
+
+- limites de seguridad para no tocar trading live sin confirmacion;
+- archivos que nunca deben subirse;
+- comandos de validacion;
+- mapa de modulos;
+- reglas para cambios de parser, BingX, UI y documentacion;
+- checklist antes de hacer commit o push.
+
+Si trabajas con un agente, empieza por ese archivo antes de pedir cambios sobre senales, ejecucion, riesgo o PM2.
+
 ## Troubleshooting
 
 ### La app no abre
@@ -491,6 +514,7 @@ curl http://localhost:5178/api/health
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Seguridad](docs/SECURITY.md)
 - [Estudio estrategico](docs/STRATEGY_STUDY.md)
+- [Guia para agentes Codex](AGENTS.md)
 
 ## Aviso
 

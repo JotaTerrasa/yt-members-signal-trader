@@ -17,6 +17,13 @@ pm2 start npm --name yt-members-signal-trader -- run dev
 pm2 save
 ```
 
+Alternativa directa en Windows si PM2 no pasa bien `npm run dev`:
+
+```powershell
+pm2 start src/server.js --name yt-members-signal-trader --cwd "C:\ruta\yt-members-signal-trader"
+pm2 save
+```
+
 URL local:
 
 ```text
@@ -40,7 +47,7 @@ YouTube:
 Telegram Web:
 
 1. Activa `Scrapear canal`.
-2. Guarda la URL `https://web.telegram.org/k/#-1323595523` o la que corresponda.
+2. Guarda la URL `https://web.telegram.org/k/#-XXXXXXXXXX` o la que corresponda.
 3. Pulsa `Abrir canal`.
 4. Inicia sesion en Telegram Web si hace falta.
 5. Deja el canal abierto en Chromium.

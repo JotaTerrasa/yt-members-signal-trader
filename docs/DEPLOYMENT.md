@@ -75,7 +75,7 @@ Ejemplo de configuracion:
 
 ```text
 YouTube URL: https://www.youtube.com/@tu-canal/posts
-Telegram Web URL: https://web.telegram.org/k/#-1323595523
+Telegram Web URL: https://web.telegram.org/k/#-XXXXXXXXXX
 Monitor: live cada 30 segundos
 BingX mode: dual, Demo VST + live real
 VST base: 1000 VST
@@ -109,6 +109,13 @@ Arranca:
 
 ```bash
 pm2 start npm --name yt-members-signal-trader -- run dev
+pm2 save
+```
+
+En Windows, si PM2 interpreta mal los argumentos de `npm`, usa el arranque directo:
+
+```powershell
+pm2 start src/server.js --name yt-members-signal-trader --cwd "C:\ruta\yt-members-signal-trader"
 pm2 save
 ```
 
