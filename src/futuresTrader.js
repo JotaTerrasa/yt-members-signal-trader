@@ -91,10 +91,15 @@ export class FuturesTrader {
     const client = this.client(config);
     const ranges = buildMonthRanges(months);
     const records = [];
+    const resetAt = timestampMs(pnlResetAtForMode(config));
 
     for (const range of ranges) {
+      const startTime = resetAt ? Math.max(range.startTime, resetAt) : range.startTime;
+      if (startTime > range.endTime) {
+        continue;
+      }
       const response = await client.getIncome({
-        startTime: range.startTime,
+        startTime,
         endTime: range.endTime,
         limit: 1000
       });
@@ -103,6 +108,9 @@ export class FuturesTrader {
     }
 
     const summary = buildPnlSummary(records, ranges);
+    if (resetAt) {
+      summary.resetAt = new Date(resetAt).toISOString();
+    }
     if (includePaper && this.paperStore) {
       const marketClient = this.marketClient(config);
       const positions = await this.paperStore.markToMarket((symbol) => this.fetchMarketPrice(marketClient, symbol));
@@ -1768,6 +1776,21 @@ function timestampIso(values) {
     return null;
   }
   return new Date(timestamp).toISOString();
+}
+
+function timestampMs(value) {
+  const timestamp = Date.parse(value || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function pnlResetAtForMode(config = {}) {
+  if (config.mode === 'demo') {
+    return config.vstPnlResetAt;
+  }
+  if (config.mode === 'live') {
+    return config.livePnlResetAt;
+  }
+  return null;
 }
 
 function positiveNumber(value, fallback) {

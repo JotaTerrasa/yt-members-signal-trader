@@ -212,7 +212,14 @@ export class YouTubePostsScraper extends EventEmitter {
     await this.dismissConsent(page);
     await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
 
-    const postCount = await page.locator(POST_SELECTORS).count().catch(() => 0);
+    let postCount = await page.locator(POST_SELECTORS).count().catch(() => 0);
+    if (postCount === 0) {
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await this.dismissConsent(page);
+      await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+      postCount = await page.locator(POST_SELECTORS).count().catch(() => 0);
+    }
+
     if (postCount === 0) {
       this.log('No se detectaron posts aun. Si ves una pantalla de login, inicia sesion en Chromium y vuelve a iniciar el scrapeo.', 'warn');
     }

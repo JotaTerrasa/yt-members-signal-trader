@@ -9,6 +9,7 @@ const elements = {
   maxScrolls: document.querySelector('#max-scrolls'),
   statusPill: document.querySelector('#status-pill'),
   statusText: document.querySelector('#status-text'),
+  restartBackend: document.querySelector('#restart-backend'),
   metricTotal: document.querySelector('#metric-total'),
   metricVisible: document.querySelector('#metric-visible'),
   metricLast: document.querySelector('#metric-last'),
@@ -22,6 +23,8 @@ const elements = {
   emptyPosts: document.querySelector('#empty-posts'),
   logsList: document.querySelector('#logs-list'),
   refreshPnl: document.querySelector('#refresh-pnl'),
+  monthReset: document.querySelector('#month-reset'),
+  monthResetStatus: document.querySelector('#month-reset-status'),
   pnlStatus: document.querySelector('#pnl-status'),
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
   performanceSourceGrid: document.querySelector('#performance-source-grid'),
@@ -250,6 +253,28 @@ function bindEvents() {
     });
   });
 
+  elements.restartBackend.addEventListener('click', async () => {
+    const confirmed = confirm('Reiniciar backend ahora? PM2 lo levantara de nuevo. No toca ordenes ni configuracion.');
+    if (!confirmed) {
+      return;
+    }
+
+    await runAction(async () => {
+      elements.restartBackend.disabled = true;
+      elements.statusText.textContent = 'Reiniciando backend...';
+      elements.statusPill.classList.remove('running');
+      try {
+        await postJson('/api/admin/restart', { confirm: 'REINICIAR_BACKEND' });
+      } catch (error) {
+        if (!/fetch|network|load failed|failed to fetch/i.test(error.message)) {
+          throw error;
+        }
+      } finally {
+        setTimeout(() => window.location.reload(), 4500);
+      }
+    });
+  });
+
   elements.clearPosts.addEventListener('click', async () => {
     if (!confirm('Vaciar el archivo local de publicaciones?')) {
       return;
@@ -275,6 +300,24 @@ function bindEvents() {
   elements.refreshPnl.addEventListener('click', async () => {
     await runAction(async () => {
       await loadPnl();
+    });
+  });
+  elements.monthReset.addEventListener('click', async () => {
+    await runAction(async () => {
+      const confirmed = confirm('Resetear el mes de rendimiento VST y real desde este momento? No toca ordenes abiertas ni la logica de senales.');
+      if (!confirmed) {
+        return;
+      }
+      elements.monthReset.disabled = true;
+      elements.monthResetStatus.textContent = 'Reseteando mes...';
+      try {
+        const response = await postJson('/api/bingx/month-reset', {});
+        appState.bingx = response.bingx;
+        renderBingx(response.bingx, 'Mes reseteado');
+        await loadPnl();
+      } finally {
+        elements.monthReset.disabled = false;
+      }
     });
   });
   elements.sheetSimCapital.addEventListener('input', () => {
@@ -899,6 +942,8 @@ function renderPnl() {
   const cooldownText = pnlCooldownText();
 
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
+  elements.monthReset.disabled = appState.pnlLoading;
+  elements.monthResetStatus.textContent = monthResetStatusText(appState.bingx);
   renderPnlSourceGrid(sources, selectedSource.key);
   const performanceSource = selectedPerformanceSource(sources);
   renderPerformanceSourceGrid(sources, performanceSource.key);
@@ -981,8 +1026,15 @@ function pnlSourceCards(reference = currentReferenceLedger()) {
     modeLabel: 'Live real',
     asset: 'USDT'
   });
+  const vstPositions = positionsForPnlSource('vst', reference);
+  const vst = exchangeSourceWithPositions(appState.pnlSources?.sources?.vst, vstPositions, {
+    key: 'vst',
+    label: 'Futuros VST',
+    modeLabel: 'Demo VST',
+    asset: 'VST'
+  });
   const sheet = sheetPnlSource(reference);
-  return [live, sheet];
+  return [live, vst, sheet];
 }
 
 function sheetPnlSource(reference = currentReferenceLedger()) {
@@ -1112,7 +1164,7 @@ function renderPnlSourceGrid(sources, selectedKey) {
   elements.pnlSourceGrid.innerHTML = sources.map((source) => {
     const lines = sourceSecondaryLines(source);
     return `
-      <button class="pnl-source-card ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
+      <button class="pnl-source-card source-${escapeAttribute(source.key)} ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
         <span>${escapeHtml(source.label)}</span>
         <strong class="${sourcePrimaryClass(source)}">${escapeHtml(formatSourceMoney(sourcePrimaryValue(source), source))}</strong>
         <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(sourcePrimaryLabel(source))}</small>
@@ -1516,6 +1568,16 @@ function sourceMonthlyRoiClass(source = {}) {
   return amountClass(sourceMonthlyRoi(source));
 }
 
+function monthResetStatusText(bingx = {}) {
+  if (!bingx?.vstPnlResetAt && !bingx?.livePnlResetAt) {
+    return 'Sin reset mensual';
+  }
+  const month = bingx.monthlyResetMonth ? formatMonth(bingx.monthlyResetMonth) : 'mes actual';
+  const vst = bingx.vstPnlResetAt ? formatDateTime(bingx.vstPnlResetAt) : 'sin corte';
+  const live = bingx.livePnlResetAt ? formatDateTime(bingx.livePnlResetAt) : 'sin corte';
+  return `${month}: VST ${vst} - Real ${live}`;
+}
+
 function renderSheetCapitalSimulator(source = {}, roi = sourceMonthlyRoi(source)) {
   if (!elements.sheetSimPanel || !elements.sheetSimCapital) {
     return;
@@ -1594,7 +1656,7 @@ function sourcePrimaryValue(source) {
 
 function sourcePrimaryLabel(source) {
   if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
-    return 'Cuenta VST total';
+    return 'Equity demo VST';
   }
   return source.key === 'live' ? 'Resultado real mes' : 'Resultado mes';
 }
@@ -1607,14 +1669,17 @@ function sourcePrimaryClass(source) {
 
 function sourceHeroDetail(source) {
   if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
-    return 'Saldo total de la cuenta demo VST';
+    return `${formatSourceMoney(source.total, source)} resultado demo mes`;
   }
   return `${formatSourceMoney(source.realized, source)} realizado · ${formatSourceMoney(source.floating, source)} flotante`;
 }
 
 function sourceSecondaryLines(source) {
   if (source.key === 'vst' && source.balance) {
-    return [];
+    return [
+      `${formatSourceMoney(source.total, source)} resultado demo mes`,
+      `${formatOptionalMoney(source.balance.availableMargin, source.asset || 'VST')} margen libre`
+    ];
   }
   return [
     `${formatSourceMoney(source.realized, source)} realizado`,
@@ -1642,6 +1707,9 @@ function sourceNoteText(source) {
   }
   if (source.key === 'live') {
     return 'Futuros reales muestra solo USDT: cuenta real, posiciones reales, fees, funding y senales ejecutadas en real.';
+  }
+  if (source.key === 'vst') {
+    return 'Futuros VST muestra BingX Demo por separado: cuenta demo, posiciones demo y resultado mensual en VST.';
   }
   return 'Cada tarjeta separa una fuente de PnL para evitar mezclar referencia y real.';
 }
@@ -2948,12 +3016,33 @@ function renderPnlRow(row, source = null) {
 }
 
 function renderOpenPositions() {
-  const openPositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
-  elements.openPositionsList.classList.remove('position-grid-split');
-  elements.openPositionsStatus.textContent = `${openPositions.length} reales`;
-  elements.openPositionsEmpty.classList.toggle('hidden', openPositions.length > 0);
+  const realPositions = positionsForPnlSource('live').filter((position) => position.status === 'open');
+  const demoPositions = positionsForPnlSource('vst').filter((position) => position.status === 'open');
+  const showDemoColumn = appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'dual' || demoPositions.length > 0;
+  const total = realPositions.length + demoPositions.length;
+
+  elements.openPositionsList.classList.toggle('position-grid-split', showDemoColumn);
+  elements.openPositionsStatus.textContent = showDemoColumn
+    ? `${demoPositions.length} demo / ${realPositions.length} reales`
+    : `${realPositions.length} reales`;
+  elements.openPositionsEmpty.classList.toggle('hidden', showDemoColumn || total > 0);
   elements.openPositionsEmpty.textContent = 'Sin posiciones reales abiertas en USDT.';
-  elements.openPositionsList.innerHTML = openPositions.map(renderOpenPositionCard).join('');
+  elements.openPositionsList.innerHTML = showDemoColumn
+    ? [
+      renderPositionColumn({
+        key: 'demo',
+        title: 'Demo VST',
+        subtitle: `${demoPositions.length} abiertas`,
+        positions: demoPositions
+      }),
+      renderPositionColumn({
+        key: 'live',
+        title: 'Live real',
+        subtitle: `${realPositions.length} abiertas`,
+        positions: realPositions
+      })
+    ].join('')
+    : realPositions.map(renderOpenPositionCard).join('');
 }
 
 function renderPositionColumn({ key, title, subtitle, positions }) {
@@ -3099,25 +3188,45 @@ function positionsForPnlSource(key, reference = currentReferenceLedger()) {
     const liveCurrent = (appState.bingx?.mode === 'demo' || appState.bingx?.mode === 'dual')
       ? (appState.exchangePositions || []).filter((position) => position.source === 'demo')
       : [];
-    return uniquePositionsById(
+    return positionsAfterSourceReset(uniquePositionsById(
       liveCurrent,
       appState.pnlSources?.positions?.vst || [],
       closedExchangePositionsForSource('demo')
-    );
+    ), key);
   }
 
   if (key === 'live') {
     const liveCurrent = (appState.bingx?.mode === 'live' || appState.bingx?.mode === 'dual')
       ? (appState.exchangePositions || []).filter((position) => position.source === 'live')
       : [];
-    return uniquePositionsById(
+    return positionsAfterSourceReset(uniquePositionsById(
       liveCurrent,
       appState.pnlSources?.positions?.live || [],
       closedExchangePositionsForSource('live')
-    );
+    ), key);
   }
 
   return exchangePositionMode() ? openExchangePositions() : openPaperPositions();
+}
+
+function positionsAfterSourceReset(positions = [], key = '') {
+  const resetValue = key === 'vst'
+    ? appState.bingx?.vstPnlResetAt
+    : key === 'live'
+      ? appState.bingx?.livePnlResetAt
+      : null;
+  const resetAt = Date.parse(resetValue || 0);
+  if (!Number.isFinite(resetAt) || resetAt <= 0) {
+    return positions;
+  }
+
+  return positions.filter((position) => {
+    if (position.status === 'open') {
+      return true;
+    }
+    const time = Date.parse(position.closedAt || position.openedAt || 0);
+    return !Number.isFinite(time) || time >= resetAt;
+  });
 }
 
 function uniquePositionsById(...collections) {

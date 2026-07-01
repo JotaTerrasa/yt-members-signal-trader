@@ -31,11 +31,13 @@ const EXCHANGE_PROTECTION_GRACE_MS = 20_000;
 const EXCHANGE_ORPHAN_GRACE_MS = 20_000;
 const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
 const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
-const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 5 * 60 * 1000;
+const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 15 * 60 * 1000;
+const MONTHLY_RESET_CHECK_MS = 60 * 60 * 1000;
 const PNL_CACHE_TTL_MS = 45_000;
 const PNL_BACKOFF_DEFAULT_MS = 5 * 60 * 1000;
 const PNL_BACKOFF_MAX_MS = 15 * 60 * 1000;
 const REDACTED_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const BACKEND_RESTART_CONFIRMATION = 'REINICIAR_BACKEND';
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -96,6 +98,7 @@ let exchangeOpenOrdersCache = [];
 let exchangeSyncInFlight = false;
 let lastExchangeSyncAt = 0;
 let lastExchangeSyncReason = '';
+let backendRestartScheduled = false;
 const pendingExchangeClosures = new Map();
 const exchangeSafetyAlerts = new Map();
 const liveProtectionGraceUntil = new Map();
@@ -402,6 +405,20 @@ const server = createServer(async (request, response) => {
       return sendJson(response, { ok: true, health: buildHealth() });
     }
 
+    if (requestUrl.pathname === '/api/admin/restart' && request.method === 'POST') {
+      const body = await readJson(request);
+      if (body.confirm !== BACKEND_RESTART_CONFIRMATION) {
+        return sendJson(response, { error: `Confirma ${BACKEND_RESTART_CONFIRMATION} para reiniciar el backend.` }, 400);
+      }
+      scheduleBackendRestart('ui');
+      return sendJson(response, {
+        ok: true,
+        restarting: true,
+        managedByPm2: Boolean(process.env.pm_id || process.env.PM2_HOME),
+        message: 'Backend reiniciandose.'
+      });
+    }
+
     if (requestUrl.pathname === '/api/posts' && request.method === 'GET') {
       return sendJson(response, { posts: store.list(), stats: store.stats() });
     }
@@ -528,8 +545,16 @@ const server = createServer(async (request, response) => {
       const bingx = await configStore.updateBingX(body);
       pnlCache = null;
       pnlSourcesCache = null;
+      pnlLastGood = null;
+      pnlSourcesLastGood = null;
+      clearPnlBackoff();
       broadcast('bingx', { bingx });
       notifyBingxPauseChange(previous, bingx);
+      return sendJson(response, { ok: true, bingx });
+    }
+
+    if (requestUrl.pathname === '/api/bingx/month-reset' && request.method === 'POST') {
+      const bingx = await resetMonthlyAccounting({ reason: 'manual' });
       return sendJson(response, { ok: true, bingx });
     }
 
@@ -597,7 +622,9 @@ const server = createServer(async (request, response) => {
         return sendJson(response, { error: 'No hay publicaciones con senales para reejecutar.' }, 404);
       }
 
-      const results = await futuresTrader.processPosts([post], { phase: 'manual_replay' });
+      const results = await futuresTrader.processPosts([post], { phase: 'manual_replay' }, {
+        duplicateGuard: duplicateOpenSignalGuard
+      });
       pnlCache = null;
       pushLog({
         level: usesLiveMode(bingx.mode) ? 'warn' : 'info',
@@ -910,6 +937,9 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`YouTube Posts Scraper disponible en http://localhost:${port}`);
+  checkAutomaticMonthlyReset({ reason: 'startup' }).catch((error) => {
+    pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
+  });
   syncExchangePositions({ reason: 'startup' }).catch((error) => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
     syncPriceSubscriptions();
@@ -931,6 +961,12 @@ setInterval(() => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
   });
 }, EXCHANGE_SYNC_POLL_MS).unref();
+
+setInterval(() => {
+  checkAutomaticMonthlyReset({ reason: 'timer' }).catch((error) => {
+    pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
+  });
+}, MONTHLY_RESET_CHECK_MS).unref();
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
@@ -1077,6 +1113,59 @@ async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
     stale: false,
     cooldownUntil: new Date(cooldownUntil).toISOString()
   };
+}
+
+async function resetMonthlyAccounting({ resetAt = new Date(), reason = 'manual' } = {}) {
+  const date = resetAt instanceof Date ? resetAt : new Date(resetAt);
+  const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+  const bingx = await configStore.resetMonthlyAccounting({
+    resetAt: safeDate,
+    month: currentMonthKeyForDate(safeDate)
+  });
+  clearPnlCaches();
+  broadcast('bingx', { bingx });
+  pushLog({
+    level: reason.startsWith('auto') ? 'warn' : 'info',
+    message: `Reset mensual aplicado (${reason}): VST ${bingx.vstPnlResetAt}, real ${bingx.livePnlResetAt}.`,
+    at: new Date().toISOString()
+  });
+  return bingx;
+}
+
+async function checkAutomaticMonthlyReset({ reason = 'timer' } = {}) {
+  const now = new Date();
+  const month = currentMonthKeyForDate(now);
+  const bingx = configStore.getBingX();
+  const vstResetMonth = monthKeyFromIso(bingx.vstPnlResetAt);
+  const liveResetMonth = monthKeyFromIso(bingx.livePnlResetAt);
+  if (bingx.monthlyResetMonth === month && vstResetMonth === month && liveResetMonth === month) {
+    return null;
+  }
+
+  return resetMonthlyAccounting({
+    resetAt: resetDateForMonthlyCatchUp({ bingx, month, now }),
+    reason: reason === 'startup' ? 'auto-startup' : 'auto'
+  });
+}
+
+function resetDateForMonthlyCatchUp({ bingx = {}, month, now = new Date() } = {}) {
+  if (bingx.monthlyResetMonth === month) {
+    const existing = [bingx.livePnlResetAt, bingx.vstPnlResetAt]
+      .map((value) => new Date(value || 0))
+      .find((date) => Number.isFinite(date.getTime()) && currentMonthKeyForDate(date) === month);
+    if (existing) {
+      return existing;
+    }
+  }
+  return monthStartDate(now);
+}
+
+function clearPnlCaches() {
+  pnlCache = null;
+  pnlSourcesCache = null;
+  pnlLastGood = null;
+  pnlSourcesLastGood = null;
+  clearPnlBackoff();
 }
 
 function pnlBackoffInfo() {
@@ -1505,6 +1594,13 @@ function markExchangeSafetyGrace(event = {}) {
       liveOrphanGraceUntil.set(exchangeSafetyPositionKey(event.signal.symbol, '*'), Date.now() + EXCHANGE_ORPHAN_GRACE_MS);
     }
   }
+}
+
+function isLiveCriticalEvent(event = {}) {
+  const status = String(event.status || '');
+  return event.executionMode === 'live'
+    || status.startsWith('live_')
+    || event.exchangePosition?.source === 'live';
 }
 
 function exchangeSafetyPositionKey(symbol, direction = '*') {
@@ -2016,11 +2112,11 @@ function notifyTradeExecutionError(event) {
 
 function notifyTradeCriticalEvent(event = {}) {
   notifyTradeExecutionError(event);
-  if (!isLiveCriticalEvent(event)) {
+  if (!isTelegramTradeEvent(event)) {
     return;
   }
 
-  const title = criticalTradeTitle(event);
+  const title = telegramTradeTitle(event);
   const details = [
     event.signal?.symbol ? `${event.signal.symbol} ${event.signal.direction || event.signal.action || ''}`.trim() : '',
     event.status ? `Estado: ${event.status}` : '',
@@ -2043,34 +2139,51 @@ function notifyTradeCriticalEvent(event = {}) {
     });
 }
 
-function isLiveCriticalEvent(event = {}) {
+function isTelegramTradeEvent(event = {}) {
   const status = String(event.status || '');
   return event.executionMode === 'live'
+    || event.executionMode === 'demo'
     || status.startsWith('live_')
-    || event.exchangePosition?.source === 'live';
+    || status.startsWith('demo_')
+    || event.exchangePosition?.source === 'live'
+    || event.exchangePosition?.source === 'demo';
 }
 
-function criticalTradeTitle(event = {}) {
+function telegramTradeTitle(event = {}) {
   const status = String(event.status || '');
+  const demo = event.executionMode === 'demo'
+    || status.startsWith('demo_')
+    || event.exchangePosition?.source === 'demo';
+  const suffix = demo ? 'VST demo' : 'real';
+
   if (status === 'live_order_sent') {
     return 'Orden real enviada';
+  }
+  if (status === 'demo_order_sent') {
+    return 'Orden VST demo enviada';
   }
   if (status === 'live_tp_sent') {
     return 'TP real colocado';
   }
+  if (status === 'demo_tp_sent') {
+    return 'TP VST demo colocado';
+  }
   if (status === 'live_sl_sent') {
     return 'SL real colocado';
   }
+  if (status === 'demo_sl_sent') {
+    return 'SL VST demo colocado';
+  }
   if (status.includes('close_all')) {
-    return 'Cierre total real';
+    return `Cierre total ${suffix}`;
   }
   if (status.includes('cancel_orders')) {
-    return 'Ordenes reales canceladas';
+    return demo ? 'Ordenes VST demo canceladas' : 'Ordenes reales canceladas';
   }
   if (status.includes('close')) {
-    return 'Cierre real enviado';
+    return `Cierre ${suffix} enviado`;
   }
-  return 'Evento critico real';
+  return demo ? 'Evento VST demo' : 'Evento critico real';
 }
 
 function notifyBingxPauseChange(previous = {}, next = {}) {
@@ -2300,6 +2413,9 @@ async function checkHealth() {
   state.health = health;
   broadcast('state', state);
   if (health.level !== 'warn') {
+    if (lastHealthAlertKey) {
+      await notifyHealthRecovered(health);
+    }
     noVisiblePostsStartedAt = 0;
     return;
   }
@@ -2349,6 +2465,31 @@ async function checkHealth() {
     })
     .catch((error) => {
       pushLog({ level: 'error', message: `Telegram health: ${error.message}`, at: new Date().toISOString() });
+    });
+}
+
+async function notifyHealthRecovered(health = {}) {
+  const previousKey = lastHealthAlertKey;
+  lastHealthAlertKey = '';
+  noVisiblePostsStartedAt = 0;
+
+  if (!previousKey) {
+    return;
+  }
+
+  const details = [
+    `El monitor vuelve a estar OK. Posts visibles: ${health.visiblePosts || 0}.`,
+    health.lastRunAt ? `Ultima lectura: ${health.lastRunAt}.` : ''
+  ].filter(Boolean).join('\n');
+
+  await telegramNotifier.sendAlert('Scraper YouTube recuperado', details)
+    .then((result) => {
+      if (result.sent) {
+        pushLog({ level: 'info', message: 'Recuperacion del scraper enviada por Telegram.', at: new Date().toISOString() });
+      }
+    })
+    .catch((error) => {
+      pushLog({ level: 'error', message: `Telegram health recovered: ${error.message}`, at: new Date().toISOString() });
     });
 }
 
@@ -2621,6 +2762,24 @@ function roundMoney(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100000000) / 100000000;
 }
 
+function scheduleBackendRestart(reason = 'manual') {
+  if (backendRestartScheduled) {
+    return;
+  }
+  backendRestartScheduled = true;
+  pushLog({
+    level: 'warn',
+    message: `Reinicio de backend solicitado (${reason}).`,
+    at: new Date().toISOString()
+  });
+  setTimeout(() => {
+    shutdown().catch((error) => {
+      console.error(`Backend restart failed: ${error.message}`);
+      process.exit(1);
+    });
+  }, 350).unref();
+}
+
 async function shutdown() {
   for (const client of clients) {
     client.end();
@@ -2642,6 +2801,18 @@ function formatSigned(value) {
 }
 
 function currentMonthKey() {
-  const date = new Date();
+  return currentMonthKeyForDate(new Date());
+}
+
+function currentMonthKeyForDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthKeyFromIso(value) {
+  const date = new Date(value || 0);
+  return Number.isFinite(date.getTime()) ? currentMonthKeyForDate(date) : '';
+}
+
+function monthStartDate(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }

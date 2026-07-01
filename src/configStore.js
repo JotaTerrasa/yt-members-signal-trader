@@ -62,7 +62,11 @@ const defaultConfig = {
     maxSignalAgeMinutes: 180,
     maxEntryDeviationPercent: 5,
     vstBaseCapital: 1000,
-    vstCapitalPercent: 15
+    vstCapitalPercent: 15,
+    vstPnlResetAt: null,
+    livePnlResetAt: null,
+    monthlyResetAt: null,
+    monthlyResetMonth: null
   }
 };
 
@@ -218,6 +222,10 @@ export class ConfigStore {
       maxEntryDeviationPercent: bingx.maxEntryDeviationPercent,
       vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
+      vstPnlResetAt: bingx.vstPnlResetAt || null,
+      livePnlResetAt: bingx.livePnlResetAt || null,
+      monthlyResetAt: bingx.monthlyResetAt || null,
+      monthlyResetMonth: bingx.monthlyResetMonth || null,
       apiKeyConfigured: Boolean(bingx.apiKey),
       apiSecretConfigured: Boolean(bingx.apiSecret),
       apiKeyPreview: tokenPreview(bingx.apiKey),
@@ -253,7 +261,15 @@ export class ConfigStore {
       maxSignalAgeMinutes: clampInteger(input.maxSignalAgeMinutes, 0, 1440, defaultConfig.bingx.maxSignalAgeMinutes),
       maxEntryDeviationPercent: clampNumber(input.maxEntryDeviationPercent, 0, 50, defaultConfig.bingx.maxEntryDeviationPercent),
       vstBaseCapital: positiveNumber(input.vstBaseCapital, defaultConfig.bingx.vstBaseCapital),
-      vstCapitalPercent: clampNumber(input.vstCapitalPercent, 1, 100, defaultConfig.bingx.vstCapitalPercent)
+      vstCapitalPercent: clampNumber(input.vstCapitalPercent, 1, 100, defaultConfig.bingx.vstCapitalPercent),
+      vstPnlResetAt: input.clearVstPnlReset
+        ? null
+        : isoDateOrCurrent(input.vstPnlResetAt, current.vstPnlResetAt || defaultConfig.bingx.vstPnlResetAt),
+      livePnlResetAt: input.clearLivePnlReset
+        ? null
+        : isoDateOrCurrent(input.livePnlResetAt, current.livePnlResetAt || defaultConfig.bingx.livePnlResetAt),
+      monthlyResetAt: current.monthlyResetAt || null,
+      monthlyResetMonth: current.monthlyResetMonth || null
     };
 
     if (input.clearApiKey) {
@@ -269,6 +285,17 @@ export class ConfigStore {
     }
 
     this.data.bingx = next;
+    await this.save();
+    return this.getBingX();
+  }
+
+  async resetMonthlyAccounting({ resetAt = new Date(), month = null } = {}) {
+    const date = resetAt instanceof Date ? resetAt : new Date(resetAt);
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    this.data.bingx.vstPnlResetAt = safeDate.toISOString();
+    this.data.bingx.livePnlResetAt = safeDate.toISOString();
+    this.data.bingx.monthlyResetAt = new Date().toISOString();
+    this.data.bingx.monthlyResetMonth = clean(month) || monthKey(safeDate);
     await this.save();
     return this.getBingX();
   }
@@ -375,4 +402,19 @@ function clampInteger(value, min, max, fallback) {
     return fallback;
   }
   return Math.min(max, Math.max(min, number));
+}
+
+function isoDateOrCurrent(value, current) {
+  if (value === null || value === '') {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return current || null;
+  }
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : current || null;
+}
+
+function monthKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }

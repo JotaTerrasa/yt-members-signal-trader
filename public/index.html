@@ -6,7 +6,7 @@
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=31">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=64" defer></script>
+    <script src="/app.js?v=65" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -21,6 +21,9 @@
           </div>
         </div>
         <div class="topbar-actions">
+          <button id="restart-backend" class="icon-button restart-backend-button" type="button" title="Reiniciar backend">
+            <i data-lucide="rotate-cw"></i>
+          </button>
           <div class="status-pill" id="status-pill">
             <span class="dot"></span>
             <span id="status-text">Inactivo</span>
@@ -437,10 +440,17 @@
                 <h2>Operativa</h2>
                 <p id="pnl-status">Leyendo BingX...</p>
               </div>
-              <button id="refresh-pnl" class="button secondary" type="button">
-                <i data-lucide="refresh-cw"></i>
-                <span>Actualizar</span>
-              </button>
+              <div class="pnl-actions">
+                <button id="month-reset" class="button secondary" type="button">
+                  <i data-lucide="rotate-ccw"></i>
+                  <span>Reset mes</span>
+                </button>
+                <button id="refresh-pnl" class="button secondary" type="button">
+                  <i data-lucide="refresh-cw"></i>
+                  <span>Actualizar</span>
+                </button>
+                <span id="month-reset-status" class="month-reset-status">Sin reset mensual</span>
+              </div>
             </div>
 
             <div id="pnl-source-grid" class="pnl-source-grid" aria-label="Fuentes de PnL"></div>
