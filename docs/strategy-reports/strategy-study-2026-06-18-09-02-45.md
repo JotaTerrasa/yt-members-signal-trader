@@ -1,56 +1,56 @@
-# Strategy Study
+# Estudio estratégico
 
-Generated: 2026-06-18T09:02:45.476Z
-Window: 2026-05-19T09:02:43.816Z to 2026-06-18T09:02:43.816Z (30 days)
+Generado: 2026-06-18T09:02:45.476Z
+Ventana: 2026-05-19T09:02:43.816Z a 2026-06-18T09:02:43.816Z (30 días)
 
-## Data Quality
+## Calidad de los datos
 
-- Order history source: bingx_order_history
-- BingX order history available: yes
-- Local fallback positions: 0
+- Fuente del histórico de órdenes: bingx_order_history
+- Histórico de órdenes de BingX disponible: sí
+- Posiciones locales de respaldo: 0
 
-## Sample
+## Muestra
 
-- Posts/messages stored: 336
-- Parsed signals: 482
-- Live orders from BingX: 284
-- Live open protective/orders now: 0
-- Reconstructed positions: 97
-- Closed positions: 97
-- Open positions: 0
-- Persisted local trade events: 596
+- Posts/mensajes guardados: 336
+- Señales parseadas: 482
+- Órdenes live de BingX: 284
+- Órdenes protectoras/live abiertas ahora: 0
+- Posiciones reconstruidas: 97
+- Posiciones cerradas: 97
+- Posiciones abiertas: 0
+- Eventos locales de trading persistidos: 596
 
-## Performance
+## Rendimiento
 
-- Net PnL closed: -212.19 USDT
-- Gross PnL closed: -140.59 USDT
-- Commission: -71.61 USDT
-- Win rate: 44.3%
-- Profit factor: 0.3876
-- Outcomes: {"SIGNAL_CLOSE":52,"SL":40,"TP":3,"LIMIT":2}
+- PnL neto cerrado: -212.19 USDT
+- PnL bruto cerrado: -140.59 USDT
+- Comisión: -71.61 USDT
+- Tasa de acierto: 44.3%
+- Factor de beneficio: 0.3876
+- Resultados: {"SIGNAL_CLOSE":52,"SL":40,"TP":3,"LIMIT":2}
 
-## Signal Shape
+## Forma de las señales
 
-- Actions: {"OPEN":285,"CLOSE":169,"SET_TAKE_PROFIT":17,"SET_STOP_LOSS":11}
-- Symbols: {"BTC-USDT":117,"ETH-USDT":134,"SOL-USDT":130,"SUI-USDT":58,"ADA-USDT":8,"BROMA-USDT":1,"SOY-USDT":1,"CRISTIANO-USDT":1,"ACABA-USDT":1,"DE-USDT":1,"DECIR-USDT":1,"ESTO-USDT":1,"EL-USDT":1,"PAPA-USDT":1,"LEON-USDT":1,"XIV-USDT":1,"SIGAN-USDT":1,"GOOD-USDT":1,"JOB-USDT":1,"DIOS-USDT":1,"BCH-USDT":2,"LTC-USDT":2,"APE-USDT":1,"DEL-USDT":2,"SNM-USDT":1,"RIF-USDT":1,"CHZ-USDT":1,"ROSE-USDT":1,"CON-USDT":2,"EN-USDT":6,"TITAL-USDT":1}
-- Average leverage: 24.2105
-- Average stop distance: 0.933%
-- Average reward distance: 0.078%
+- Acciones: {"OPEN":285,"CLOSE":169,"SET_TAKE_PROFIT":17,"SET_STOP_LOSS":11}
+- Símbolos: {"BTC-USDT":117,"ETH-USDT":134,"SOL-USDT":130,"SUI-USDT":58,"ADA-USDT":8,"BROMA-USDT":1,"SOY-USDT":1,"CRISTIANO-USDT":1,"ACABA-USDT":1,"DE-USDT":1,"DECIR-USDT":1,"ESTO-USDT":1,"EL-USDT":1,"PAPA-USDT":1,"LEON-USDT":1,"XIV-USDT":1,"SIGAN-USDT":1,"GOOD-USDT":1,"JOB-USDT":1,"DIOS-USDT":1,"BCH-USDT":2,"LTC-USDT":2,"APE-USDT":1,"DEL-USDT":2,"SNM-USDT":1,"RIF-USDT":1,"CHZ-USDT":1,"ROSE-USDT":1,"CON-USDT":2,"EN-USDT":6,"TITAL-USDT":1}
+- Apalancamiento medio: 24.2105
+- Distancia media al stop: 0.933%
+- Distancia media al objetivo: 0.078%
 
-## Playbook Hypotheses
+## Hipótesis operativas
 
-- Build positions in packs, usually multiple tickers with the same direction and leverage.
-- Stops are mandatory and often exchange-specific.
-- Management messages can modify TP/SL after entry; these are part of the strategy, not noise.
-- Telegram/Web messages may contain management earlier than posts, so they should be logged even if not used for future autonomous trading.
+- Construye posiciones en paquetes, normalmente con varios tickers en la misma dirección y con el mismo apalancamiento.
+- Los stops son obligatorios y suelen depender del exchange.
+- Los mensajes de gestión pueden modificar TP/SL después de la entrada; forman parte de la estrategia, no son ruido.
+- Los mensajes de Telegram Web pueden contener gestión antes que los posts, por lo que deben registrarse aunque no se usen para una futura operativa autónoma.
 
-## Current Statistical Status
+## Estado estadístico actual
 
-Sample is directional but still fragile (97 closed positions). Keep collecting before automating.
+La muestra es direccional, pero aún frágil (97 posiciones cerradas). Hay que seguir acumulando datos antes de automatizar.
 
-## Closed Positions
+## Posiciones cerradas
 
-| Opened | Symbol | Outcome | Entry | Exit | Net USDT | SL | TP |
+| Apertura | Símbolo | Resultado | Entrada | Salida | Neto USDT | SL | TP |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 2026-05-20T15:12:40.000Z | SOL-USDT | SIGNAL_CLOSE | 85.44 | 86.068 | 2.62 | 84.6 | 0 |
 | 2026-05-20T15:12:42.000Z | SUI-USDT | SIGNAL_CLOSE | 1.0649 | 1.0771 | 4.32 | 1.055 | 0 |
@@ -150,7 +150,7 @@ Sample is directional but still fragile (97 closed positions). Keep collecting b
 | 2026-06-15T08:19:58.000Z | SUI-USDT | TP | 0.7967 | 0.7972 | -1.16 | 0 | 0.7972 |
 | 2026-06-15T08:35:39.000Z | JTO-USDT | LIMIT | 0.6048 | 0.5971 | -41.48 | 0 | 0.6048 |
 
-## Open Positions
+## Posiciones abiertas
 
-| Opened | Symbol | Entry | SL | TP | Qty |
+| Apertura | Símbolo | Entrada | SL | TP | Cantidad |
 |---|---:|---:|---:|---:|---:|

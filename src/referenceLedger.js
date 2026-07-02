@@ -2,6 +2,7 @@ const fallbackPortfolioUrl = 'https://4tfs.short.gy/14may';
 const cacheMs = 5 * 60 * 1000;
 const cache = new Map();
 const sourceCache = new Map();
+const sheetNamesCache = new Map();
 
 const spanishMonths = [
   'ENERO',
@@ -21,6 +22,7 @@ const spanishMonths = [
 export function clearReferenceLedgerCache() {
   cache.clear();
   sourceCache.clear();
+  sheetNamesCache.clear();
 }
 
 export async function resolvePortfolioSource(portfolioUrl = fallbackPortfolioUrl) {
@@ -111,22 +113,27 @@ export async function loadReferenceLedger({ month = currentMonthKey(), portfolio
     return cached.value;
   }
 
-  const sheetName = sheetNameForMonth(month);
-  const url = `https://docs.google.com/spreadsheets/d/${source.spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`No se pudo leer ${sheetName}: HTTP ${response.status}`);
-  }
-
-  const rows = parseGvizRows(await response.text());
-  const positions = rows
-    .slice(2)
-    .filter((row) => Number.isFinite(Number(row[0])) && row[2])
-    .map((row) => referencePosition(row, month, sheetName))
-    .filter(Boolean);
+  const requestedSheetName = sheetNameForMonth(month);
+  let sheetName = requestedSheetName;
+  let rows = await fetchSheetRows(source.spreadsheetId, sheetName);
+  let positions = positionsFromRows(rows, month, sheetName);
 
   if (!positions.length) {
-    throw new Error(`La hoja ${sheetName} no tiene ordenes legibles.`);
+    const alternatives = await compatibleSheetNames(source.spreadsheetId, requestedSheetName, month);
+    for (const alternative of alternatives) {
+      const alternativeRows = await fetchSheetRows(source.spreadsheetId, alternative);
+      const alternativePositions = positionsFromRows(alternativeRows, month, alternative);
+      if (alternativePositions.length) {
+        sheetName = alternative;
+        rows = alternativeRows;
+        positions = alternativePositions;
+        break;
+      }
+    }
+  }
+
+  if (!positions.length) {
+    throw new Error(`La hoja ${requestedSheetName} no tiene ordenes legibles.`);
   }
 
   const row = summaryRow(month, positions);
@@ -143,6 +150,7 @@ export async function loadReferenceLedger({ month = currentMonthKey(), portfolio
     source: {
       type: 'google_sheet',
       label: sheetName,
+      requestedLabel: requestedSheetName,
       url: source.originalUrl,
       spreadsheetUrl: source.spreadsheetUrl,
       resolvedUrl: source.resolvedUrl,
@@ -200,6 +208,78 @@ export async function applyReferenceLedger(historical, { month = currentMonthKey
   };
 }
 
+async function fetchSheetRows(spreadsheetId, sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`No se pudo leer ${sheetName}: HTTP ${response.status}`);
+  }
+  return parseGvizRows(await response.text());
+}
+
+function positionsFromRows(rows, month, sheetName) {
+  return rows
+    .slice(2)
+    .filter((row) => Number.isFinite(Number(row[0])) && row[2])
+    .map((row) => referencePosition(row, month, sheetName))
+    .filter(Boolean);
+}
+
+async function compatibleSheetNames(spreadsheetId, requestedSheetName, month) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const label = spanishMonths[monthNumber - 1];
+  if (!year || !label) {
+    return [];
+  }
+
+  const names = await listSpreadsheetSheetNames(spreadsheetId);
+  const matching = names.filter((name) => (
+    normalizeSheetName(name).startsWith(normalizeSheetName(`FUTUROS ${label}`))
+    && normalizeSheetName(name) !== normalizeSheetName(requestedSheetName)
+  ));
+
+  return matching.sort((left, right) => {
+    const leftYear = sheetNameYear(left);
+    const rightYear = sheetNameYear(right);
+    const leftFuture = leftYear >= year ? 0 : 1;
+    const rightFuture = rightYear >= year ? 0 : 1;
+    return leftFuture - rightFuture
+      || Math.abs(leftYear - year) - Math.abs(rightYear - year)
+      || left.localeCompare(right);
+  });
+}
+
+async function listSpreadsheetSheetNames(spreadsheetId) {
+  const cached = sheetNamesCache.get(spreadsheetId);
+  if (cached && Date.now() - cached.at < cacheMs) {
+    return cached.value;
+  }
+
+  const response = await fetch(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?usp=sharing`, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 YouTubePostsScraper/1.0'
+    }
+  });
+  if (!response.ok) {
+    return [];
+  }
+
+  const body = await response.text();
+  const names = [...new Set([...body.matchAll(/FUTUROS [A-ZÁÉÍÓÚÑ]+(?: PARTE \d+)?(?: 20\d{2})?(?: PARTE \d+)?/g)]
+    .map((match) => match[0].replace(/\\"$/, '').trim()))];
+  sheetNamesCache.set(spreadsheetId, { at: Date.now(), value: names });
+  return names;
+}
+
+function normalizeSheetName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function sheetNameYear(value) {
+  const match = String(value || '').match(/\b(20\d{2})\b/);
+  return match ? Number(match[1]) : 0;
+}
+
 function referencePosition(row, month, sheetName) {
   const orderNumber = Number(row[0]);
   const symbol = `${String(row[2] || '').trim().toUpperCase()}-USDT`;
@@ -210,7 +290,11 @@ function referencePosition(row, month, sheetName) {
   const notional = parseNumber(row[7]);
   const exposure = parseNumber(row[8]) || notional * leverage;
   const pnl = parseNumber(row[10]);
-  const date = parseSpanishDate(row[1]) || firstDayOfMonth(month);
+  const parsedDate = parseSpanishDate(row[1]);
+  if (parsedDate && monthKey(parsedDate) !== month) {
+    return null;
+  }
+  const date = parsedDate || firstDayOfMonth(month);
   const quantity = entryPrice > 0 ? exposure / entryPrice : 0;
 
   if (!symbol || !direction || !entryPrice || !leverage || !notional || !Number.isFinite(pnl)) {

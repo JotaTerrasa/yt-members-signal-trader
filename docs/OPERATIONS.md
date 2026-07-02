@@ -1,4 +1,4 @@
-# Operacion diaria
+# Operación diaria
 
 Runbook para operar Futures Magician en local.
 
@@ -40,8 +40,8 @@ La app usa Playwright con perfil persistente:
 
 YouTube:
 
-1. Pulsa `Abrir sesion`.
-2. Inicia sesion en Chromium.
+1. Pulsa `Abrir sesión`.
+2. Inicia sesión en Chromium.
 3. Comprueba que la cuenta ve los posts de miembros.
 
 Telegram Web:
@@ -49,10 +49,10 @@ Telegram Web:
 1. Activa `Scrapear canal`.
 2. Guarda la URL `https://web.telegram.org/k/#-XXXXXXXXXX` o la que corresponda.
 3. Pulsa `Abrir canal`.
-4. Inicia sesion en Telegram Web si hace falta.
+4. Inicia sesión en Telegram Web si hace falta.
 5. Deja el canal abierto en Chromium.
 
-La aplicacion no pide ni almacena contrasenas web.
+La aplicación no pide ni almacena contraseñas web.
 
 ## 3. Monitor
 
@@ -61,16 +61,16 @@ Opciones:
 - `Posts pasados`: baja historial haciendo scroll.
 - `Monitor continuo`: revisa posts nuevos cada intervalo.
 - `Intervalo`: frecuencia del monitor.
-- `Scrolls max.`: limite de scroll para backfill.
+- `Scrolls max.`: límite de scroll para backfill.
 - `Telegram Web`: lee mensajes visibles del canal configurado.
-- `Recargar pestana`: cada cuantos segundos refresca Telegram Web.
+- `Recargar pestaña`: cada cuántos segundos refresca Telegram Web.
 
 El modo live es polling. YouTube y Telegram Web no se leen como stream.
 
 Persistencia:
 
-- Al iniciar el monitor continuo, la app guarda la configuracion live en `.data/config.json`.
-- Si PM2 o Node reinician la app, el monitor live se rearma automaticamente con la ultima URL, intervalo y fuente de Telegram Web guardados.
+- Al iniciar el monitor continuo, la app guarda la configuración live en `.data/config.json`.
+- Si PM2 o Node reinician la app, el monitor live se rearma automáticamente con la última URL, intervalo y fuente de Telegram Web guardados.
 - Pulsar `Parar` desactiva ese auto-resume, para que un stop manual siga siendo manual.
 
 ## 4. Telegram de alertas
@@ -78,7 +78,7 @@ Persistencia:
 Uso recomendado:
 
 1. Crea el bot en BotFather.
-2. Envia `/start` al bot.
+2. Envía `/start` al bot.
 3. Guarda el token en la UI.
 4. Usa `Detectar chat`.
 5. Usa `Prueba Telegram`.
@@ -91,22 +91,22 @@ Puede avisar de:
 - eventos importantes;
 - avisos de scraper.
 
-## 5. Telegram Web como fuente de senales
+## 5. Telegram Web como fuente de señales
 
 Telegram Web tiene controles separados de las alertas del bot.
 
 Modos:
 
-- `Solo lectura`: guarda mensajes con senales, pero no opera.
-- `Cierres/TP/SL`: permite gestion de posiciones.
-- `Permitir aperturas`: permite tambien aperturas desde Telegram Web.
+- `Solo lectura`: guarda mensajes con señales, pero no opera.
+- `Cierres/TP/SL`: permite gestión de posiciones.
+- `Permitir aperturas`: permite también aperturas desde Telegram Web.
 
 Regla de seguridad:
 
-- En `live` o `dual`, `Cierres/TP/SL` exige confirmacion `Confirmo Telegram hacia BingX real`.
-- Las aperturas desde Telegram Web deben dejarse desactivadas salvo decision consciente.
+- En `live` o `dual`, `Cierres/TP/SL` exige confirmación `Confirmo Telegram hacia BingX real`.
+- Las aperturas desde Telegram Web deben dejarse desactivadas salvo decisión consciente.
 
-Ejemplo critico:
+Ejemplo crítico:
 
 ```text
 CERRADLO TODO
@@ -119,69 +119,69 @@ Se interpreta como `CLOSE_ALL` y cierra todas las posiciones abiertas en los mod
 Modos:
 
 - `test`: no crea orden real; simula en `.data/paper-trades.json`.
-- `demo`: envia ordenes a BingX Demo VST.
-- `live`: envia ordenes reales.
-- `dual`: envia a Demo VST y a live real.
+- `demo`: envía órdenes a BingX Demo VST.
+- `live`: envía órdenes reales.
+- `dual`: envía a Demo VST y a live real.
 
-Configuracion importante:
+Configuración importante:
 
 - `API key` y `API secret`: se guardan localmente en `.data/config.json`.
-- `Allowlist`: si esta vacia permite cualquier ticker soportado por BingX.
+- `Allowlist`: si está vacía permite cualquier ticker soportado por BingX.
 - `Stop obligatorio`: bloquea aperturas sin SL.
-- `Max posiciones`: bloquea nuevas aperturas si se alcanza el limite.
-- `Max leverage senal`: bloquea senales con demasiado apalancamiento.
+- `Max posiciones`: bloquea nuevas aperturas si se alcanza el límite.
+- `Max leverage señal`: bloquea señales con demasiado apalancamiento.
 - `Capital mes USDT`: capital inicial mensual para futuros reales.
 - `Capital mes VST`: capital inicial mensual para Demo VST.
-- `% fijo por senal`: porcentaje fijo aplicado a ambos capitales.
-- Criterio actual: 300 USDT/VST de capital mensual y 10% por senal, es decir 30 USDT en real y 30 VST en demo por ticker.
+- `% fijo por señal`: porcentaje fijo aplicado a ambos capitales.
+- Criterio actual: 300 USDT/VST de capital mensual y 10% por señal, es decir 30 USDT en real y 30 VST en demo por ticker.
 
 ## 7. Aperturas
 
 Cuando detecta una apertura:
 
-1. Valida que BingX este activado.
+1. Valida que BingX esté activado.
 2. Valida allowlist, stop loss y riesgo.
 3. Consulta contrato y ticker en BingX.
-4. Usa el apalancamiento exacto de la senal, salvo bloqueo por maximo.
-5. Calcula cantidad segun modo.
-6. Envia orden.
+4. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
+5. Calcula cantidad según modo.
+6. Envía orden.
 7. Adjunta SL y TP si existen.
 
 Tipo de orden:
 
-- Si la linea de direccion trae precio, por ejemplo `LONG SUI 1.123`, envia `LIMIT` a ese precio.
+- Si la línea de dirección trae precio, por ejemplo `LONG SUI 1.123`, envía `LIMIT` a ese precio.
 - Si no trae precio, usa `MARKET`.
-- Si `Entradas siempre a mercado` esta activo, ignora el precio de entrada de la senal y envia `MARKET`.
+- Si `Entradas siempre a mercado` está activo, ignora el precio de entrada de la señal y envía `MARKET`.
 - Incluso en mercado, el stop debe seguir siendo valido: en LONG por debajo del mercado y en SHORT por encima.
 
-## 8. Gestion de posiciones
+## 8. Gestión de posiciones
 
 TP:
 
-- Cancela TP anteriores del simbolo/side.
+- Cancela TP anteriores del símbolo/side.
 - Crea un `TAKE_PROFIT_MARKET` nuevo con la cantidad abierta.
 
 SL:
 
-- Cancela SL anteriores del simbolo/side.
+- Cancela SL anteriores del símbolo/side.
 - Crea un `STOP_MARKET` nuevo con la cantidad abierta.
 
 Cierres:
 
-- `CLOSE` por simbolo cierra la posicion de ese ticker.
+- `CLOSE` por símbolo cierra la posición de ese ticker.
 - `CLOSE_ALL` cierra todas las posiciones abiertas.
 - Cierres parciales respetan el porcentaje detectado.
-- En cierres completos, la app intenta cancelar despues los SL/TP protectores asociados a esa posicion.
+- En cierres completos, la app intenta cancelar después los SL/TP protectores asociados a esa posición.
 
 Notas:
 
 - BingX usa IDs de orden largos; el cliente los conserva como string para evitar redondeo.
-- El replay de una senal live requiere confirmacion explicita.
-- Las alertas de SL/ordenes huerfanas tienen una pequena ventana de gracia tras aperturas y cierres para evitar falsos positivos mientras BingX confirma la posicion y sus protectoras.
+- El replay de una señal live requiere confirmación explícita.
+- Las alertas de SL/órdenes huérfanas tienen una pequeña ventana de gracia tras aperturas y cierres para evitar falsos positivos mientras BingX confirma la posición y sus protectoras.
 
-## 9. Reejecutar una senal fallida
+## 9. Reejecutar una señal fallida
 
-Ultima publicacion con senales:
+Última publicación con señales:
 
 ```bash
 curl -X POST http://localhost:5178/api/bingx/replay-latest-signal \
@@ -189,7 +189,7 @@ curl -X POST http://localhost:5178/api/bingx/replay-latest-signal \
   --data "{}"
 ```
 
-Publicacion concreta:
+Publicación concreta:
 
 ```bash
 curl -X POST http://localhost:5178/api/bingx/replay-latest-signal \
@@ -203,19 +203,19 @@ En `live` o `dual`:
 {"postId":"ID_O_URL_DEL_POST","confirm":"REPLAY_LIVE"}
 ```
 
-Usalo con cuidado. Un replay puede duplicar una apertura si la posicion ya existe.
+Úsalo con cuidado. Un replay puede duplicar una apertura si la posición ya existe.
 
 ## 10. Checklist nocturno
 
 Antes de irte:
 
 1. `GET /api/health` devuelve `ok`.
-2. PM2 esta `online`.
+2. PM2 está `online`.
 3. YouTube devuelve posts visibles.
-4. Telegram Web esta abierto si dependes de cierres por escrito.
-5. Cada posicion real tiene SL.
-6. Cada posicion con TP esperado tiene TP.
-7. No hay duplicados de TP/SL por simbolo.
+4. Telegram Web está abierto si dependes de cierres por escrito.
+5. Cada posición real tiene SL.
+6. Cada posición con TP esperado tiene TP.
+7. No hay duplicados de TP/SL por símbolo.
 8. SUI/BTC/ETH/SOL coinciden con lo que esperas en BingX.
 9. No hay errores recientes en logs.
 
@@ -240,9 +240,9 @@ Endpoint:
 GET /api/portfolio
 ```
 
-La URL del portfolio se actualiza automaticamente cuando aparece un post de miembros con enlace `4tfs.short.gy`, `short.gy` o Google Sheets.
+La URL del portfolio se actualiza automáticamente cuando aparece un post de miembros con enlace `4tfs.short.gy`, `short.gy` o Google Sheets.
 
-## 12. Uso desde movil
+## 12. Uso desde móvil
 
 En la misma red local puedes abrir el host LAN del ordenador.
 
@@ -258,30 +258,30 @@ No compartas esa URL: la UI permite operar.
 
 `YouTube no muestra posts visibles`
 
-- Abre sesion otra vez.
+- Abre sesión otra vez.
 - Comprueba que la cuenta tenga acceso al canal.
 - Espera una pasada: a veces una lectura devuelve 0 y la siguiente recupera.
 
 `No llega Telegram`
 
-- Envia `/start` al bot.
+- Envía `/start` al bot.
 - Usa detectar chat.
 - Comprueba que el token no haya sido rotado.
 
 `Telegram Web no lee mensajes`
 
-- Comprueba que Chromium este logueado.
+- Comprueba que Chromium esté logueado.
 - Abre el canal desde la UI.
 - Revisa `maxMessages` y `refreshSeconds`.
 
-`BingX bloquea una senal`
+`BingX bloquea una señal`
 
 - Revisa allowlist.
 - Revisa stop loss.
-- Revisa apalancamiento maximo.
+- Revisa apalancamiento máximo.
 - Revisa capital disponible.
-- Revisa confirmacion live.
+- Revisa confirmación live.
 
 `No se puede cancelar una orden`
 
-- Revisa que el ID sea string. Los IDs de BingX superan la precision segura de JavaScript.
+- Revisa que el ID sea string. Los IDs de BingX superan la precisión segura de JavaScript.

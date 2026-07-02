@@ -1,10 +1,10 @@
 # Seguridad
 
-Esta aplicacion puede leer contenido privado de YouTube/Telegram y operar en BingX. Tratala como software sensible.
+Esta aplicación puede leer contenido privado de YouTube/Telegram y operar en BingX. Trátala como software sensible.
 
 ## Nunca subir a Git
 
-Estos paths estan ignorados:
+Estas rutas están ignoradas:
 
 ```text
 .data/
@@ -29,36 +29,36 @@ tmp/
 
 Reglas:
 
-- Si un token se pega en un chat, captura o repo, rotalo.
+- Si un token se pega en un chat, captura o repo, rótalo.
 - Usa claves de BingX sin permisos de retirada.
-- Si BingX permite restriccion por IP, activala.
+- Si BingX permite restricción por IP, actívala.
 - Separa claves demo y live si tu operativa lo permite.
 - No compartas `.data/config.json`.
 - No publiques capturas donde se vean tokens, chat IDs, API keys o URLs privadas.
 
 ## Live real
 
-Live real requiere confirmacion manual en la UI. Aun asi:
+Live real requiere confirmación manual en la UI. Aun así:
 
 - valida primero en `test`;
-- valida despues en `demo`;
+- valida después en `demo`;
 - revisa parser con `/api/bingx/parse-test`;
 - confirma cantidades;
 - confirma que cada apertura trae SL;
 - usa allowlist si solo quieres pares concretos;
-- deja `dryRunRequired` activo salvo que sepas por que lo desactivas.
+- deja `dryRunRequired` activo salvo que sepas por qué lo desactivas.
 
 No ejecutes `REPLAY_LIVE` sin revisar si la orden ya se ejecuto.
 
 ## Telegram Web
 
-Telegram Web puede recibir mensajes urgentes antes que YouTube. Tambien aumenta el riesgo operativo.
+Telegram Web puede recibir mensajes urgentes antes que YouTube. También aumenta el riesgo operativo.
 
 Recomendacion:
 
-- permitir por defecto solo gestion de posiciones;
-- mantener aperturas desactivadas salvo confirmacion explicita;
-- exigir confirmacion live si `executeSignals` esta activo en `live` o `dual`;
+- permitir por defecto solo gestión de posiciones;
+- mantener aperturas desactivadas salvo confirmación explícita;
+- exigir confirmación live si `executeSignals` está activo en `live` o `dual`;
 - revisar que el canal abierto en Chromium sea el correcto.
 
 Mensajes como:
@@ -87,13 +87,13 @@ No incluyas:
 
 ## UI expuesta
 
-No expongas `http://localhost:5178` a internet sin autenticacion.
+No expongas `http://localhost:5178` a internet sin autenticación.
 
 Si usas Cloudflare Tunnel:
 
 - que sea temporal;
 - no compartas la URL;
-- cierralo al terminar;
+- ciérralo al terminar;
 - recuerda que la UI permite operar y cambiar claves.
 
 ## Incidente
@@ -103,7 +103,7 @@ Si sospechas que se ha filtrado algo:
 1. Para la app.
 2. Revoca token Telegram.
 3. Revoca API key BingX.
-4. Borra o rota la URL publica del tunel.
+4. Borra o rota la URL pública del túnel.
 5. Revisa `git log` y GitHub por si hubo secretos.
 6. Genera claves nuevas.
 7. Reinicia en `test`.

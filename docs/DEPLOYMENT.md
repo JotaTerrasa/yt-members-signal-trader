@@ -1,6 +1,6 @@
 # Despliegue
 
-Guia para instalar, arrancar y dejar la aplicacion corriendo en segundo plano.
+Guía para instalar, arrancar y dejar la aplicación corriendo en segundo plano.
 
 ## 1. Clonar
 
@@ -37,7 +37,7 @@ La URL por defecto es:
 http://localhost:5178
 ```
 
-Si el puerto esta ocupado, identifica primero el proceso. En PowerShell:
+Si el puerto está ocupado, identifica primero el proceso. En PowerShell:
 
 ```powershell
 Get-NetTCPConnection -LocalPort 5178 | Select-Object LocalAddress,LocalPort,State,OwningProcess
@@ -62,16 +62,16 @@ La app usa un perfil persistente:
 Flujo:
 
 1. Abre `http://localhost:5178`.
-2. Pulsa `Abrir sesion`.
-3. Inicia sesion en YouTube con una cuenta que tenga acceso a miembros.
+2. Pulsa `Abrir sesión`.
+3. Inicia sesión en YouTube con una cuenta que tenga acceso a miembros.
 4. Si usas Telegram Web, guarda la URL del canal y pulsa `Abrir canal`.
-5. Inicia sesion en Telegram Web si Chromium lo pide.
+5. Inicia sesión en Telegram Web si Chromium lo pide.
 
-No se guarda ninguna contrasena en el repo.
+No se guarda ninguna contraseña en el repo.
 
-## 5. Configuracion funcional
+## 5. Configuración funcional
 
-Ejemplo de configuracion:
+Ejemplo de configuración:
 
 ```text
 YouTube URL: https://www.youtube.com/@tu-canal/posts
@@ -80,18 +80,18 @@ Monitor: live cada 30 segundos
 BingX mode: dual, Demo VST + live real
 Capital mensual VST: 300 VST
 Capital mensual real: 300 USDT
-Por senal: 10% fijo del capital mensual
+Por señal: 10% fijo del capital mensual
 Resultado: 30 VST en demo y 30 USDT en real por ticker
-Apalancamiento: usar el de la senal
+Apalancamiento: usar el de la señal
 Stop loss obligatorio: activado
 Telegram alertas: activado
-Telegram Web ejecucion: gestion de posiciones
-Telegram Web aperturas: desactivadas salvo confirmacion explicita
+Telegram Web ejecución: gestión de posiciones
+Telegram Web aperturas: desactivadas salvo confirmación explícita
 ```
 
 Campos sensibles:
 
-- Telegram bot token.
+- bot de Telegram token.
 - Telegram chat ID.
 - BingX API key.
 - BingX API secret.
@@ -100,7 +100,7 @@ Estos valores viven en `.data/config.json` y no deben subirse a Git.
 
 ## 6. Dejarlo corriendo con PM2
 
-Instala PM2 si no esta instalado:
+Instala PM2 si no está instalado:
 
 ```bash
 npm install -g pm2
@@ -140,7 +140,7 @@ Para supervivencia real tras reinicio de Windows, ejecuta el comando que PM2 rec
 pm2 startup
 ```
 
-PM2 imprimira un comando especifico para tu sistema. Ejecutalo una vez y despues:
+PM2 imprimira un comando especifico para tu sistema. Ejecutalo una vez y después:
 
 ```bash
 pm2 save
@@ -167,13 +167,13 @@ Respuesta esperada con monitor activo:
 }
 ```
 
-Estado BingX sin enviar ordenes:
+Estado BingX sin enviar órdenes:
 
 ```bash
 curl http://localhost:5178/api/bingx/open-positions
 ```
 
-Auditoria general:
+Auditoría general:
 
 ```bash
 curl http://localhost:5178/api/audit
@@ -181,7 +181,7 @@ curl http://localhost:5178/api/audit
 
 ## 8. Cloudflare Tunnel opcional
 
-Solo si necesitas ver la app desde movil fuera de la red local:
+Solo si necesitas ver la app desde móvil fuera de la red local:
 
 ```bash
 cloudflared tunnel --url http://localhost:5178
@@ -189,9 +189,9 @@ cloudflared tunnel --url http://localhost:5178
 
 Precauciones:
 
-- No publiques la URL sin autenticacion.
-- Cierra el tunel cuando termines.
-- La UI permite operar y cambiar configuracion.
+- No publiques la URL sin autenticación.
+- Cierra el túnel cuando termines.
+- La UI permite operar y cambiar configuración.
 
 ## 9. Actualizar desde GitHub
 

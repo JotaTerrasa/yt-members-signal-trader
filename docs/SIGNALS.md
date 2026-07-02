@@ -1,11 +1,11 @@
-# Formato de senales
+# Formato de señales
 
-El parser convierte texto libre de YouTube o Telegram Web en senales normalizadas. Esta guia documenta los formatos soportados y sus limites.
+El parser convierte texto libre de YouTube o Telegram Web en señales normalizadas. Esta guía documenta los formatos soportados y sus límites.
 
 ## Acciones soportadas
 
 - `OPEN`: apertura LONG/SHORT.
-- `CLOSE`: cierre por simbolo.
+- `CLOSE`: cierre por símbolo.
 - `CLOSE_ALL`: cierre global.
 - `SET_TAKE_PROFIT`: colocar o modificar TP.
 - `SET_STOP_LOSS`: colocar o modificar SL.
@@ -27,11 +27,11 @@ APALANCAMIENTO X25
 Resultado:
 
 - `BTC-USDT`
-- direccion `LONG`
+- dirección `LONG`
 - entrada `LIMIT 78190`
 - SL `77500`
 - leverage `25`
-- notional leido `1500 USDT`
+- notional leído `1500 USDT`
 
 Regla de tipo de orden:
 
@@ -71,7 +71,7 @@ STOP BTC BINGX 77500
 STOP SUI BINGX 1.111
 ```
 
-Si `Stop obligatorio` esta activo, una apertura sin stop se bloquea.
+Si `Stop obligatorio` está activo, una apertura sin stop se bloquea.
 
 ## Take profit
 
@@ -90,7 +90,7 @@ BTC 78711
 ETH 2182
 ```
 
-Cuando aparece una seccion `TPS` o `take profits`, cada linea `SIMBOLO PRECIO` se convierte en `SET_TAKE_PROFIT`. El encabezado puede venir precedido por `Primero:`, `Segundo:`, `1.` o formatos similares.
+Cuando aparece una sección `TPS` o `take profits`, cada línea `SIMBOLO PRECIO` se convierte en `SET_TAKE_PROFIT`. El encabezado puede venir precedido por `Primero:`, `Segundo:`, `1.` o formatos similares.
 
 ## Modificacion de stop loss
 
@@ -102,7 +102,7 @@ ETH 2115
 SOL 86.5
 ```
 
-Tambien detecta:
+También detecta:
 
 ```text
 SL ETH 2115
@@ -137,7 +137,7 @@ APALANCAMIENTO X25
 1500USDT
 ```
 
-Senales generadas:
+Señales generadas:
 
 ```text
 OPEN SUI-USDT LONG LIMIT 1.123 SL 1.111 TP 1.159 X25
@@ -151,8 +151,8 @@ SET_STOP_LOSS SOL-USDT 86.5
 
 Notas:
 
-- Si el TP del simbolo abierto aparece en `TPS`, se adjunta tambien a la apertura.
-- Las secciones `TPS` y `MODIFICACION STOPLOSS` tienen limites para no mezclar precios.
+- Si el TP del símbolo abierto aparece en `TPS`, se adjunta también a la apertura.
+- Las secciones `TPS` y `MODIFICACION STOPLOSS` tienen límites para no mezclar precios.
 
 ## Apalancamiento
 
@@ -166,9 +166,9 @@ X25
 
 Regla:
 
-- Si la senal trae apalancamiento, se usa ese valor.
+- Si la señal trae apalancamiento, se usa ese valor.
 - Si no trae, se usa el fallback configurado.
-- Si supera el maximo local o del contrato, se bloquea.
+- Si supera el máximo local o del contrato, se bloquea.
 
 ## Notional
 
@@ -182,11 +182,11 @@ Formatos:
 
 Uso:
 
-- `test`: usa el notional de la senal o el default.
+- `test`: usa el notional de la señal o el default.
 - `demo`: usa porcentaje sobre capital base VST fijo.
-- `live`: usa el tamano configurado/limitado para real.
+- `live`: usa el tamaño configurado/limitado para real.
 
-## Cierre por simbolo
+## Cierre por símbolo
 
 ```text
 CIERRE TOTAL
@@ -250,7 +250,7 @@ Telegram Web puede ejecutar:
 - SL;
 - break even.
 
-Las aperturas desde Telegram Web solo se ejecutan si `Permitir aperturas` esta activo.
+Las aperturas desde Telegram Web solo se ejecutan si `Permitir aperturas` está activo.
 
 ## Portfolio
 
@@ -272,8 +272,8 @@ Reglas:
 
 ## Limitaciones
 
-- Textos ambiguos pueden producir simbolos no deseados. Usa allowlist si quieres restringir.
-- Los cierres se aplican por simbolo, no por ID de senal original.
+- Textos ambiguos pueden producir símbolos no deseados. Usa allowlist si quieres restringir.
+- Los cierres se aplican por símbolo, no por ID de señal original.
 - Si hay varios TP de apertura, se usa el primero como TP adjunto.
-- Telegram Web depende de la sesion visual de Chromium.
+- Telegram Web depende de la sesión visual de Chromium.
 - El parser asume pares contra USDT.

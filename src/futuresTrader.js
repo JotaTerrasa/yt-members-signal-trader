@@ -208,6 +208,23 @@ export class FuturesTrader {
     }
   }
 
+  clearOpenOrdersCache({ mode = null } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      ...(mode ? { mode } : {})
+    };
+    if (config.mode === 'dual') {
+      this.clearOpenOrdersCache({ mode: 'demo' });
+      this.clearOpenOrdersCache({ mode: 'live' });
+      return;
+    }
+    this.clearOpenOrdersCacheForConfig(config);
+  }
+
+  clearOpenOrdersCacheForConfig(config) {
+    this.openOrdersCache.delete(openOrdersCacheKey(config));
+  }
+
   async getExchangeBalance({ mode = null } = {}) {
     const config = {
       ...this.configStore.getBingX({ includeSecrets: true }),
@@ -856,6 +873,9 @@ export class FuturesTrader {
     let response;
     try {
       response = await client.placeOrder(order, { test });
+      if (!test) {
+        this.clearOpenOrdersCacheForConfig(config);
+      }
     } catch (error) {
       if (isExchangeStopPriceInvalid(error)) {
         return this.emitTrade({

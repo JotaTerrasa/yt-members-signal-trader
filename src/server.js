@@ -27,6 +27,7 @@ const EXCHANGE_SYNC_MIN_INTERVAL_MS = 10_000;
 const EXCHANGE_SYNC_STALE_MS = 90_000;
 const EXCHANGE_SAFETY_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
 const EXCHANGE_ORDER_SETTLE_SYNC_DELAY_MS = 5_000;
+const EXCHANGE_STOP_LOSS_REPAIR_DELAY_MS = 7_000;
 const EXCHANGE_PROTECTION_GRACE_MS = 20_000;
 const EXCHANGE_ORPHAN_GRACE_MS = 20_000;
 const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
@@ -38,6 +39,10 @@ const PNL_BACKOFF_DEFAULT_MS = 5 * 60 * 1000;
 const PNL_BACKOFF_MAX_MS = 15 * 60 * 1000;
 const REDACTED_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const BACKEND_RESTART_CONFIRMATION = 'REINICIAR_BACKEND';
+const STOP_LOSS_RETRY_FIRST_DELAY_MS = 10_000;
+const STOP_LOSS_RETRY_INTERVAL_MS = 15_000;
+const STOP_LOSS_RETRY_MAX_AGE_MS = 10 * 60 * 1000;
+const STOP_LOSS_RETRY_MAX_ATTEMPTS = 40;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -73,6 +78,8 @@ const futuresTrader = new FuturesTrader({
     notifyTradeCriticalEvent(event);
     markExchangeSafetyGrace(event);
     scheduleExchangeSyncForTrade(event);
+    scheduleStopLossRepairForTrade(event);
+    handleStopLossRetryEvent(event);
     broadcast('state', state);
   }
 });
@@ -103,6 +110,7 @@ const pendingExchangeClosures = new Map();
 const exchangeSafetyAlerts = new Map();
 const liveProtectionGraceUntil = new Map();
 const liveOrphanGraceUntil = new Map();
+const pendingStopLossRetries = new Map();
 
 const state = {
   browserOpen: false,
@@ -297,6 +305,10 @@ async function updatePortfolioSource(input) {
   return portfolio;
 }
 
+function portfolioSourceForReference(portfolio = {}) {
+  return portfolio.resolvedUrl || portfolio.spreadsheetId || portfolio.url;
+}
+
 function findReplayPost(postId) {
   const posts = store.list();
   if (postId) {
@@ -385,6 +397,374 @@ function duplicateOpenSignalGuard(signal = {}) {
     eventId: duplicate.eventId || null,
     at: duplicate.at || null
   };
+}
+
+function handleStopLossRetryEvent(event = {}) {
+  const key = stopLossRetryKeyFromEvent(event);
+  if (!key) {
+    return;
+  }
+
+  if (isOpeningExecutionStatusForRetry(event.status)) {
+    clearStopLossRetry(key, 'opened');
+    return;
+  }
+
+  if (shouldQueueStopLossRetry(event)) {
+    queueStopLossRetry(event, key);
+  }
+}
+
+function shouldQueueStopLossRetry(event = {}) {
+  const status = String(event.status || '');
+  const mode = String(event.executionMode || '').toLowerCase();
+  const signal = event.signal || {};
+  return status === 'blocked'
+    && (mode === 'demo' || mode === 'live')
+    && signal.symbol
+    && signal.direction
+    && !isPositionManagementSignal(signal)
+    && isRetryableStopLossReason(event.reason);
+}
+
+function isRetryableStopLossReason(reason = '') {
+  return /^(exchange_stop_loss_invalid|entry_missed_invalid_(?:long|short)_stop_loss|invalid_(?:long|short)_stop_loss):/i
+    .test(String(reason || ''));
+}
+
+function queueStopLossRetry(event, key = stopLossRetryKeyFromEvent(event)) {
+  if (!key) {
+    return null;
+  }
+
+  const existing = pendingStopLossRetries.get(key);
+  if (existing) {
+    existing.lastReason = event.reason || existing.lastReason;
+    existing.lastBlockedAt = event.at || new Date().toISOString();
+    existing.updatedAt = new Date().toISOString();
+    broadcast('state', state);
+    return existing;
+  }
+
+  const now = Date.now();
+  const item = {
+    key,
+    signal: event.signal,
+    post: {
+      id: event.postId || null,
+      url: event.postUrl || null,
+      firstSeenAt: event.at || new Date().toISOString()
+    },
+    originalPhase: event.phase || null,
+    executionMode: String(event.executionMode || '').toLowerCase(),
+    queuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + STOP_LOSS_RETRY_MAX_AGE_MS).toISOString(),
+    attempts: 0,
+    lastReason: event.reason || '',
+    lastBlockedAt: event.at || new Date(now).toISOString(),
+    lastCheckedAt: null,
+    lastMarketPrice: null,
+    nextRunAt: null,
+    timer: null
+  };
+
+  pendingStopLossRetries.set(key, item);
+  pushLog({
+    level: 'warn',
+    message: `Reintento pendiente por SL ${item.executionMode}: ${item.signal.symbol} ${item.signal.direction}.`,
+    at: new Date().toISOString()
+  });
+  scheduleStopLossRetryTimer(item, STOP_LOSS_RETRY_FIRST_DELAY_MS);
+  broadcast('state', state);
+  return item;
+}
+
+function scheduleStopLossRetryTimer(item, delayMs = STOP_LOSS_RETRY_INTERVAL_MS) {
+  if (!item || !pendingStopLossRetries.has(item.key)) {
+    return;
+  }
+  if (item.timer) {
+    clearTimeout(item.timer);
+  }
+  const delay = Math.max(1000, Number(delayMs || STOP_LOSS_RETRY_INTERVAL_MS));
+  item.nextRunAt = new Date(Date.now() + delay).toISOString();
+  item.timer = setTimeout(() => {
+    runStopLossRetry(item.key).catch((error) => {
+      const current = pendingStopLossRetries.get(item.key);
+      if (!current) {
+        return;
+      }
+      current.lastReason = error.message;
+      current.lastCheckedAt = new Date().toISOString();
+      pushLog({
+        level: 'warn',
+        message: `Reintento SL ${current.signal.symbol}: ${error.message}`,
+        at: new Date().toISOString()
+      });
+      rescheduleOrExpireStopLossRetry(current, `retry_error:${error.message}`);
+    });
+  }, delay);
+  item.timer.unref();
+}
+
+async function runStopLossRetry(key) {
+  const item = pendingStopLossRetries.get(key);
+  if (!item) {
+    return;
+  }
+  item.timer = null;
+
+  if (stopLossRetryExpired(item)) {
+    expireStopLossRetry(item, item.lastReason || 'retry_expired');
+    return;
+  }
+
+  if (hasOpenPositionForStopLossRetry(item) || hasOpeningExecutionForStopLossRetry(item)) {
+    clearStopLossRetry(key, 'already_open');
+    return;
+  }
+
+  const baseConfig = configStore.getBingX({ includeSecrets: true });
+  if (!baseConfig.enabled) {
+    expireStopLossRetry(item, 'bingx_disabled');
+    return;
+  }
+  if (!configAllowsRetryMode(baseConfig.mode, item.executionMode)) {
+    expireStopLossRetry(item, `mode_changed:${baseConfig.mode}`);
+    return;
+  }
+  if (item.executionMode === 'live' && !baseConfig.liveConfirmed) {
+    expireStopLossRetry(item, 'live_not_confirmed');
+    return;
+  }
+
+  const config = {
+    ...baseConfig,
+    mode: item.executionMode
+  };
+  const readiness = await stopLossRetryReadiness(item, config);
+  item.attempts += 1;
+  item.lastCheckedAt = new Date().toISOString();
+  item.lastMarketPrice = readiness.marketPrice || null;
+  item.lastReason = readiness.reason || item.lastReason;
+
+  if (!readiness.ok) {
+    rescheduleOrExpireStopLossRetry(item, readiness.reason);
+    return;
+  }
+
+  pushLog({
+    level: 'warn',
+    message: `Reintentando orden pendiente ${item.executionMode}: ${item.signal.symbol} ${item.signal.direction} con precio ${readiness.marketPrice}.`,
+    at: new Date().toISOString()
+  });
+
+  const result = await futuresTrader.executeSignalWithConfig(item.signal, {
+    post: item.post,
+    phase: 'stop_loss_retry'
+  }, config);
+
+  if (isOpeningExecutionStatusForRetry(result?.status)) {
+    clearStopLossRetry(key, 'opened');
+    return;
+  }
+
+  if (shouldQueueStopLossRetry(result)) {
+    item.lastReason = result.reason || item.lastReason;
+    item.lastBlockedAt = result.at || item.lastBlockedAt;
+    rescheduleOrExpireStopLossRetry(item, item.lastReason);
+    return;
+  }
+
+  expireStopLossRetry(item, result?.reason || result?.status || 'retry_not_executable');
+}
+
+async function stopLossRetryReadiness(item, config) {
+  const marketPrice = await futuresTrader.fetchMarketPrice(
+    futuresTrader.marketClient(config),
+    item.signal.symbol
+  );
+  const stopLoss = Number(item.signal.stopLoss);
+  if (!Number.isFinite(stopLoss) || stopLoss <= 0) {
+    return {
+      ok: false,
+      marketPrice,
+      reason: `invalid_stop_loss:${item.signal.stopLoss}`
+    };
+  }
+
+  const direction = String(item.signal.direction || '').toUpperCase();
+  if (direction === 'LONG' && stopLoss >= marketPrice) {
+    return {
+      ok: false,
+      marketPrice,
+      reason: `waiting_long_stop_loss:${stopLoss}>=${marketPrice}`
+    };
+  }
+  if (direction === 'SHORT' && stopLoss <= marketPrice) {
+    return {
+      ok: false,
+      marketPrice,
+      reason: `waiting_short_stop_loss:${stopLoss}<=${marketPrice}`
+    };
+  }
+
+  return { ok: true, marketPrice, reason: '' };
+}
+
+function rescheduleOrExpireStopLossRetry(item, reason) {
+  if (!item || !pendingStopLossRetries.has(item.key)) {
+    return;
+  }
+  item.lastReason = reason || item.lastReason;
+  if (stopLossRetryExpired(item)) {
+    expireStopLossRetry(item, item.lastReason || 'retry_expired');
+    return;
+  }
+  scheduleStopLossRetryTimer(item, STOP_LOSS_RETRY_INTERVAL_MS);
+  broadcast('state', state);
+}
+
+function stopLossRetryExpired(item) {
+  return Date.now() >= Date.parse(item.expiresAt || 0)
+    || Number(item.attempts || 0) >= STOP_LOSS_RETRY_MAX_ATTEMPTS;
+}
+
+function expireStopLossRetry(item, reason = 'retry_expired') {
+  clearStopLossRetry(item.key, reason);
+  const event = {
+    at: new Date().toISOString(),
+    status: `${item.executionMode}_order_retry_expired`,
+    reason,
+    signal: item.signal,
+    postId: item.post?.id || null,
+    postUrl: item.post?.url || null,
+    phase: 'stop_loss_retry',
+    executionMode: item.executionMode,
+    retry: publicStopLossRetryItem(item)
+  };
+  recordTradeEvent(event);
+  notifyTradeCriticalEvent(event);
+}
+
+function clearStopLossRetry(key, reason = '') {
+  const item = pendingStopLossRetries.get(key);
+  if (!item) {
+    return;
+  }
+  if (item.timer) {
+    clearTimeout(item.timer);
+  }
+  pendingStopLossRetries.delete(key);
+  if (reason) {
+    pushLog({
+      level: reason === 'opened' || reason === 'already_open' ? 'info' : 'warn',
+      message: `Reintento SL finalizado ${item.signal.symbol}: ${reason}.`,
+      at: new Date().toISOString()
+    });
+  }
+  broadcast('state', state);
+}
+
+function stopLossRetryKeyFromEvent(event = {}) {
+  const signal = event.signal || {};
+  const mode = String(event.executionMode || '').toLowerCase();
+  if (!mode || !signal.symbol || !signal.direction || isPositionManagementSignal(signal)) {
+    return '';
+  }
+  return [
+    mode,
+    event.postId || '',
+    normalizePositionSymbol(signal.symbol),
+    String(signal.direction || '').toUpperCase(),
+    signal.entry?.price || '',
+    signal.stopLoss || ''
+  ].join('|');
+}
+
+function hasOpenPositionForStopLossRetry(item) {
+  const symbol = normalizePositionSymbol(item.signal.symbol);
+  const direction = String(item.signal.direction || '').toUpperCase();
+  return exchangePositionsCache.some((position) => (
+    position.source === item.executionMode
+    && position.status === 'open'
+    && normalizePositionSymbol(position.symbol) === symbol
+    && String(position.direction || '').toUpperCase() === direction
+  ));
+}
+
+function hasOpeningExecutionForStopLossRetry(item) {
+  return state.trades.some((event) => (
+    isOpeningExecutionStatusForRetry(event.status)
+    && stopLossRetryKeyFromEvent(event) === item.key
+  ));
+}
+
+function configAllowsRetryMode(configMode, executionMode) {
+  if (executionMode === 'demo') {
+    return configMode === 'demo' || configMode === 'dual';
+  }
+  if (executionMode === 'live') {
+    return configMode === 'live' || configMode === 'dual';
+  }
+  return false;
+}
+
+function isOpeningExecutionStatusForRetry(status) {
+  const value = String(status || '');
+  return value === 'test_order_sent'
+    || value === 'demo_order_sent'
+    || value === 'live_order_sent';
+}
+
+function stopLossRetryQueueState() {
+  return [...pendingStopLossRetries.values()].map(publicStopLossRetryItem);
+}
+
+function publicStopLossRetryItem(item) {
+  return {
+    key: item.key,
+    symbol: item.signal?.symbol || '',
+    direction: item.signal?.direction || '',
+    executionMode: item.executionMode,
+    postId: item.post?.id || null,
+    postUrl: item.post?.url || null,
+    queuedAt: item.queuedAt,
+    expiresAt: item.expiresAt,
+    attempts: item.attempts,
+    nextRunAt: item.nextRunAt,
+    lastCheckedAt: item.lastCheckedAt,
+    lastMarketPrice: item.lastMarketPrice,
+    lastReason: item.lastReason
+  };
+}
+
+function hydrateStopLossRetryQueueFromEvents() {
+  const cutoff = Date.now() - STOP_LOSS_RETRY_MAX_AGE_MS;
+  for (const event of [...state.trades].reverse()) {
+    const timestamp = Date.parse(event.at || 0);
+    if (!Number.isFinite(timestamp) || timestamp < cutoff) {
+      continue;
+    }
+    if (!shouldQueueStopLossRetry(event)) {
+      continue;
+    }
+    const key = stopLossRetryKeyFromEvent(event);
+    if (!key || pendingStopLossRetries.has(key)) {
+      continue;
+    }
+    if (state.trades.some((candidate) => (
+      Date.parse(candidate.at || 0) > timestamp
+      && isOpeningExecutionStatusForRetry(candidate.status)
+      && stopLossRetryKeyFromEvent(candidate) === key
+    ))) {
+      continue;
+    }
+    const item = queueStopLossRetry(event, key);
+    if (item) {
+      item.expiresAt = new Date(timestamp + STOP_LOSS_RETRY_MAX_AGE_MS).toISOString();
+    }
+  }
 }
 
 function countParsedSignals(posts = []) {
@@ -769,6 +1149,7 @@ const server = createServer(async (request, response) => {
     if (requestUrl.pathname === '/api/historical-pnl' && request.method === 'GET') {
       const bingx = configStore.getBingX();
       const portfolio = configStore.getPortfolio();
+      const referencePortfolioUrl = portfolioSourceForReference(portfolio);
       const parsedHistorical = buildHistoricalPnl(store.list(), {
         months: requestUrl.searchParams.get('months') || 72,
         defaultNotionalUSDT: bingx.monthlyOrderNotionalUSDT || bingx.defaultNotionalUSDT || 30,
@@ -776,7 +1157,7 @@ const server = createServer(async (request, response) => {
       });
       const historical = await applyReferenceLedger(parsedHistorical, {
         month: requestUrl.searchParams.get('month') || currentMonthKey(),
-        portfolioUrl: portfolio.url
+        portfolioUrl: referencePortfolioUrl
       });
       return sendJson(response, { ok: true, historical });
     }
@@ -784,7 +1165,7 @@ const server = createServer(async (request, response) => {
     if (requestUrl.pathname === '/api/reference-ledger' && request.method === 'GET') {
       const month = requestUrl.searchParams.get('month') || currentMonthKey();
       const portfolio = configStore.getPortfolio();
-      const reference = await loadReferenceLedger({ month, portfolioUrl: portfolio.url });
+      const reference = await loadReferenceLedger({ month, portfolioUrl: portfolioSourceForReference(portfolio) });
       return sendJson(response, { ok: true, reference });
     }
 
@@ -941,6 +1322,7 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`YouTube Posts Scraper disponible en http://localhost:${port}`);
+  hydrateStopLossRetryQueueFromEvents();
   checkAutomaticMonthlyReset({ reason: 'startup' }).catch((error) => {
     pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
   });
@@ -1090,6 +1472,7 @@ function currentState() {
     monitor: configStore.getMonitor(),
     telegramSource: configStore.getTelegramSource(),
     portfolio: configStore.getPortfolio(),
+    stopLossRetryQueue: stopLossRetryQueueState(),
     exchangeSafety: buildExchangeSafety(),
     stats: store.stats()
   };
@@ -1564,6 +1947,81 @@ function scheduleExchangeSyncForTrade(event = {}) {
   }
 
   runSync();
+}
+
+function scheduleStopLossRepairForTrade(event = {}) {
+  const status = String(event.status || '');
+  const mode = String(event.executionMode || '').toLowerCase();
+  const signal = event.signal || {};
+  if (
+    !isOpeningExecutionStatusForRetry(status)
+    || (mode !== 'demo' && mode !== 'live')
+    || !signal.symbol
+    || !signal.direction
+    || !signal.stopLoss
+  ) {
+    return;
+  }
+
+  setTimeout(() => {
+    repairMissingStopLossForTrade(event).catch((error) => {
+      pushLog({
+        level: 'warn',
+        message: `Repair SL ${signal.symbol}: ${error.message}`,
+        at: new Date().toISOString()
+      });
+    });
+  }, EXCHANGE_STOP_LOSS_REPAIR_DELAY_MS).unref();
+}
+
+async function repairMissingStopLossForTrade(event = {}) {
+  const mode = String(event.executionMode || '').toLowerCase();
+  const signal = event.signal || {};
+  const baseConfig = configStore.getBingX({ includeSecrets: true });
+  if (!baseConfig.enabled || !configAllowsRetryMode(baseConfig.mode, mode)) {
+    return;
+  }
+  if (mode === 'live' && !baseConfig.liveConfirmed) {
+    return;
+  }
+
+  const config = {
+    ...baseConfig,
+    mode
+  };
+  futuresTrader.clearOpenOrdersCache({ mode });
+  const positions = await futuresTrader.getExchangeOpenPositions({ mode });
+  const target = positions.find((position) => (
+    position.status === 'open'
+    && normalizePositionSymbol(position.symbol) === normalizePositionSymbol(signal.symbol)
+    && String(position.direction || '').toUpperCase() === String(signal.direction || '').toUpperCase()
+  ));
+
+  if (!target || hasStopLossProtection(target)) {
+    return;
+  }
+
+  pushLog({
+    level: mode === 'live' ? 'warn' : 'info',
+    message: `Repair SL ${mode}: ${signal.symbol} ${signal.direction} -> ${signal.stopLoss}.`,
+    at: new Date().toISOString()
+  });
+  futuresTrader.clearOpenOrdersCache({ mode });
+  await futuresTrader.executeStopLossSignalWithConfig({
+    ...signal,
+    action: 'SET_STOP_LOSS'
+  }, {
+    post: {
+      id: event.postId || null,
+      url: event.postUrl || null,
+      firstSeenAt: event.at || new Date().toISOString()
+    },
+    phase: 'auto_stop_loss_repair'
+  }, config);
+  futuresTrader.clearOpenOrdersCache({ mode });
+  await syncExchangePositions({ reason: 'auto_stop_loss_repair' }).catch((error) => {
+    pushLog({ level: 'warn', message: `BingX sync repair SL: ${error.message}`, at: new Date().toISOString() });
+  });
 }
 
 function shouldDelayExchangeSync(event = {}) {
@@ -2793,6 +3251,12 @@ async function shutdown() {
   if (backupTimer) {
     clearInterval(backupTimer);
   }
+  for (const item of pendingStopLossRetries.values()) {
+    if (item.timer) {
+      clearTimeout(item.timer);
+    }
+  }
+  pendingStopLossRetries.clear();
   await scraper.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1000).unref();

@@ -1,35 +1,35 @@
 # AGENTS.md
 
-Guia operativa para Codex y cualquier agente que mantenga este repositorio.
+Guía operativa para Codex y cualquier agente que mantenga este repositorio.
 
 ## Prioridad
 
-Futures Magician puede enviar ordenes a BingX. La prioridad siempre es:
+Futures Magician puede enviar órdenes a BingX. La prioridad siempre es:
 
-1. No ejecutar acciones reales de trading sin confirmacion explicita del usuario en ese momento.
-2. No exponer ni versionar secretos, sesiones web, backups con datos sensibles ni historicos locales privados.
-3. Preservar la logica operativa que ya funciona, especialmente parser, anti-duplicados, stop loss, TP, cierres y reconciliacion.
-4. Verificar cambios con comandos locales antes de commitear o pushear.
+1. No ejecutar acciones reales de trading sin confirmación explícita del usuario en ese momento.
+2. No exponer ni versionar secretos, sesiones web, backups con datos sensibles ni históricos locales privados.
+3. Preservar la lógica operativa que ya funciona, especialmente parser, anti-duplicados, stop loss, TP, cierres y reconciliación.
+4. Verificar cambios con comandos locales antes de hacer commit o hacer push.
 
 ## Alcance del proyecto
 
-La app es un servidor Node.js local con frontend estatico:
+La app es un servidor Node.js local con frontend estático:
 
-- `src/server.js`: API HTTP, SSE, estado global, monitor, PM2/runtime local.
+- `src/server.js`: API HTTP, SSE, estado global, monitor, PM2/entorno local.
 - `src/youtubeScraper.js`: Playwright Chromium persistente para YouTube y Telegram Web.
-- `src/futuresSignalParser.js`: parser de texto libre a senales normalizadas.
-- `src/futuresTrader.js`: motor de ejecucion, validaciones, riesgo, demo/live y gestion de posiciones.
+- `src/futuresSignalParser.js`: parser de texto libre a señales normalizadas.
+- `src/futuresTrader.js`: motor de ejecución, validaciones, riesgo, demo/live y gestión de posiciones.
 - `src/bingxClient.js`: cliente REST firmado de BingX.
 - `src/paperTradeStore.js`: trading local/paper.
-- `src/referenceLedger.js`: lectura de Google Sheet de referencia.
-- `src/tradeEventStore.js`: auditoria de eventos reales/demo/paper.
+- `src/referenceLedger.js`: lectura de hoja de Google de referencia.
+- `src/tradeEventStore.js`: auditoría de eventos reales/demo/paper.
 - `public/app.js`, `public/index.html`, `public/styles.css`: UI local.
-- `scripts/strategyStudy.js`: informe estadistico de operativa.
-- `docs/`: documentacion operativa.
+- `scripts/strategyStudy.js`: informe estadístico de operativa.
+- `docs/`: documentación operativa.
 
 ## Archivos que no se suben
 
-No anadas ni fuerces nunca estos datos al repositorio:
+No añadas ni fuerces nunca estos datos al repositorio:
 
 - `.data/config.json`
 - `.data/posts.json`
@@ -41,18 +41,18 @@ No anadas ni fuerces nunca estos datos al repositorio:
 - API key o secret de BingX
 - capturas que muestren credenciales, IDs privados o saldos sensibles
 
-Antes de commitear, revisa:
+Antes de hacer commit, revisa:
 
 ```bash
 git status --short
 rg -n "(botToken|apiSecret|apiKey|TOKEN|SECRET|PRIVATE_KEY|chatId)" README.md docs public src package.json package-lock.json
 ```
 
-El segundo comando puede mostrar ejemplos documentados. Si aparece un valor real, parate y limpialo antes de seguir.
+El segundo comando puede mostrar ejemplos documentados. Si aparece un valor real, párate y límpialo antes de seguir.
 
 ## Comandos habituales
 
-Instalacion:
+Instalación:
 
 ```bash
 npm install
@@ -71,14 +71,14 @@ Salud local:
 curl http://localhost:5178/api/health
 ```
 
-Validacion estatica:
+Validación estática:
 
 ```bash
 npm run lint
 git diff --check
 ```
 
-Informe estrategico:
+Informe estratégico:
 
 ```bash
 npm run study:strategy
@@ -102,7 +102,7 @@ pm2 save
 
 ## Reglas por tipo de cambio
 
-### Parser de senales
+### Parser de señales
 
 - Lee primero `docs/SIGNALS.md`.
 - Preserva aperturas `LONG` y `SHORT`, cierres, cierre total, TP, SL, break even y mensajes mixtos.
@@ -112,34 +112,34 @@ pm2 save
 
 ### Motor BingX y riesgo
 
-- No ejecutes endpoints que creen, cierren o modifiquen ordenes reales sin confirmacion explicita del usuario.
-- En revisiones tecnicas, usa `test`, lectura de estado o validaciones sin efecto.
+- No ejecutes endpoints que creen, cierren o modifiquen órdenes reales sin confirmación explícita del usuario.
+- En revisiones técnicas, usa `test`, lectura de estado o validaciones sin efecto.
 - Mantener claro el aislamiento entre:
   - real USDT;
   - demo VST;
   - paper/test local.
-- Cualquier cambio en tamanos de orden, apalancamiento, SL/TP o modo live debe quedar visible en UI y documentado.
+- Cualquier cambio en tamaños de orden, apalancamiento, SL/TP o modo live debe quedar visible en UI y documentado.
 
 ### Scraping YouTube / Telegram Web
 
-- No borres `.yt-profile/` salvo peticion explicita.
+- No borres `.yt-profile/` salvo petición explícita.
 - No cambies el comportamiento de auto-resume sin explicarlo.
-- Si YouTube o Telegram Web no devuelven posts visibles, diagnostica sesion, URL, DOM y logs antes de tocar logica.
-- Telegram Web puede usarse para gestion de posiciones; las aperturas desde Telegram deben tratarse como decision de riesgo.
+- Si YouTube o Telegram Web no devuelven posts visibles, diagnostica sesión, URL, DOM y logs antes de tocar lógica.
+- Telegram Web puede usarse para gestión de posiciones; las aperturas desde Telegram deben tratarse como decisión de riesgo.
 
 ### Frontend
 
 - No mezcles visual de real USDT con demo VST si el panel es de futuros reales.
-- Las pantallas de riesgo deben mostrar estado, ultima reconciliacion, ultimo error, monitor, Telegram y BingX de forma clara.
-- Verifica que los textos no se solapan en desktop y movil cuando cambies UI.
-- No alteres la logica operativa desde UI salvo que el cambio lo requiera explicitamente.
+- Las pantallas de riesgo deben mostrar estado, última reconciliación, último error, monitor, Telegram y BingX de forma clara.
+- Verifica que los textos no se solapan en desktop y móvil cuando cambies UI.
+- No alteres la lógica operativa desde UI salvo que el cambio lo requiera explícitamente.
 
-### Documentacion
+### Documentación
 
 - Mantener README como entrada principal.
-- Mantener docs especificos en `docs/`.
+- Mantener docs específicos en `docs/`.
 - Usar placeholders para URLs privadas, IDs, tokens y saldos sensibles.
-- Si anades diagramas, usa Mermaid para que GitHub los renderice.
+- Si añades diagramas, usa Mermaid para que GitHub los renderice.
 
 ## Checklist antes de entregar
 
@@ -148,23 +148,23 @@ pm2 save
 3. `git diff --check` sin errores.
 4. No hay secretos reales en el diff.
 5. Si tocaste UI, verificaste localhost en navegador.
-6. Si tocaste trading, no ejecutaste acciones reales sin confirmacion.
-7. Si hiciste commit, la autoria debe ser:
+6. Si tocaste trading, no ejecutaste acciones reales sin confirmación.
+7. Si hiciste commit, la autoría debe ser:
 
 ```text
 jotaterrasa <165782559+JotaTerrasa@users.noreply.github.com>
 ```
 
-## Git y publicacion
+## Git y publicación
 
-Usa commits pequenos y descriptivos. Para commit con autoria correcta:
+Usa commits pequeños y descriptivos. Para commit con autoría correcta:
 
 ```bash
 git add README.md docs AGENTS.md
 git -c user.name="jotaterrasa" -c user.email="165782559+JotaTerrasa@users.noreply.github.com" commit -m "Update project documentation"
 ```
 
-Para push, usa la credencial de GitHub ya configurada en el entorno si esta disponible.
+Para push, usa la credencial de GitHub ya configurada en el entorno si está disponible.
 
 ## Incidentes
 
@@ -172,23 +172,23 @@ Si hay descuadre entre app y BingX:
 
 1. No abras nuevas posiciones para "probar".
 2. Revisa UI, Telegram, `/api/health`, eventos y BingX directamente.
-3. Identifica si falta SL, TP, cierre, posicion o cancelacion.
-4. Documenta el mensaje original, la senal parseada, la orden enviada y la respuesta de BingX.
-5. Pide confirmacion antes de cualquier accion real correctiva.
+3. Identifica si falta SL, TP, cierre, posición o cancelación.
+4. Documenta el mensaje original, la señal parseada, la orden enviada y la respuesta de BingX.
+5. Pide confirmación antes de cualquier acción real correctiva.
 
 Si el monitor se para:
 
 1. Comprueba PM2.
 2. Comprueba `/api/health`.
-3. Mira si `autoResume` esta activo o si fue parada manual.
-4. Reanuda solo el monitor si la configuracion de riesgo esta clara.
+3. Mira si `autoResume` está activo o si fue parada manual.
+4. Reanuda solo el monitor si la configuración de riesgo está clara.
 
 ## Referencias
 
 - [README](README.md)
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Despliegue](docs/DEPLOYMENT.md)
-- [Operacion diaria](docs/OPERATIONS.md)
-- [Formato de senales](docs/SIGNALS.md)
+- [Operación diaria](docs/OPERATIONS.md)
+- [Formato de señales](docs/SIGNALS.md)
 - [Seguridad](docs/SECURITY.md)
-- [Estudio estrategico](docs/STRATEGY_STUDY.md)
+- [Estudio estratégico](docs/STRATEGY_STUDY.md)

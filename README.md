@@ -1,42 +1,42 @@
 # Futures Magician
 
-Futures Magician es una aplicacion local para monitorizar publicaciones de miembros de YouTube, leer mensajes de Telegram Web, emitir alertas por Telegram y gestionar senales de futuros en BingX con varios modos de seguridad.
+Futures Magician es una aplicación local para monitorizar publicaciones de miembros de YouTube, leer mensajes de Telegram Web, emitir alertas por Telegram y gestionar señales de futuros en BingX con varios modos de seguridad.
 
-La aplicacion esta pensada para ejecutarse en tu propia maquina. Las sesiones web viven en un perfil Chromium persistente y los secretos se guardan en `.data/config.json`, que esta ignorado por Git.
+La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones web viven en un perfil Chromium persistente y los secretos se guardan en `.data/config.json`, que está ignorado por Git.
 
-## Indice
+## Índice
 
-- [Que hace](#que-hace)
+- [Qué hace](#qué-hace)
 - [Arquitectura](#arquitectura)
 - [Modos de BingX](#modos-de-bingx)
 - [Requisitos](#requisitos)
-- [Instalacion rapida](#instalacion-rapida)
+- [Instalación rápida](#instalación-rápida)
 - [Arranque con PM2](#arranque-con-pm2)
-- [Configuracion inicial](#configuracion-inicial)
-- [Operacion diaria](#operacion-diaria)
-- [Seguridad y limites](#seguridad-y-limites)
+- [Configuración inicial](#configuración-inicial)
+- [Operación diaria](#operación-diaria)
+- [Seguridad y límites](#seguridad-y-límites)
 - [Paneles de la UI](#paneles-de-la-ui)
-- [Informes, backups y auditoria](#informes-backups-y-auditoria)
-- [Endpoints utiles](#endpoints-utiles)
+- [Informes, backups y auditoría](#informes-backups-y-auditoría)
+- [Endpoints útiles](#endpoints-útiles)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Datos locales](#datos-locales)
-- [Guia para Codex](#guia-para-codex)
+- [Guía para Codex](#guía-para-codex)
 - [Troubleshooting](#troubleshooting)
-- [Documentacion ampliada](#documentacion-ampliada)
+- [Documentación ampliada](#documentación-ampliada)
 
-## Que hace
+## Qué hace
 
-- Scrapea posts de miembros de YouTube con Playwright.
-- Puede leer un canal de Telegram Web para detectar mensajes de gestion antes de que aparezcan en YouTube.
-- Detecta senales de futuros: aperturas, cierres, cierre total, take profits, modificaciones de stop loss y stop a break even.
-- Permite alertas por Telegram para posts, eventos criticos y salud del monitor.
-- Opera contra BingX en `test`, Demo VST, live real o modo mixto, segun configuracion.
-- Requiere stop loss si se activa esa proteccion.
-- Mantiene anti-duplicados para evitar repetir senales ya procesadas.
+- Rastrea posts de miembros de YouTube con Playwright.
+- Puede leer un canal de Telegram Web para detectar mensajes de gestión antes de que aparezcan en YouTube.
+- Detecta señales de futuros: aperturas, cierres, cierre total, take profits, modificaciones de stop loss y stop a break even.
+- Permite alertas por Telegram para posts, eventos críticos y salud del monitor.
+- Opera contra BingX en `test`, Demo VST, live real o modo mixto, según configuración.
+- Requiere stop loss si se activa esa protección.
+- Mantiene anti-duplicados para evitar repetir señales ya procesadas.
 - Reconcilia lo que la app cree que existe con lo que BingX devuelve.
-- Muestra PnL real, Google Sheet de referencia, ROI mensual, historial auditable, linea de vida de senales e incidencias.
-- Genera informes de estudio estrategico para aprender patrones de la operativa.
-- Genera backups redacted sin credenciales.
+- Muestra PnL real, hoja de Google de referencia, ROI mensual, historial auditable, línea de vida de señales e incidencias.
+- Genera informes de estudio estratégico para aprender patrones de la operativa.
+- Genera backups redactados sin credenciales.
 
 ## Arquitectura
 
@@ -44,55 +44,55 @@ La aplicacion esta pensada para ejecutarse en tu propia maquina. Las sesiones we
 flowchart LR
   operator["Operador local"] --> ui["UI local<br/>public/index.html<br/>public/app.js"]
   ui <--> api["Node HTTP API + SSE<br/>src/server.js"]
-  api --> config[".data/config.json<br/>configuracion y secretos locales"]
+  api --> config[".data/config.json<br/>configuración y secretos locales"]
   api --> stores[".data/*.json<br/>posts, eventos, trades, backups"]
   api --> pm2["PM2 / npm run dev<br/>proceso en segundo plano"]
 
-  subgraph sources["Fuentes de senales"]
+  subgraph sources["Fuentes de señales"]
     youtube["YouTube members posts"] --> scraper["Playwright Chromium<br/>src/youtubeScraper.js"]
     telegramWeb["Telegram Web channel"] --> scraper
   end
 
-  scraper --> parser["Parser de senales<br/>src/futuresSignalParser.js"]
+  scraper --> parser["Parser de señales<br/>src/futuresSignalParser.js"]
   parser --> trader["Motor de futuros<br/>src/futuresTrader.js"]
-  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>limites, antiguedad y modo real"]
+  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>límites, antigüedad y modo real"]
   risk --> bingxClient["Cliente BingX REST<br/>src/bingxClient.js"]
   bingxClient <--> bingx["BingX Futures"]
 
   api --> priceWs["Precios WebSocket<br/>src/bingxPriceWebSocket.js"]
   priceWs <--> bingx
-  api --> reconcile["Reconciliacion real<br/>posiciones, SL/TP y ordenes huerfanas"]
+  api --> reconcile["Reconciliación real<br/>posiciones, SL/TP y órdenes huérfanas"]
   reconcile <--> bingx
 
   api --> notifier["Alertas Telegram<br/>src/telegramNotifier.js"]
-  notifier --> telegramBot["Telegram Bot"]
+  notifier --> telegramBot["bot de Telegram"]
 
   api --> sheet["Google Sheet / referencia<br/>src/referenceLedger.js"]
-  api --> study["Estudio estrategico<br/>scripts/strategyStudy.js"]
+  api --> study["Estudio estratégico<br/>scripts/strategyStudy.js"]
   study --> reports["docs/strategy-reports/"]
-  api --> backup["Backup redacted<br/>.data/backups/"]
+  api --> backup["Backup redactado<br/>.data/backups/"]
 ```
 
 Flujo principal:
 
-1. La UI configura fuentes, Telegram, BingX, limites y modo de ejecucion a traves de la API local.
+1. La UI configura fuentes, Telegram, BingX, límites y modo de ejecución a través de la API local.
 2. Playwright mantiene sesiones persistentes en `.yt-profile/` y lee YouTube/Telegram Web.
 3. El parser convierte texto libre en eventos operables: apertura, cierre, TP, SL, break even o cierre total.
-4. El motor de futuros valida cada senal antes de enviarla: stop loss, duplicados, limites, antiguedad, modo y bloqueo local.
-5. BingX ejecuta o reconcilia segun el modo activo; la app compara periodicamente estado local contra estado real.
-6. Telegram Bot avisa de senales, ejecuciones, errores, descuadres, salud del monitor y acciones criticas.
-7. Los stores locales, backups redacted e informes permiten auditar lo ocurrido sin subir secretos al repo.
+4. El motor de futuros valida cada señal antes de enviarla: stop loss, duplicados, límites, antigüedad, modo y bloqueo local.
+5. BingX ejecuta o reconcilia según el modo activo; la app compara periódicamente estado local contra estado real.
+6. El bot de Telegram avisa de señales, ejecuciones, errores, descuadres, salud del monitor y acciones críticas.
+7. Los almacenes locales, backups redactados e informes permiten auditar lo ocurrido sin subir secretos al repo.
 
 ## Modos de BingX
 
-| Modo | Descripcion | Uso recomendado |
+| Modo | Descripción | Uso recomendado |
 |---|---|---|
-| `test` | Simulacion local/paper. No envia ordenes reales. | Primeras pruebas y validacion de parser. |
+| `test` | Simulación local/paper. No envía órdenes reales. | Primeras pruebas y validación de parser. |
 | `demo` | Opera en BingX Demo VST. | Ensayo con entorno exchange sin dinero real. |
 | `live` | Opera en cuenta real USDT. | Solo con API validada, live confirmado y riesgo revisado. |
-| `dual` | Ejecuta Demo VST y live real en paralelo. | Comparar ejecucion demo/real. |
+| `dual` | Ejecuta Demo VST y live real en paralelo. | Comparar ejecución demo/real. |
 
-La pestana de futuros reales muestra solo USDT y estado de la cuenta real.
+La pestaña de futuros reales muestra solo USDT y estado de la cuenta real.
 
 ## Requisitos
 
@@ -104,7 +104,7 @@ La pestana de futuros reales muestra solo USDT y estado de la cuenta real.
 - Opcional: API key y secret de BingX.
 - Opcional: PM2 para dejar la app en segundo plano.
 
-## Instalacion rapida
+## Instalación rápida
 
 ```bash
 git clone https://github.com/JotaTerrasa/yt-members-signal-trader.git
@@ -174,13 +174,13 @@ pm2 restart yt-members-signal-trader --update-env
 
 El monitor puede auto-resumir tras reinicio si se guardo con `autoResume` activo desde la UI.
 
-## Configuracion inicial
+## Configuración inicial
 
 ### 1. YouTube
 
-1. Pega la URL de la pestana de publicaciones.
-2. Pulsa `Abrir sesion`.
-3. Inicia sesion en Chromium.
+1. Pega la URL de la pestaña de publicaciones.
+2. Pulsa `Abrir sesión`.
+3. Inicia sesión en Chromium.
 4. Activa `Monitor continuo`.
 5. Usa un intervalo razonable, por ejemplo `30 s`.
 6. Pulsa `Iniciar`.
@@ -190,12 +190,12 @@ El monitor puede auto-resumir tras reinicio si se guardo con `autoResume` activo
 1. Activa `Scrapear canal`.
 2. Pega la URL de Telegram Web.
 3. Pulsa `Abrir canal`.
-4. Inicia sesion si Chromium lo pide.
-5. Deja activo `Cierres/TP/SL` si quieres usar Telegram para gestion.
-6. Mantener `Permitir aperturas` desactivado es lo mas conservador.
-7. Si el modo BingX es live, marca la confirmacion explicita.
+4. Inicia sesión si Chromium lo pide.
+5. Deja activo `Cierres/TP/SL` si quieres usar Telegram para gestión.
+6. Mantener `Permitir aperturas` desactivado es lo más conservador.
+7. Si el modo BingX es live, marca la confirmación explícita.
 
-### 3. Telegram bot para alertas
+### 3. bot de Telegram para alertas
 
 1. Crea un bot con BotFather.
 2. Pega el token en `Bot token`.
@@ -207,15 +207,15 @@ No escribas tokens en README, issues, commits ni capturas.
 
 ### 4. BingX
 
-1. Activa `Auto-operar senales` solo cuando estes listo.
+1. Activa `Auto-operar señales` solo cuando estés listo.
 2. Elige modo: `test`, `demo`, `live` o `dual`.
 3. Pega API key y API secret.
-4. Configura capital mensual, porcentaje fijo por senal, margen, apalancamiento maximo y limites.
+4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
 5. Activa `Exigir stop loss`.
 6. Si vas a live, revisa el checklist `Preparado para live`.
-7. Arma live solo desde la UI y con confirmacion consciente.
+7. Arma live solo desde la UI y con confirmación consciente.
 
-## Operacion diaria
+## Operación diaria
 
 Antes de dejar la app funcionando:
 
@@ -224,22 +224,22 @@ Antes de dejar la app funcionando:
 - En la UI, `Monitor live activo` debe estar verde.
 - `API BingX validada` debe estar verde si usas BingX.
 - `Stop loss obligatorio` debe estar verde.
-- `Seguro real BingX` debe indicar que no faltan SL/TP criticos.
-- `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestion.
+- `Seguro real BingX` debe indicar que no faltan SL/TP críticos.
+- `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestión.
 - `Guardia nocturna` debe estar estable.
-- `Incidencias 24h` no debe mostrar errores criticos sin revisar.
-- `Backup auto` debe tener una ejecucion reciente o programada.
+- `Incidencias 24h` no debe mostrar errores críticos sin revisar.
+- `Backup auto` debe tener una ejecución reciente o programada.
 
-Durante la sesion:
+Durante la sesión:
 
-- Revisa `Linea de vida real` para ver cada senal: recibida, parseada, validada, enviada, aceptada y cerrada.
-- Revisa `Historial de senales` para auditar la senal original, orden enviada, respuesta de BingX, PnL y motivo.
+- Revisa `Línea de vida real` para ver cada señal: recibida, parseada, validada, enviada, aceptada y cerrada.
+- Revisa `Historial de señales` para auditar la señal original, orden enviada, respuesta de BingX, PnL y motivo.
 - Revisa `Rendimiento` para comparar futuros reales y Google Sheet.
-- Revisa `Estudio estrategico` para conclusiones estadisticas, no para ejecutar decisiones autonomas todavia.
+- Revisa `Estudio estratégico` para conclusiones estadísticas, no para ejecutar decisiones autónomas todavía.
 
-## Seguridad y limites
+## Seguridad y límites
 
-La app puede enviar ordenes reales si la config lo permite. Trata el panel local como una consola de produccion.
+La app puede enviar órdenes reales si la config lo permite. Trata el panel local como una consola de producción.
 
 Reglas recomendadas:
 
@@ -247,21 +247,21 @@ Reglas recomendadas:
 - No des permisos de retirada a las API keys.
 - Usa IP whitelist si BingX lo permite.
 - Mantener stop loss obligatorio.
-- Configurar limite de perdida diaria.
-- Configurar limite de perdida mensual.
-- Configurar maximo de ordenes por dia.
-- No expongas `localhost:5178` a internet sin autenticacion.
+- Configurar límite de pérdida diaria.
+- Configurar límite de pérdida mensual.
+- Configurar máximo de órdenes por dia.
+- No expongas `localhost:5178` a internet sin autenticación.
 - No subas `.data/config.json`.
 - No borres `.yt-profile/` si quieres conservar sesiones de YouTube/Telegram Web.
 
 Botones de emergencia disponibles:
 
 - `Pausar entradas`.
-- `Solo gestion`.
+- `Solo gestión`.
 - `Cancelar pendientes`.
 - `Cerrar todo real`.
 
-Los botones destructivos piden confirmacion textual.
+Los botones destructivos piden confirmación textual.
 
 ## Paneles de la UI
 
@@ -278,7 +278,7 @@ Muestra logs internos: scraping, Telegram, BingX, health, backups e incidencias.
 Incluye:
 
 - Futuros reales en USDT.
-- Google Sheet de referencia.
+- hoja de Google de referencia.
 - ROI mensual.
 - Simulador de capital inicial para Google Sheet.
 - Guardia nocturna.
@@ -290,14 +290,14 @@ Incluye:
 - Seguro real BingX.
 - Emergencia real.
 - Posiciones abiertas.
-- Estudio estrategico.
-- Linea de vida real.
+- Estudio estratégico.
+- Línea de vida real.
 - Historial auditable.
 - Rendimiento detallado.
 
-## Informes, backups y auditoria
+## Informes, backups y auditoría
 
-### Estudio estrategico
+### Estudio estratégico
 
 Ejecutar manualmente:
 
@@ -314,13 +314,13 @@ docs/strategy-reports/latest.md
 docs/strategy-reports/strategy-study-*.md
 ```
 
-La UI lee el ultimo informe desde:
+La UI lee el último informe desde:
 
 ```text
 /api/strategy-study/latest
 ```
 
-### Backup redacted
+### Backup redactado
 
 Endpoint manual:
 
@@ -335,7 +335,7 @@ Backups automaticos:
 .data/backups/futures-magician-backup-YYYY-MM-DD.json
 ```
 
-El backup redacted omite:
+El backup redactado omite:
 
 - API keys.
 - API secrets.
@@ -343,7 +343,7 @@ El backup redacted omite:
 - Chat ID.
 - Previews de secretos.
 
-### Auditoria
+### Auditoría
 
 Endpoints:
 
@@ -355,18 +355,18 @@ Endpoints:
 /api/export.csv
 ```
 
-## Endpoints utiles
+## Endpoints útiles
 
-| Endpoint | Descripcion |
+| Endpoint | Descripción |
 |---|---|
 | `GET /api/health` | Salud del monitor. |
 | `GET /api/state` | Estado completo de app y monitor. |
 | `GET /api/audit` | Snapshot auditable. |
 | `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
-| `GET /api/bingx/positions` | Reconciliacion de posiciones. |
+| `GET /api/bingx/positions` | Reconciliación de posiciones. |
 | `GET /api/bingx/pnl-sources` | Fuentes de rendimiento. |
-| `GET /api/historical-pnl` | Historico local/Google Sheet. |
-| `GET /api/strategy-study/latest` | Ultimo estudio estrategico. |
+| `GET /api/historical-pnl` | Histórico local/Google Sheet. |
+| `GET /api/strategy-study/latest` | Último estudio estratégico. |
 | `GET /api/backup/redacted` | Backup seguro descargable. |
 
 ## Estructura del proyecto
@@ -374,22 +374,22 @@ Endpoints:
 ```text
 public/
   index.html             UI local
-  app.js                 Estado frontend, paneles, PnL, auditoria
+  app.js                 Estado frontend, paneles, PnL, auditoría
   styles.css             Estilos
 
 src/
   server.js              API HTTP, SSE, salud, PM2 runtime
   youtubeScraper.js      Playwright, YouTube y Telegram Web
-  futuresSignalParser.js Parser de senales
-  futuresTrader.js       Test/demo/live/dual y gestion
+  futuresSignalParser.js Parser de señales
+  futuresTrader.js       Test/demo/live/dual y gestión
   bingxClient.js         Cliente REST BingX
   bingxPriceWebSocket.js WebSocket de precios
-  referenceLedger.js     Google Sheet de referencia
-  portfolioDetector.js   Deteccion de portfolio
+  referenceLedger.js     hoja de Google de referencia
+  portfolioDetector.js   Detección de portfolio
   *Store.js              Persistencia local
 
 scripts/
-  strategyStudy.js       Informe estrategico
+  strategyStudy.js       Informe estratégico
 
 docs/
   ARCHITECTURE.md
@@ -417,30 +417,30 @@ tmp/
 Contenido importante:
 
 ```text
-.data/config.json             Configuracion local con secretos
+.data/config.json             Configuración local con secretos
 .data/posts.json              Posts/mensajes guardados
 .data/trade-events.json       Eventos de trading
-.data/paper-trades.json       Simulacion local
+.data/paper-trades.json       Simulación local
 .data/backups/                Backups redacted
 .yt-profile/                  Sesiones Chromium
 ```
 
 No borres `.yt-profile/` salvo que quieras reiniciar sesiones web.
 
-## Guia para Codex
+## Guía para Codex
 
-El repositorio incluye [AGENTS.md](AGENTS.md), que es la guia operativa para Codex y otros agentes de codigo.
+El repositorio incluye [AGENTS.md](AGENTS.md), que es la guía operativa para Codex y otros agentes de código.
 
 Resume:
 
-- limites de seguridad para no tocar trading live sin confirmacion;
+- límites de seguridad para no tocar trading live sin confirmación;
 - archivos que nunca deben subirse;
-- comandos de validacion;
+- comandos de validación;
 - mapa de modulos;
-- reglas para cambios de parser, BingX, UI y documentacion;
+- reglas para cambios de parser, BingX, UI y documentación;
 - checklist antes de hacer commit o push.
 
-Si trabajas con un agente, empieza por ese archivo antes de pedir cambios sobre senales, ejecucion, riesgo o PM2.
+Si trabajas con un agente, empieza por ese archivo antes de pedir cambios sobre señales, ejecución, riesgo o PM2.
 
 ## Troubleshooting
 
@@ -461,10 +461,10 @@ npm run dev
 
 Revisa:
 
-- Si Chromium esta logueado.
+- Si Chromium está logueado.
 - Si YouTube devuelve posts visibles.
-- Si el monitor esta activo.
-- Si el puerto `5178` esta libre.
+- Si el monitor está activo.
+- Si el puerto `5178` está libre.
 
 ### Telegram Web no lee mensajes
 
@@ -479,12 +479,12 @@ Acciones:
 
 ### BingX PnL muestra rate-limit
 
-Es normal si se consulta demasiado el historico. La app entra en cooldown y usa ultimo dato/fallback hasta que BingX permita reintentar.
+Es normal si se consulta demasiado el histórico. La app entra en cooldown y usa último dato/fallback hasta que BingX permita reintentar.
 
 Revisa:
 
 ```text
-Guardia nocturna -> PnL historico
+Guardia nocturna -> PnL histórico
 Watchdog Telegram Web -> PnL BingX
 ```
 
@@ -493,31 +493,31 @@ Watchdog Telegram Web -> PnL BingX
 Revisa:
 
 - `Seguro real BingX`.
-- `Linea de vida real`.
-- `Historial de senales`.
+- `Línea de vida real`.
+- `Historial de señales`.
 - La cuenta de BingX directamente.
 
 ### El monitor se para tras reinicio
 
-Comprueba que auto-resume este guardado y PM2 online:
+Comprueba que auto-resume esté guardado y PM2 online:
 
 ```bash
 pm2 status yt-members-signal-trader
 curl http://localhost:5178/api/health
 ```
 
-## Documentacion ampliada
+## Documentación ampliada
 
 - [Despliegue](docs/DEPLOYMENT.md)
-- [Operacion diaria](docs/OPERATIONS.md)
-- [Formato de senales](docs/SIGNALS.md)
+- [Operación diaria](docs/OPERATIONS.md)
+- [Formato de señales](docs/SIGNALS.md)
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Seguridad](docs/SECURITY.md)
-- [Estudio estrategico](docs/STRATEGY_STUDY.md)
-- [Guia para agentes Codex](AGENTS.md)
+- [Estudio estratégico](docs/STRATEGY_STUDY.md)
+- [Guía para agentes Codex](AGENTS.md)
 
 ## Aviso
 
-Este proyecto automatiza acciones de trading a partir de texto scrapeado. El parser y la ejecucion pueden fallar si cambia el formato de las senales, si el exchange responde distinto, si hay latencia, rate-limit, sesion web caducada o errores humanos de configuracion.
+Este proyecto automatiza acciones de trading a partir de texto scrapeado. El parser y la ejecución pueden fallar si cambia el formato de las señales, si el exchange responde distinto, si hay latencia, rate-limit, sesión web caducada o errores humanos de configuración.
 
-Antes de usar live real, valida en test/demo, revisa la auditoria y usa limites de riesgo.
+Antes de usar live real, valida en test/demo, revisa la auditoría y usa límites de riesgo.

@@ -1,21 +1,21 @@
 # Arquitectura
 
-Futures Magician es un servidor Node.js local con frontend estatico, scraping por Playwright, persistencia en JSON local y conexiones opcionales a Telegram y BingX.
+Futures Magician es un servidor Node.js local con frontend estático, scraping por Playwright, persistencia en JSON local y conexiones opcionales a Telegram y BingX.
 
 ## Vista de contenedores
 
 ```mermaid
 flowchart TB
-  user["Operador local"] --> browser["Browser UI<br/>http://localhost:5178"]
+  user["Operador local"] --> browser["Interfaz web<br/>http://localhost:5178"]
   browser <--> server["Node HTTP API + SSE<br/>src/server.js"]
 
-  subgraph local["Maquina local"]
+  subgraph local["Máquina local"]
     server --> static["public/index.html<br/>public/app.js<br/>public/styles.css"]
     server --> data[".data/*.json<br/>config, posts, eventos,<br/>paper, backups"]
     server --> profile[".yt-profile/<br/>sesiones Chromium"]
   end
 
-  subgraph ingestion["Ingestion"]
+  subgraph ingestion["Ingesta"]
     server --> scraper["YouTubePostsScraper<br/>src/youtubeScraper.js"]
     scraper <--> youtube["YouTube members posts"]
     scraper <--> telegramWeb["Telegram Web"]
@@ -24,7 +24,7 @@ flowchart TB
 
   subgraph trading["Trading y riesgo"]
     server --> trader["FuturesTrader<br/>src/futuresTrader.js"]
-    trader --> parser["futuresSignalParser<br/>texto -> senal"]
+    trader --> parser["futuresSignalParser<br/>texto -> señal"]
     trader --> bingxClient["BingXClient<br/>REST firmado"]
     trader --> paper["PaperTradeStore<br/>test/paper local"]
     server --> priceWs["BingXPriceWebSocket<br/>precios"]
@@ -41,10 +41,10 @@ flowchart TB
   end
 
   server --> telegramBot["TelegramNotifier<br/>alertas bot"]
-  telegramBot --> telegram["Telegram Bot API"]
+  telegramBot --> telegram["bot de Telegram API"]
 ```
 
-## Secuencia de una senal
+## Secuencia de una señal
 
 ```mermaid
 sequenceDiagram
@@ -56,15 +56,15 @@ sequenceDiagram
   participant Trader as futuresTrader.js
   participant BingX as BingX REST
   participant UI as Frontend/SSE
-  participant Bot as Telegram Bot
+  participant Bot as bot de Telegram
 
-  Source->>Scraper: Publicacion o mensaje visible
+  Source->>Scraper: Publicación o mensaje visible
   Scraper->>Store: upsert post/mensaje
   Scraper->>Server: evento posts
   Server->>Parser: parsear texto
-  Parser-->>Server: senales normalizadas
+  Parser-->>Server: señales normalizadas
   Server->>Trader: processPosts
-  Trader->>Trader: validar modo, SL, duplicado, riesgo y antiguedad
+  Trader->>Trader: validar modo, SL, duplicado, riesgo y antigüedad
   alt modo test
     Trader->>Store: paper/local event
   else demo/live/dual
@@ -80,16 +80,16 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  config[".data/config.json<br/>configuracion y secretos"] --> server["server.js"]
+  config[".data/config.json<br/>configuración y secretos"] --> server["server.js"]
   posts[".data/posts.json<br/>posts/mensajes"] --> server
   events[".data/trade-events.json<br/>eventos auditables"] --> server
   paper[".data/paper-trades.json<br/>paper/test"] --> server
   study[".data/strategy-study/*.json/md<br/>informe runtime"] --> server
-  backups[".data/backups/*.json<br/>backup redacted"] --> server
+  backups[".data/backups/*.json<br/>backup redactado"] --> server
   profile[".yt-profile/<br/>sesiones web"] --> scraper["youtubeScraper.js"]
 ```
 
-Regla de seguridad: `.data/` y `.yt-profile/` son runtime local y no forman parte del repositorio.
+Regla de seguridad: `.data/` y `.yt-profile/` son entorno local y no forman parte del repositorio.
 
 ## Componentes
 
@@ -101,11 +101,11 @@ Orquesta:
 - Server-Sent Events para la UI.
 - Arranque/parada del scraper.
 - Estado, logs y salud.
-- Telegram bot de alertas.
+- bot de Telegram de alertas.
 - Telegram Web como fuente de mensajes.
 - BingX.
-- Portfolio dinamico.
-- PnL historico.
+- Portfolio dinámico.
+- PnL histórico.
 
 ### `src/youtubeScraper.js`
 
@@ -138,11 +138,11 @@ Hace upsert por `post.id`, mantiene `firstSeenAt`, `lastSeenAt`, `seenCount` y `
 
 ### `src/futuresSignalParser.js`
 
-Convierte texto libre en senales normalizadas:
+Convierte texto libre en señales normalizadas:
 
 - aperturas `LONG` / `SHORT`;
 - entradas LIMIT con precio;
-- cierres por simbolo;
+- cierres por símbolo;
 - cierre global;
 - TP;
 - modificacion de SL;
@@ -151,14 +151,14 @@ Convierte texto libre en senales normalizadas:
 
 ### `src/futuresTrader.js`
 
-Gestiona ejecucion:
+Gestiona ejecución:
 
-- valida configuracion y riesgo;
+- valida configuración y riesgo;
 - consulta contrato y ticker en BingX;
 - calcula cantidad;
-- envia ordenes `MARKET` o `LIMIT`;
+- envía órdenes `MARKET` o `LIMIT`;
 - adjunta SL/TP a aperturas;
-- cancela y recrea TP/SL de gestion;
+- cancela y recrea TP/SL de gestión;
 - abre/cierra paper local;
 - cierra posiciones demo/live;
 - soporta modo `dual`.
@@ -172,7 +172,7 @@ Cliente REST firmado con HMAC para BingX:
 - contracts;
 - ticker;
 - positions;
-- open orders;
+- órdenes abiertas;
 - margin type;
 - leverage;
 - place order;
@@ -189,7 +189,7 @@ Entornos:
 
 ### `src/bingxPriceWebSocket.js`
 
-Conecta al WebSocket de mercado de BingX y emite precios para simbolos con posiciones paper abiertas.
+Conecta al WebSocket de mercado de BingX y emite precios para símbolos con posiciones paper abiertas.
 
 Se usa para:
 
@@ -208,7 +208,7 @@ Calcula:
 
 - PnL diario;
 - PnL mensual;
-- exposicion abierta;
+- exposición abierta;
 - cierres;
 - cierre global;
 - TP/SL paper;
@@ -216,9 +216,9 @@ Calcula:
 
 ### `src/referenceLedger.js`
 
-Lee Google Sheets via endpoint `gviz` y transforma la hoja mensual a posiciones de referencia.
+Lee Google Sheets vía endpoint `gviz` y transforma la hoja mensual a posiciones de referencia.
 
-Tambien resuelve enlaces acortados de portfolio que embeben Google Sheets en iframe.
+También resuelve enlaces acortados de portfolio que embeben Google Sheets en iframe.
 
 ### `src/portfolioDetector.js`
 
@@ -321,18 +321,18 @@ La UI escucha:
 1. Scraper extrae posts de YouTube y mensajes de Telegram Web.
 2. Store inserta o actualiza.
 3. Si hay URL de portfolio nueva, actualiza fuente.
-4. Telegram bot envia alerta si procede.
-5. Parser busca senales.
-6. Trader ejecuta segun modo.
+4. bot de Telegram envía alerta si procede.
+5. Parser busca señales.
+6. Trader ejecuta según modo.
 7. UI recibe eventos por SSE.
 8. PnL se recalcula al actualizar.
 
-Para Telegram Web, el servidor filtra mensajes sin senales para reducir ruido.
+Para Telegram Web, el servidor filtra mensajes sin señales para reducir ruido.
 
-## Validacion
+## Validación
 
 ```bash
 npm run lint
 ```
 
-El comando hace `node --check` sobre archivos principales. No ejecuta pruebas end-to-end ni ordenes contra BingX.
+El comando hace `node --check` sobre archivos principales. No ejecuta pruebas end-to-end ni órdenes contra BingX.

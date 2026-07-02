@@ -88,7 +88,7 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
       history: [],
       openOrders: [],
       available: false,
-      warning: 'Offline mode enabled; BingX live order history was not requested.'
+      warning: 'Modo offline activado; no se solicitó el histórico de órdenes live de BingX.'
     };
   }
 
@@ -97,7 +97,7 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
       history: [],
       openOrders: [],
       available: false,
-      warning: 'BingX credentials are not configured; live order history was not requested.'
+      warning: 'Las credenciales de BingX no están configuradas; no se solicitó el histórico de órdenes live.'
     };
   }
 
@@ -117,7 +117,7 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
         endTime: chunkEnd,
         limit: 1000
       }), {
-        label: `order history ${new Date(cursor).toISOString()}-${new Date(chunkEnd).toISOString()}`
+        label: `histórico de órdenes ${new Date(cursor).toISOString()}-${new Date(chunkEnd).toISOString()}`
       });
       const chunkRows = response?.data?.orders || response?.data || [];
       if (Array.isArray(chunkRows)) {
@@ -126,7 +126,7 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
     }
 
     const [openOrdersResponse] = await Promise.all([
-      retryBingXRead(() => client.getOpenOrders(), { label: 'open orders' }).catch(() => ({ data: [] }))
+      retryBingXRead(() => client.getOpenOrders(), { label: 'órdenes abiertas' }).catch(() => ({ data: [] }))
     ]);
     const openRows = openOrdersResponse?.data?.orders || openOrdersResponse?.data || [];
     const byId = new Map(rows.map((order) => [String(order.orderId || order.orderID || ''), order]));
@@ -141,7 +141,7 @@ async function fetchLiveOrders(bingx = {}, { startTime, endTime, offline = false
       history: [],
       openOrders: [],
       available: false,
-      warning: `BingX live order history unavailable: ${safeErrorMessage(error)}`
+      warning: `Histórico de órdenes live de BingX no disponible: ${safeErrorMessage(error)}`
     };
   }
 }
@@ -387,62 +387,62 @@ function summarizePlaybook(signals = [], positions = []) {
 
 function renderMarkdown(study) {
   const lines = [];
-  lines.push('# Strategy Study');
+  lines.push('# Estudio estratégico');
   lines.push('');
-  lines.push(`Generated: ${study.generatedAt}`);
-  lines.push(`Window: ${study.window.startAt} to ${study.window.endAt} (${study.window.days} days)`);
+  lines.push(`Generado: ${study.generatedAt}`);
+  lines.push(`Ventana: ${study.window.startAt} a ${study.window.endAt} (${study.window.days} días)`);
   lines.push('');
-  lines.push('## Data Quality');
+  lines.push('## Calidad de los datos');
   lines.push('');
-  lines.push(`- Order history source: ${study.dataQuality.orderHistorySource}`);
-  lines.push(`- BingX order history available: ${study.dataQuality.orderHistoryAvailable ? 'yes' : 'no'}`);
-  lines.push(`- Local fallback positions: ${study.dataQuality.localFallbackPositions}`);
+  lines.push(`- Fuente del histórico de órdenes: ${study.dataQuality.orderHistorySource}`);
+  lines.push(`- Histórico de órdenes de BingX disponible: ${study.dataQuality.orderHistoryAvailable ? 'sí' : 'no'}`);
+  lines.push(`- Posiciones locales de respaldo: ${study.dataQuality.localFallbackPositions}`);
   if (study.dataQuality.warning) {
-    lines.push(`- Warning: ${study.dataQuality.warning}`);
+    lines.push(`- Advertencia: ${study.dataQuality.warning}`);
   }
   lines.push('');
-  lines.push('## Sample');
+  lines.push('## Muestra');
   lines.push('');
-  lines.push(`- Posts/messages stored: ${study.sample.posts}`);
-  lines.push(`- Parsed signals: ${study.sample.parsedSignals}`);
-  lines.push(`- Live orders from BingX: ${study.sample.liveOrders}`);
-  lines.push(`- Live open protective/orders now: ${study.sample.liveOpenOrders}`);
-  lines.push(`- Reconstructed positions: ${study.sample.positions}`);
-  lines.push(`- Closed positions: ${study.sample.closedPositions}`);
-  lines.push(`- Open positions: ${study.sample.openPositions}`);
-  lines.push(`- Persisted local trade events: ${study.sample.persistedTradeEvents}`);
+  lines.push(`- Posts/mensajes guardados: ${study.sample.posts}`);
+  lines.push(`- Señales parseadas: ${study.sample.parsedSignals}`);
+  lines.push(`- Órdenes live de BingX: ${study.sample.liveOrders}`);
+  lines.push(`- Órdenes protectoras/live abiertas ahora: ${study.sample.liveOpenOrders}`);
+  lines.push(`- Posiciones reconstruidas: ${study.sample.positions}`);
+  lines.push(`- Posiciones cerradas: ${study.sample.closedPositions}`);
+  lines.push(`- Posiciones abiertas: ${study.sample.openPositions}`);
+  lines.push(`- Eventos locales de trading persistidos: ${study.sample.persistedTradeEvents}`);
   lines.push('');
-  lines.push('## Performance');
+  lines.push('## Rendimiento');
   lines.push('');
-  lines.push(`- Net PnL closed: ${money(study.performance.netPnl)} USDT`);
-  lines.push(`- Gross PnL closed: ${money(study.performance.grossPnl)} USDT`);
-  lines.push(`- Commission: ${money(study.performance.commission)} USDT`);
-  lines.push(`- Win rate: ${pct(study.performance.winRate)}`);
-  lines.push(`- Profit factor: ${number(study.performance.profitFactor)}`);
-  lines.push(`- Outcomes: ${jsonInline(study.performance.outcomes)}`);
+  lines.push(`- PnL neto cerrado: ${money(study.performance.netPnl)} USDT`);
+  lines.push(`- PnL bruto cerrado: ${money(study.performance.grossPnl)} USDT`);
+  lines.push(`- Comisión: ${money(study.performance.commission)} USDT`);
+  lines.push(`- Tasa de acierto: ${pct(study.performance.winRate)}`);
+  lines.push(`- Factor de beneficio: ${number(study.performance.profitFactor)}`);
+  lines.push(`- Resultados: ${jsonInline(study.performance.outcomes)}`);
   lines.push('');
-  lines.push('## Signal Shape');
+  lines.push('## Forma de las señales');
   lines.push('');
-  lines.push(`- Actions: ${jsonInline(study.signalStats.byAction)}`);
-  lines.push(`- Symbols: ${jsonInline(study.signalStats.symbols)}`);
-  lines.push(`- Average leverage: ${number(study.signalStats.averageLeverage)}`);
-  lines.push(`- Average stop distance: ${pctDecimal(study.signalStats.averageStopDistancePct)}`);
-  lines.push(`- Average reward distance: ${pctDecimal(study.signalStats.averageRewardDistancePct)}`);
+  lines.push(`- Acciones: ${jsonInline(study.signalStats.byAction)}`);
+  lines.push(`- Símbolos: ${jsonInline(study.signalStats.symbols)}`);
+  lines.push(`- Apalancamiento medio: ${number(study.signalStats.averageLeverage)}`);
+  lines.push(`- Distancia media al stop: ${pctDecimal(study.signalStats.averageStopDistancePct)}`);
+  lines.push(`- Distancia media al objetivo: ${pctDecimal(study.signalStats.averageRewardDistancePct)}`);
   lines.push('');
-  lines.push('## Playbook Hypotheses');
+  lines.push('## Hipótesis operativas');
   lines.push('');
-  lines.push('- Build positions in packs, usually multiple tickers with the same direction and leverage.');
-  lines.push('- Stops are mandatory and often exchange-specific.');
-  lines.push('- Management messages can modify TP/SL after entry; these are part of the strategy, not noise.');
-  lines.push('- Telegram/Web messages may contain management earlier than posts, so they should be logged even if not used for future autonomous trading.');
+  lines.push('- Construye posiciones en paquetes, normalmente con varios tickers en la misma dirección y con el mismo apalancamiento.');
+  lines.push('- Los stops son obligatorios y suelen depender del exchange.');
+  lines.push('- Los mensajes de gestión pueden modificar TP/SL después de la entrada; forman parte de la estrategia, no son ruido.');
+  lines.push('- Los mensajes de Telegram Web pueden contener gestión antes que los posts, por lo que deben registrarse aunque no se usen para una futura operativa autónoma.');
   lines.push('');
-  lines.push('## Current Statistical Status');
+  lines.push('## Estado estadístico actual');
   lines.push('');
   lines.push(statisticalStatus(study.performance.closedTrades));
   lines.push('');
-  lines.push('## Closed Positions');
+  lines.push('## Posiciones cerradas');
   lines.push('');
-  lines.push('| Opened | Symbol | Outcome | Entry | Exit | Net USDT | SL | TP |');
+  lines.push('| Apertura | Símbolo | Resultado | Entrada | Salida | Neto USDT | SL | TP |');
   lines.push('|---|---:|---:|---:|---:|---:|---:|---:|');
   for (const position of study.positions.filter((item) => item.status === 'closed')) {
     lines.push([
@@ -457,9 +457,9 @@ function renderMarkdown(study) {
     ].join(' | ').replace(/^/, '| ').replace(/$/, ' |'));
   }
   lines.push('');
-  lines.push('## Open Positions');
+  lines.push('## Posiciones abiertas');
   lines.push('');
-  lines.push('| Opened | Symbol | Entry | SL | TP | Qty |');
+  lines.push('| Apertura | Símbolo | Entrada | SL | TP | Cantidad |');
   lines.push('|---|---:|---:|---:|---:|---:|');
   for (const position of study.positions.filter((item) => item.status === 'open')) {
     lines.push([
@@ -593,10 +593,10 @@ function jsonInline(value) {
 
 function statisticalStatus(closedTrades) {
   if (closedTrades < 30) {
-    return `Sample is exploratory only (${closedTrades} closed positions). Do not treat it as statistically significant.`;
+    return `La muestra es solo exploratoria (${closedTrades} posiciones cerradas). No debe tratarse como estadísticamente significativa.`;
   }
   if (closedTrades < 100) {
-    return `Sample is directional but still fragile (${closedTrades} closed positions). Keep collecting before automating.`;
+    return `La muestra es direccional, pero aún frágil (${closedTrades} posiciones cerradas). Hay que seguir acumulando datos antes de automatizar.`;
   }
-  return `Sample is large enough to start testing formal hypotheses (${closedTrades} closed positions), but still needs out-of-sample validation.`;
+  return `La muestra es suficientemente amplia para empezar a contrastar hipótesis formales (${closedTrades} posiciones cerradas), pero aún necesita validación fuera de muestra.`;
 }
