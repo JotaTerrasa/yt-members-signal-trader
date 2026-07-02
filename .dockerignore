@@ -1,11 +1,11 @@
-node_modules/
-.data/
-.yt-profile/
-tmp/
+node_modules
+.git
+.data
+.yt-profile
+tmp
 .env
 .env.*
 !.env.example
-.DS_Store
 npm-debug.log*
 tmp-*.png
 frontend-refresh-*.png

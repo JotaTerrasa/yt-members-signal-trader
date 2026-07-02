@@ -1,0 +1,26 @@
+services:
+  futures-magician:
+    build:
+      context: .
+    image: futures-magician:local
+    container_name: futures-magician
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-5178}
+      PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
+      PLAYWRIGHT_NO_SANDBOX: ${PLAYWRIGHT_NO_SANDBOX:-false}
+      TZ: ${TZ:-Europe/Madrid}
+    ports:
+      - "${PORT:-5178}:${PORT:-5178}"
+    volumes:
+      - ./.data:/app/.data
+      - ./.yt-profile:/app/.yt-profile
+      - ./docs/strategy-reports:/app/docs/strategy-reports
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:' + (process.env.PORT || 5178) + '/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

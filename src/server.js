@@ -30,6 +30,7 @@ const EXCHANGE_ORDER_SETTLE_SYNC_DELAY_MS = 5_000;
 const EXCHANGE_STOP_LOSS_REPAIR_DELAY_MS = 7_000;
 const EXCHANGE_PROTECTION_GRACE_MS = 20_000;
 const EXCHANGE_ORPHAN_GRACE_MS = 20_000;
+const EXCHANGE_STOP_CLOSE_TOLERANCE_PERCENT = 0.15;
 const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
 const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 15 * 60 * 1000;
@@ -43,6 +44,10 @@ const STOP_LOSS_RETRY_FIRST_DELAY_MS = 10_000;
 const STOP_LOSS_RETRY_INTERVAL_MS = 15_000;
 const STOP_LOSS_RETRY_MAX_AGE_MS = 10 * 60 * 1000;
 const STOP_LOSS_RETRY_MAX_ATTEMPTS = 40;
+const CLOSE_GUARD_RETRY_FIRST_DELAY_MS = 10_000;
+const CLOSE_GUARD_RETRY_INTERVAL_MS = 15_000;
+const CLOSE_GUARD_RETRY_MAX_AGE_MS = 10 * 60 * 1000;
+const CLOSE_GUARD_RETRY_MAX_ATTEMPTS = 40;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -80,6 +85,7 @@ const futuresTrader = new FuturesTrader({
     scheduleExchangeSyncForTrade(event);
     scheduleStopLossRepairForTrade(event);
     handleStopLossRetryEvent(event);
+    handleCloseGuardRetryEvent(event);
     broadcast('state', state);
   }
 });
@@ -111,6 +117,7 @@ const exchangeSafetyAlerts = new Map();
 const liveProtectionGraceUntil = new Map();
 const liveOrphanGraceUntil = new Map();
 const pendingStopLossRetries = new Map();
+const pendingCloseGuardRetries = new Map();
 
 const state = {
   browserOpen: false,
@@ -415,6 +422,22 @@ function handleStopLossRetryEvent(event = {}) {
   }
 }
 
+function handleCloseGuardRetryEvent(event = {}) {
+  const key = closeGuardRetryKeyFromEvent(event);
+  if (!key) {
+    return;
+  }
+
+  if (isCloseExecutionStatusForRetry(event.status)) {
+    clearCloseGuardRetry(key, 'closed');
+    return;
+  }
+
+  if (shouldQueueCloseGuardRetry(event)) {
+    queueCloseGuardRetry(event, key);
+  }
+}
+
 function shouldQueueStopLossRetry(event = {}) {
   const status = String(event.status || '');
   const mode = String(event.executionMode || '').toLowerCase();
@@ -430,6 +453,17 @@ function shouldQueueStopLossRetry(event = {}) {
 function isRetryableStopLossReason(reason = '') {
   return /^(exchange_stop_loss_invalid|entry_missed_invalid_(?:long|short)_stop_loss|invalid_(?:long|short)_stop_loss):/i
     .test(String(reason || ''));
+}
+
+function shouldQueueCloseGuardRetry(event = {}) {
+  const status = String(event.status || '');
+  const mode = String(event.executionMode || '').toLowerCase();
+  const signal = event.signal || {};
+  return status === `${mode}_close_guarded`
+    && (mode === 'demo' || mode === 'live')
+    && signal.action === 'CLOSE'
+    && signal.symbol
+    && Number(signal.closePrice) > 0;
 }
 
 function queueStopLossRetry(event, key = stopLossRetryKeyFromEvent(event)) {
@@ -479,6 +513,52 @@ function queueStopLossRetry(event, key = stopLossRetryKeyFromEvent(event)) {
   return item;
 }
 
+function queueCloseGuardRetry(event, key = closeGuardRetryKeyFromEvent(event)) {
+  if (!key) {
+    return null;
+  }
+
+  const existing = pendingCloseGuardRetries.get(key);
+  if (existing) {
+    existing.lastReason = closeGuardEventReason(event) || existing.lastReason;
+    existing.lastBlockedAt = event.at || new Date().toISOString();
+    existing.updatedAt = new Date().toISOString();
+    broadcast('state', state);
+    return existing;
+  }
+
+  const now = Date.now();
+  const item = {
+    key,
+    signal: event.signal,
+    post: {
+      id: event.postId || null,
+      url: event.postUrl || null,
+      firstSeenAt: event.at || new Date().toISOString()
+    },
+    originalPhase: event.phase || null,
+    executionMode: String(event.executionMode || '').toLowerCase(),
+    queuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + CLOSE_GUARD_RETRY_MAX_AGE_MS).toISOString(),
+    attempts: 0,
+    lastReason: closeGuardEventReason(event),
+    lastBlockedAt: event.at || new Date(now).toISOString(),
+    lastCheckedAt: null,
+    nextRunAt: null,
+    timer: null
+  };
+
+  pendingCloseGuardRetries.set(key, item);
+  pushLog({
+    level: 'warn',
+    message: `Cierre protegido pendiente ${item.executionMode}: ${item.signal.symbol}.`,
+    at: new Date().toISOString()
+  });
+  scheduleCloseGuardRetryTimer(item, CLOSE_GUARD_RETRY_FIRST_DELAY_MS);
+  broadcast('state', state);
+  return item;
+}
+
 function scheduleStopLossRetryTimer(item, delayMs = STOP_LOSS_RETRY_INTERVAL_MS) {
   if (!item || !pendingStopLossRetries.has(item.key)) {
     return;
@@ -502,6 +582,34 @@ function scheduleStopLossRetryTimer(item, delayMs = STOP_LOSS_RETRY_INTERVAL_MS)
         at: new Date().toISOString()
       });
       rescheduleOrExpireStopLossRetry(current, `retry_error:${error.message}`);
+    });
+  }, delay);
+  item.timer.unref();
+}
+
+function scheduleCloseGuardRetryTimer(item, delayMs = CLOSE_GUARD_RETRY_INTERVAL_MS) {
+  if (!item || !pendingCloseGuardRetries.has(item.key)) {
+    return;
+  }
+  if (item.timer) {
+    clearTimeout(item.timer);
+  }
+  const delay = Math.max(1000, Number(delayMs || CLOSE_GUARD_RETRY_INTERVAL_MS));
+  item.nextRunAt = new Date(Date.now() + delay).toISOString();
+  item.timer = setTimeout(() => {
+    runCloseGuardRetry(item.key).catch((error) => {
+      const current = pendingCloseGuardRetries.get(item.key);
+      if (!current) {
+        return;
+      }
+      current.lastReason = error.message;
+      current.lastCheckedAt = new Date().toISOString();
+      pushLog({
+        level: 'warn',
+        message: `Reintento cierre protegido ${current.signal.symbol}: ${error.message}`,
+        at: new Date().toISOString()
+      });
+      rescheduleOrExpireCloseGuardRetry(current, `retry_error:${error.message}`);
     });
   }, delay);
   item.timer.unref();
@@ -579,6 +687,64 @@ async function runStopLossRetry(key) {
   expireStopLossRetry(item, result?.reason || result?.status || 'retry_not_executable');
 }
 
+async function runCloseGuardRetry(key) {
+  const item = pendingCloseGuardRetries.get(key);
+  if (!item) {
+    return;
+  }
+  item.timer = null;
+
+  if (closeGuardRetryExpired(item)) {
+    expireCloseGuardRetry(item, item.lastReason || 'retry_expired');
+    return;
+  }
+
+  const baseConfig = configStore.getBingX({ includeSecrets: true });
+  if (!baseConfig.enabled) {
+    expireCloseGuardRetry(item, 'bingx_disabled');
+    return;
+  }
+  if (!configAllowsRetryMode(baseConfig.mode, item.executionMode)) {
+    expireCloseGuardRetry(item, `mode_changed:${baseConfig.mode}`);
+    return;
+  }
+  if (item.executionMode === 'live' && !baseConfig.liveConfirmed) {
+    expireCloseGuardRetry(item, 'live_not_confirmed');
+    return;
+  }
+
+  const config = {
+    ...baseConfig,
+    mode: item.executionMode
+  };
+  item.attempts += 1;
+  item.lastCheckedAt = new Date().toISOString();
+
+  pushLog({
+    level: 'warn',
+    message: `Reintentando cierre protegido ${item.executionMode}: ${item.signal.symbol}.`,
+    at: new Date().toISOString()
+  });
+
+  const result = await futuresTrader.executeCloseSignalWithConfig(item.signal, {
+    post: item.post,
+    phase: 'close_guard_retry'
+  }, config);
+
+  if (isCloseExecutionStatusForRetry(result?.status)) {
+    clearCloseGuardRetry(key, 'closed');
+    return;
+  }
+
+  if (shouldQueueCloseGuardRetry(result)) {
+    item.lastReason = closeGuardEventReason(result) || item.lastReason;
+    rescheduleOrExpireCloseGuardRetry(item, item.lastReason);
+    return;
+  }
+
+  expireCloseGuardRetry(item, result?.reason || result?.status || 'retry_not_executable');
+}
+
 async function stopLossRetryReadiness(item, config) {
   const marketPrice = await futuresTrader.fetchMarketPrice(
     futuresTrader.marketClient(config),
@@ -625,9 +791,27 @@ function rescheduleOrExpireStopLossRetry(item, reason) {
   broadcast('state', state);
 }
 
+function rescheduleOrExpireCloseGuardRetry(item, reason) {
+  if (!item || !pendingCloseGuardRetries.has(item.key)) {
+    return;
+  }
+  item.lastReason = reason || item.lastReason;
+  if (closeGuardRetryExpired(item)) {
+    expireCloseGuardRetry(item, item.lastReason || 'retry_expired');
+    return;
+  }
+  scheduleCloseGuardRetryTimer(item, CLOSE_GUARD_RETRY_INTERVAL_MS);
+  broadcast('state', state);
+}
+
 function stopLossRetryExpired(item) {
   return Date.now() >= Date.parse(item.expiresAt || 0)
     || Number(item.attempts || 0) >= STOP_LOSS_RETRY_MAX_ATTEMPTS;
+}
+
+function closeGuardRetryExpired(item) {
+  return Date.now() >= Date.parse(item.expiresAt || 0)
+    || Number(item.attempts || 0) >= CLOSE_GUARD_RETRY_MAX_ATTEMPTS;
 }
 
 function expireStopLossRetry(item, reason = 'retry_expired') {
@@ -642,6 +826,23 @@ function expireStopLossRetry(item, reason = 'retry_expired') {
     phase: 'stop_loss_retry',
     executionMode: item.executionMode,
     retry: publicStopLossRetryItem(item)
+  };
+  recordTradeEvent(event);
+  notifyTradeCriticalEvent(event);
+}
+
+function expireCloseGuardRetry(item, reason = 'retry_expired') {
+  clearCloseGuardRetry(item.key, reason);
+  const event = {
+    at: new Date().toISOString(),
+    status: `${item.executionMode}_close_guard_expired`,
+    reason,
+    signal: item.signal,
+    postId: item.post?.id || null,
+    postUrl: item.post?.url || null,
+    phase: 'close_guard_retry',
+    executionMode: item.executionMode,
+    retry: publicCloseGuardRetryItem(item)
   };
   recordTradeEvent(event);
   notifyTradeCriticalEvent(event);
@@ -666,6 +867,25 @@ function clearStopLossRetry(key, reason = '') {
   broadcast('state', state);
 }
 
+function clearCloseGuardRetry(key, reason = '') {
+  const item = pendingCloseGuardRetries.get(key);
+  if (!item) {
+    return;
+  }
+  if (item.timer) {
+    clearTimeout(item.timer);
+  }
+  pendingCloseGuardRetries.delete(key);
+  if (reason) {
+    pushLog({
+      level: reason === 'closed' ? 'info' : 'warn',
+      message: `Cierre protegido finalizado ${item.signal?.symbol || ''}: ${reason}.`.trim(),
+      at: new Date().toISOString()
+    });
+  }
+  broadcast('state', state);
+}
+
 function stopLossRetryKeyFromEvent(event = {}) {
   const signal = event.signal || {};
   const mode = String(event.executionMode || '').toLowerCase();
@@ -679,6 +899,21 @@ function stopLossRetryKeyFromEvent(event = {}) {
     String(signal.direction || '').toUpperCase(),
     signal.entry?.price || '',
     signal.stopLoss || ''
+  ].join('|');
+}
+
+function closeGuardRetryKeyFromEvent(event = {}) {
+  const signal = event.signal || {};
+  const mode = String(event.executionMode || '').toLowerCase();
+  if (!mode || !signal.symbol || signal.action !== 'CLOSE') {
+    return '';
+  }
+  return [
+    mode,
+    event.postId || '',
+    normalizePositionSymbol(signal.symbol),
+    signal.closePrice || '',
+    signal.closePercent || 100
   ].join('|');
 }
 
@@ -717,8 +952,20 @@ function isOpeningExecutionStatusForRetry(status) {
     || value === 'live_order_sent';
 }
 
+function isCloseExecutionStatusForRetry(status) {
+  const value = String(status || '');
+  return value === 'demo_close_sent'
+    || value === 'live_close_sent'
+    || value === 'demo_close_no_position'
+    || value === 'live_close_no_position';
+}
+
 function stopLossRetryQueueState() {
   return [...pendingStopLossRetries.values()].map(publicStopLossRetryItem);
+}
+
+function closeGuardRetryQueueState() {
+  return [...pendingCloseGuardRetries.values()].map(publicCloseGuardRetryItem);
 }
 
 function publicStopLossRetryItem(item) {
@@ -735,6 +982,24 @@ function publicStopLossRetryItem(item) {
     nextRunAt: item.nextRunAt,
     lastCheckedAt: item.lastCheckedAt,
     lastMarketPrice: item.lastMarketPrice,
+    lastReason: item.lastReason
+  };
+}
+
+function publicCloseGuardRetryItem(item) {
+  return {
+    key: item.key,
+    symbol: item.signal?.symbol || '',
+    executionMode: item.executionMode,
+    closePrice: item.signal?.closePrice || null,
+    closePercent: item.signal?.closePercent || 100,
+    postId: item.post?.id || null,
+    postUrl: item.post?.url || null,
+    queuedAt: item.queuedAt,
+    expiresAt: item.expiresAt,
+    attempts: item.attempts,
+    nextRunAt: item.nextRunAt,
+    lastCheckedAt: item.lastCheckedAt,
     lastReason: item.lastReason
   };
 }
@@ -765,6 +1030,41 @@ function hydrateStopLossRetryQueueFromEvents() {
       item.expiresAt = new Date(timestamp + STOP_LOSS_RETRY_MAX_AGE_MS).toISOString();
     }
   }
+}
+
+function hydrateCloseGuardRetryQueueFromEvents() {
+  const cutoff = Date.now() - CLOSE_GUARD_RETRY_MAX_AGE_MS;
+  for (const event of [...state.trades].reverse()) {
+    const timestamp = Date.parse(event.at || 0);
+    if (!Number.isFinite(timestamp) || timestamp < cutoff) {
+      continue;
+    }
+    if (!shouldQueueCloseGuardRetry(event)) {
+      continue;
+    }
+    const key = closeGuardRetryKeyFromEvent(event);
+    if (!key || pendingCloseGuardRetries.has(key)) {
+      continue;
+    }
+    if (state.trades.some((candidate) => (
+      Date.parse(candidate.at || 0) > timestamp
+      && isCloseExecutionStatusForRetry(candidate.status)
+      && closeGuardRetryKeyFromEvent(candidate) === key
+    ))) {
+      continue;
+    }
+    const item = queueCloseGuardRetry(event, key);
+    if (item) {
+      item.expiresAt = new Date(timestamp + CLOSE_GUARD_RETRY_MAX_AGE_MS).toISOString();
+    }
+  }
+}
+
+function closeGuardEventReason(event = {}) {
+  return event.reason
+    || event.exchangeClose?.skipped?.[0]?.reason
+    || event.exchangeClose?.skipped?.[0]?.guard?.reason
+    || 'close_guarded';
 }
 
 function countParsedSignals(posts = []) {
@@ -1323,6 +1623,7 @@ const server = createServer(async (request, response) => {
 server.listen(port, () => {
   console.log(`YouTube Posts Scraper disponible en http://localhost:${port}`);
   hydrateStopLossRetryQueueFromEvents();
+  hydrateCloseGuardRetryQueueFromEvents();
   checkAutomaticMonthlyReset({ reason: 'startup' }).catch((error) => {
     pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
   });
@@ -1473,6 +1774,7 @@ function currentState() {
     telegramSource: configStore.getTelegramSource(),
     portfolio: configStore.getPortfolio(),
     stopLossRetryQueue: stopLossRetryQueueState(),
+    closeGuardRetryQueue: closeGuardRetryQueueState(),
     exchangeSafety: buildExchangeSafety(),
     stats: store.stats()
   };
@@ -2639,6 +2941,9 @@ function telegramTradeTitle(event = {}) {
   if (status.includes('close_all')) {
     return `Cierre total ${suffix}`;
   }
+  if (status.includes('close_guard')) {
+    return `Cierre ${suffix} protegido`;
+  }
   if (status.includes('cancel_orders')) {
     return demo ? 'Ordenes VST demo canceladas' : 'Ordenes reales canceladas';
   }
@@ -2747,10 +3052,17 @@ function exchangeCloseStatus(position, reason) {
   if (!Number.isFinite(price) || !Number.isFinite(stop) || stop <= 0) {
     return 'exchange_position_closed';
   }
-  if (position.direction === 'SHORT') {
-    return price >= stop ? 'exchange_stop_closed' : 'exchange_position_closed';
+  return closedNearStop({ price, stop, direction: position.direction })
+    ? 'exchange_stop_closed'
+    : 'exchange_position_closed';
+}
+
+function closedNearStop({ price, stop, direction }) {
+  const tolerance = Math.abs(stop) * (EXCHANGE_STOP_CLOSE_TOLERANCE_PERCENT / 100);
+  if (String(direction || '').toUpperCase() === 'SHORT') {
+    return price >= stop - tolerance;
   }
-  return price <= stop ? 'exchange_stop_closed' : 'exchange_position_closed';
+  return price <= stop + tolerance;
 }
 
 function exchangeCloseTitle(status) {
@@ -3257,6 +3569,12 @@ async function shutdown() {
     }
   }
   pendingStopLossRetries.clear();
+  for (const item of pendingCloseGuardRetries.values()) {
+    if (item.timer) {
+      clearTimeout(item.timer);
+    }
+  }
+  pendingCloseGuardRetries.clear();
   await scraper.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1000).unref();

@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=31">
+    <link rel="stylesheet" href="/styles.css?v=32">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=65" defer></script>
+    <script src="/app.js?v=66" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -673,6 +673,86 @@
                   <span id="real-lifecycle-status">0 senales</span>
                 </div>
                 <div class="real-lifecycle-list" id="real-lifecycle-list"></div>
+              </div>
+
+              <div class="trade-section my-ledger-section">
+                <div class="trade-section-header">
+                  <h3>Mi hoja operativa</h3>
+                  <span id="my-ledger-status">0 filas</span>
+                </div>
+                <div class="audit-actions">
+                  <a class="icon-link" href="/api/trades.csv" title="Exportar operaciones CSV">
+                    <i data-lucide="download"></i>
+                    <span>Exportar CSV</span>
+                  </a>
+                  <a class="icon-link" id="external-sheet-link" href="#" title="Abrir hoja externa" target="_blank" rel="noreferrer">
+                    <i data-lucide="external-link"></i>
+                    <span>Hoja externa</span>
+                  </a>
+                </div>
+                <div class="ledger-summary-grid" id="my-ledger-summary"></div>
+                <div class="ledger-tabs" id="my-ledger-tabs" aria-label="Filtro de hoja operativa">
+                  <button class="active" type="button" data-ledger-filter="ops">Operaciones</button>
+                  <button type="button" data-ledger-filter="all">Todas</button>
+                  <button type="button" data-ledger-filter="open">Abiertas</button>
+                  <button type="button" data-ledger-filter="closed">Cerradas</button>
+                  <button type="button" data-ledger-filter="review">Revisar</button>
+                  <button type="button" data-ledger-filter="vst">VST</button>
+                  <button type="button" data-ledger-filter="live">Real</button>
+                </div>
+                <div id="my-ledger-empty" class="empty-state compact hidden">
+                  Todavia no hay operaciones propias para mostrar.
+                </div>
+                <div class="trade-table-wrap my-ledger-wrap">
+                  <table class="trade-table my-ledger-table">
+                    <colgroup>
+                      <col class="ledger-col-date">
+                      <col class="ledger-col-account">
+                      <col class="ledger-col-symbol">
+                      <col class="ledger-col-status">
+                      <col class="ledger-col-entry">
+                      <col class="ledger-col-protection">
+                      <col class="ledger-col-money">
+                      <col class="ledger-col-result">
+                      <col class="ledger-col-source">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Cuenta</th>
+                        <th>Activo</th>
+                        <th>Estado</th>
+                        <th>Entrada / Actual</th>
+                        <th>SL / TP</th>
+                        <th>Margen</th>
+                        <th>
+                          <button class="ledger-sort-button" id="my-ledger-result-sort" type="button" title="Ordenar por PnL y ROI">
+                            <span>PnL / ROI</span>
+                            <i data-lucide="arrow-up-down"></i>
+                            <small id="my-ledger-result-sort-state">-</small>
+                          </button>
+                        </th>
+                        <th>Fuente</th>
+                      </tr>
+                    </thead>
+                    <tbody id="my-ledger-body"></tbody>
+                  </table>
+                </div>
+                <div class="external-sheet-panel">
+                  <div class="trade-section-header">
+                    <h3>Hoja externa en vivo</h3>
+                    <span id="external-sheet-status">Sin hoja</span>
+                  </div>
+                  <iframe
+                    id="external-sheet-frame"
+                    class="external-sheet-frame hidden"
+                    title="Hoja externa en vivo"
+                    loading="lazy"
+                  ></iframe>
+                  <div id="external-sheet-empty" class="empty-state compact">
+                    No hay una hoja externa cargada todavia.
+                  </div>
+                </div>
               </div>
 
               <div class="trade-section">

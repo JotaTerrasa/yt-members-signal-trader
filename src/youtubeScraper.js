@@ -92,10 +92,15 @@ export class YouTubePostsScraper extends EventEmitter {
 
   async ensurePage() {
     if (!this.context) {
+      const headless = booleanEnv('PLAYWRIGHT_HEADLESS', false);
+      const args = ['--disable-blink-features=AutomationControlled'];
+      if (booleanEnv('PLAYWRIGHT_NO_SANDBOX', false)) {
+        args.push('--no-sandbox');
+      }
       this.context = await chromium.launchPersistentContext(this.profileDir, {
-        headless: false,
+        headless,
         viewport: { width: 1440, height: 1000 },
-        args: ['--disable-blink-features=AutomationControlled']
+        args
       });
       this.context.on('close', () => {
         this.context = null;
@@ -780,6 +785,14 @@ function conciseError(error) {
     .split('\n')[0]
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function booleanEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 }
 
 async function sleepInterruptible(totalMs, shouldStop) {

@@ -11,6 +11,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - [Modos de BingX](#modos-de-bingx)
 - [Requisitos](#requisitos)
 - [Instalación rápida](#instalación-rápida)
+- [Paquetización portable](#paquetización-portable)
 - [Arranque con PM2](#arranque-con-pm2)
 - [Configuración inicial](#configuración-inicial)
 - [Operación diaria](#operación-diaria)
@@ -136,6 +137,37 @@ Respuesta esperada:
   }
 }
 ```
+
+## Paquetización portable
+
+El repositorio incluye tres formas de dejar la app funcionando:
+
+| Modo | Comando | Cuándo usarlo |
+|---|---|---|
+| Local | `npm run start` | Desarrollo, uso en escritorio e inicio de sesión visual en Chromium. |
+| PM2 | `pm2 start ecosystem.config.cjs` | Mantenerla viva en la misma máquina tras reinicios. |
+| Docker | `npm run docker:up` | Ejecutarla de forma reproducible en servidores o mini-PC. |
+
+Comprobación portable:
+
+```bash
+npm run package:check
+```
+
+Docker:
+
+```bash
+cp .env.example .env
+npm run docker:up
+```
+
+Los datos persistentes siguen fuera de Git:
+
+- `.data/`
+- `.yt-profile/`
+- `docs/strategy-reports/`
+
+Guía completa: [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ## Arranque con PM2
 

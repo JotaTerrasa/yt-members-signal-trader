@@ -16,6 +16,7 @@ const managementBaseSymbols = new Set([
 ]);
 const baseSymbolAliases = new Map([
   ['BITCOIN', 'BTC'],
+  ['BT', 'BTC'],
   ['ETHEREUM', 'ETH'],
   ['ETHER', 'ETH'],
   ['SOLANA', 'SOL'],
@@ -32,7 +33,7 @@ const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERR
 const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const takeProfitLineStartPattern = /^\W*(TPS?|TAKE\s*PROFITS?|TAKE\s*PROFIT|OBJETIVOS?|TARGETS?)\b/i;
 const listPrefixPattern = /^\W*(?:(?:PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SEPTIMO|OCTAVO|NOVENO|DECIMO|FIRST|SECOND|THIRD|\d+)\s*[:.)-]\s*)/i;
-const symbolPricePattern = /\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:(?:A|AL|EN|TO|AT|@|=|->)\s*)?(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi;
+const symbolPricePattern = /\b([A-Z]{2,12})\.?(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:(?:A|AL|EN|TO|AT|@|=|->)\s*)?(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi;
 const stopLossLineStartPattern = /^\W*(?:MODIFICACI[OÓ]N|MODIFICAR|MODIF|CAMBIO|CAMBIAR|AJUSTE|AJUSTAR)?\s*(?:SL|STOP|STOPLOSS|STOP\s+LOSS|STOPS)\b/i;
 
 export function parseFuturesSignal(text) {
@@ -202,7 +203,7 @@ function parseCloseTargetsFromLine(line) {
     return [];
   }
 
-  const matches = [...body.matchAll(/\b([A-Z]{2,12})(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?))?\b/gi)];
+  const matches = [...body.matchAll(/\b([A-Z]{2,12})\.?(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?))?\b/gi)];
   return matches
     .map((match) => ({
       baseSymbol: normalizeBaseSymbol(match[1]),
@@ -212,7 +213,7 @@ function parseCloseTargetsFromLine(line) {
 }
 
 function looksLikeCloseTickerLine(line) {
-  return /^\W*[A-Z]{2,12}(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?\d+(?:[.,]\d+)?\s*[kK]?)?\W*$/i.test(line);
+  return /^\W*[A-Z]{2,12}\.?(?:\s*[-/]\s*USDT|\s*USDT)?(?:\s+(?:BINGX\s*)?\d+(?:[.,]\d+)?\s*[kK]?)?\W*$/i.test(line);
 }
 
 function parseTakeProfitSignals(raw) {
@@ -487,7 +488,7 @@ function parseStructuredSignals(raw) {
 }
 
 function parseDirectionLine(line) {
-  const match = String(line || '').match(new RegExp(`^\\W*(${directionWords.join('|')})\\s+([A-Z]{2,12})(?:\\s+(?:BINGX\\s*)?(\\d+(?:[.,]\\d+)?\\s*[kK]?))?\\b`, 'i'));
+  const match = String(line || '').match(new RegExp(`^\\W*(${directionWords.join('|')})\\s+([A-Z]{2,12})\\.?(?:\\s+(?:BINGX\\s*)?(\\d+(?:[.,]\\d+)?\\s*[kK]?))?\\b`, 'i'));
   if (!match) {
     return null;
   }

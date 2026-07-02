@@ -117,6 +117,17 @@ const elements = {
   strategyStudyStatus: document.querySelector('#strategy-study-status'),
   strategyStudyGrid: document.querySelector('#strategy-study-grid'),
   strategyStudyInsights: document.querySelector('#strategy-study-insights'),
+  myLedgerStatus: document.querySelector('#my-ledger-status'),
+  myLedgerSummary: document.querySelector('#my-ledger-summary'),
+  myLedgerTabs: document.querySelector('#my-ledger-tabs'),
+  myLedgerEmpty: document.querySelector('#my-ledger-empty'),
+  myLedgerBody: document.querySelector('#my-ledger-body'),
+  myLedgerResultSort: document.querySelector('#my-ledger-result-sort'),
+  myLedgerResultSortState: document.querySelector('#my-ledger-result-sort-state'),
+  externalSheetStatus: document.querySelector('#external-sheet-status'),
+  externalSheetFrame: document.querySelector('#external-sheet-frame'),
+  externalSheetEmpty: document.querySelector('#external-sheet-empty'),
+  externalSheetLink: document.querySelector('#external-sheet-link'),
   tradeHistoryStatus: document.querySelector('#trade-history-status'),
   tradeHistoryEmpty: document.querySelector('#trade-history-empty'),
   tradeHistoryList: document.querySelector('#trade-history-list'),
@@ -200,6 +211,8 @@ const appState = {
   pnlSource: '',
   performanceSource: '',
   performanceRange: '1D',
+  ledgerFilter: 'ops',
+  ledgerResultSort: '',
   sheetSimCapital: storedSheetSimCapital(),
   sheetSimTouched: false,
   pnlLoading: false,
@@ -212,6 +225,7 @@ const appState = {
   exchangeSafety: null,
   strategyStudy: null,
   operationalStatus: null,
+  portfolio: null,
   risk: null,
   logs: []
 };
@@ -290,6 +304,18 @@ function bindEvents() {
   });
 
   elements.search.addEventListener('input', renderPosts);
+  elements.myLedgerTabs?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-ledger-filter]');
+    if (!button) {
+      return;
+    }
+    appState.ledgerFilter = button.dataset.ledgerFilter || 'all';
+    renderMyLedger();
+  });
+  elements.myLedgerResultSort?.addEventListener('click', () => {
+    appState.ledgerResultSort = appState.ledgerResultSort === 'asc' ? 'desc' : 'asc';
+    renderMyLedger();
+  });
   elements.postsTab.addEventListener('click', () => switchView('posts'));
   elements.logsTab.addEventListener('click', () => switchView('logs'));
   elements.pnlTab.addEventListener('click', () => {
@@ -574,6 +600,7 @@ async function loadState() {
   const state = await fetchJson('/api/state');
   appState.state = state;
   appState.logs = state.logs || appState.logs;
+  appState.portfolio = state.portfolio || appState.portfolio;
   renderState();
   renderLogs();
   renderTelegramWatchPanel();
@@ -730,6 +757,7 @@ function connectEvents() {
     appState.logs = appState.state.logs || appState.logs;
     appState.trades = appState.state.trades || appState.trades;
     appState.exchangeSafety = appState.state.exchangeSafety || appState.exchangeSafety;
+    appState.portfolio = appState.state.portfolio || appState.portfolio;
     renderState();
     renderLogs();
     renderPnl();
@@ -1014,6 +1042,8 @@ function renderPnl() {
   renderOpenPositions(openPositions);
   renderStrategyStudy();
   renderRealLifecycle();
+  renderMyLedger();
+  renderExternalSheetEmbed();
   renderTradeHistory();
   renderRealAuditTable();
   elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
@@ -3562,6 +3592,502 @@ function renderRealAuditTable() {
   elements.realAuditTable.innerHTML = events.length
     ? events.map(renderRealAuditRow).join('')
     : '<tr><td colspan="9">Sin eventos reales auditables todavia.</td></tr>';
+}
+
+function renderMyLedger() {
+  if (!elements.myLedgerBody) {
+    return;
+  }
+
+  const allRows = myLedgerRows();
+  const rows = sortMyLedgerRows(filterMyLedgerRows(allRows, appState.ledgerFilter));
+  const openCount = allRows.filter((row) => row.rawStatus === 'open').length;
+  const reviewCount = allRows.filter((row) => row.statusClass === 'negative' || row.statusClass === 'warn').length;
+  elements.myLedgerStatus.textContent = allRows.length
+    ? `${rows.length}/${allRows.length} filas - ${openCount} abiertas${reviewCount ? ` - ${reviewCount} revisar` : ''}`
+    : '0 filas';
+  elements.myLedgerEmpty.classList.toggle('hidden', rows.length > 0);
+  elements.myLedgerBody.innerHTML = rows.length
+    ? rows.slice(0, 120).map(renderMyLedgerRow).join('')
+    : '';
+  renderMyLedgerTabs(allRows);
+  renderMyLedgerSummary(allRows);
+  renderMyLedgerSortControl();
+}
+
+function myLedgerRows() {
+  const reference = currentReferenceLedger();
+  const positionRows = [
+    ...positionsForPnlSource('live', reference).map((position) => positionToMyLedgerRow({ ...position, source: 'live' })),
+    ...positionsForPnlSource('vst', reference).map((position) => positionToMyLedgerRow({ ...position, source: 'demo' }))
+  ];
+  const eventRows = (appState.trades || [])
+    .filter(myLedgerEventShouldShow)
+    .filter((event) => !myLedgerEventRepresentedByPosition(event, positionRows))
+    .map(eventToMyLedgerRow)
+    .filter(Boolean);
+
+  return uniqueLedgerRows([...positionRows, ...eventRows])
+    .sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+}
+
+function filterMyLedgerRows(rows, filter) {
+  const key = filter || 'all';
+  if (key === 'ops') {
+    return rows.filter((row) => row.kind === 'position');
+  }
+  if (key === 'open') {
+    return rows.filter((row) => row.rawStatus === 'open');
+  }
+  if (key === 'closed') {
+    return rows.filter((row) => row.rawStatus === 'closed' || row.action === 'Cierre');
+  }
+  if (key === 'review') {
+    return rows.filter((row) => row.statusClass === 'negative' || row.statusClass === 'warn');
+  }
+  if (key === 'vst') {
+    return rows.filter((row) => row.sourceKey === 'demo');
+  }
+  if (key === 'live') {
+    return rows.filter((row) => row.sourceKey === 'live');
+  }
+  return rows;
+}
+
+function sortMyLedgerRows(rows = []) {
+  const direction = appState.ledgerResultSort;
+  if (direction !== 'asc' && direction !== 'desc') {
+    return rows;
+  }
+
+  const multiplier = direction === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const pnlDiff = ledgerSortNumber(a.pnl) - ledgerSortNumber(b.pnl);
+    if (pnlDiff !== 0) {
+      return pnlDiff * multiplier;
+    }
+    const roiDiff = ledgerSortNumber(a.roi) - ledgerSortNumber(b.roi);
+    if (roiDiff !== 0) {
+      return roiDiff * multiplier;
+    }
+    return Date.parse(b.at || 0) - Date.parse(a.at || 0);
+  });
+}
+
+function ledgerSortNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : Number.NEGATIVE_INFINITY;
+}
+
+function renderMyLedgerSortControl() {
+  if (!elements.myLedgerResultSort) {
+    return;
+  }
+  const direction = appState.ledgerResultSort;
+  const active = direction === 'asc' || direction === 'desc';
+  elements.myLedgerResultSort.classList.toggle('active', active);
+  elements.myLedgerResultSort.setAttribute('aria-pressed', active ? 'true' : 'false');
+  elements.myLedgerResultSort.title = direction === 'asc'
+    ? 'Ordenado de menor a mayor'
+    : direction === 'desc'
+      ? 'Ordenado de mayor a menor'
+      : 'Ordenar por PnL y ROI';
+  if (elements.myLedgerResultSortState) {
+    elements.myLedgerResultSortState.textContent = direction === 'asc' ? 'ASC' : direction === 'desc' ? 'DESC' : '-';
+  }
+}
+
+function renderMyLedgerTabs(rows = []) {
+  if (!elements.myLedgerTabs) {
+    return;
+  }
+
+  const counts = {
+    ops: filterMyLedgerRows(rows, 'ops').length,
+    all: rows.length,
+    open: filterMyLedgerRows(rows, 'open').length,
+    closed: filterMyLedgerRows(rows, 'closed').length,
+    review: filterMyLedgerRows(rows, 'review').length,
+    vst: filterMyLedgerRows(rows, 'vst').length,
+    live: filterMyLedgerRows(rows, 'live').length
+  };
+  elements.myLedgerTabs.querySelectorAll('[data-ledger-filter]').forEach((button) => {
+    const key = button.dataset.ledgerFilter || 'all';
+    button.classList.toggle('active', key === appState.ledgerFilter);
+    button.dataset.count = String(counts[key] || 0);
+  });
+}
+
+function renderMyLedgerSummary(rows = []) {
+  if (!elements.myLedgerSummary) {
+    return;
+  }
+
+  const month = currentMonthKey();
+  const monthRows = rows.filter((row) => monthKeyFromValue(row.at) === month);
+  const closed = monthRows.filter((row) => row.rawStatus === 'closed' || row.action === 'Cierre');
+  const pnlRows = closed.filter((row) => Number.isFinite(Number(row.pnl)) && Number(row.pnl) !== 0);
+  const netByAsset = ledgerTotalsByAsset(pnlRows, 'pnl');
+  const open = monthRows.filter((row) => row.rawStatus === 'open');
+  const review = monthRows.filter((row) => row.statusClass === 'negative' || row.statusClass === 'warn');
+  const best = pnlRows.reduce((winner, row) => Number(row.pnl || 0) > Number(winner?.pnl ?? Number.NEGATIVE_INFINITY) ? row : winner, null);
+  const winners = pnlRows.filter((row) => Number(row.pnl) > 0).length;
+  const winRate = pnlRows.length ? (winners / pnlRows.length) * 100 : null;
+
+  elements.myLedgerSummary.innerHTML = [
+    {
+      label: 'Resultado mes',
+      value: formatLedgerAssetTotals(netByAsset),
+      className: amountClass(ledgerDominantTotal(netByAsset)),
+      detail: `${pnlRows.length} cierres con PnL`
+    },
+    {
+      label: 'Win rate',
+      value: formatPercent(winRate),
+      className: winRate == null ? '' : amountClass(winRate - 50),
+      detail: pnlRows.length ? `${winners}/${pnlRows.length} ganadoras` : 'Sin cierres'
+    },
+    {
+      label: 'Abiertas',
+      value: String(open.length),
+      className: open.length ? 'warn' : 'positive',
+      detail: open.map((row) => row.symbol.replace('-USDT', '')).slice(0, 4).join(' / ') || 'Sin exposicion'
+    },
+    {
+      label: 'Mejor operacion',
+      value: best ? formatMoney(best.pnl, best.asset) : '-',
+      className: best ? amountClass(best.pnl) : '',
+      detail: best ? `${best.symbol.replace('-USDT', '')} ${formatOptionalPercent(best.roi)}` : 'Sin dato'
+    },
+    {
+      label: 'A revisar',
+      value: String(review.length),
+      className: review.length ? 'negative' : 'positive',
+      detail: review.length ? 'Bloqueos / avisos' : 'Todo limpio'
+    }
+  ].map(renderLedgerSummaryCard).join('');
+}
+
+function renderLedgerSummaryCard(card) {
+  return `
+    <div class="ledger-summary-card">
+      <span>${escapeHtml(card.label)}</span>
+      <strong class="${escapeAttribute(card.className || '')}">${escapeHtml(card.value)}</strong>
+      <small>${escapeHtml(card.detail || '')}</small>
+    </div>
+  `;
+}
+
+function ledgerTotalsByAsset(rows = [], field = 'pnl') {
+  return rows.reduce((totals, row) => {
+    const asset = row.asset || 'USDT';
+    totals[asset] = roundPnl(Number(totals[asset] || 0) + Number(row[field] || 0));
+    return totals;
+  }, {});
+}
+
+function formatLedgerAssetTotals(totals = {}) {
+  const entries = Object.entries(totals).filter(([, value]) => Number(value) !== 0);
+  if (!entries.length) {
+    return '0,00';
+  }
+  return entries
+    .map(([asset, value]) => formatMoney(value, asset))
+    .join(' / ');
+}
+
+function ledgerDominantTotal(totals = {}) {
+  return Object.values(totals)
+    .map(Number)
+    .sort((a, b) => Math.abs(b) - Math.abs(a))[0] || 0;
+}
+
+function positionToMyLedgerRow(position = {}) {
+  const account = position.source === 'demo' ? 'demo' : 'live';
+  const asset = ledgerAsset(account);
+  const status = String(position.status || 'open').toLowerCase();
+  const pnl = ledgerPositionPnl(position);
+  const notional = ledgerNumber(position.notional ?? position.margin ?? position.sizing?.notional);
+  return {
+    id: `position:${exchangePositionKey(position) || position.id || position.openedAt || position.symbol}`,
+    kind: 'position',
+    at: position.closedAt || position.openedAt || position.updatedAt || position.liveTickAt,
+    openedAt: position.openedAt,
+    sourceKey: account,
+    sourceLabel: ledgerSourceLabel(account),
+    action: status === 'closed' ? 'Cierre' : 'Posicion',
+    symbol: normalizeTradeSymbol(position.symbol || ''),
+    direction: position.direction || '',
+    status: status === 'closed' ? closeReasonLabel(position.closeReason) : 'Abierta',
+    rawStatus: status,
+    statusClass: status === 'closed' ? amountClass(pnl) : 'neutral',
+    entryPrice: position.entryPrice,
+    exitPrice: status === 'closed' ? (position.closePrice || position.currentPrice) : position.currentPrice,
+    stopLoss: position.stopLoss,
+    takeProfit: position.takeProfit,
+    notional,
+    pnl,
+    roi: ledgerRoi(pnl, notional),
+    asset,
+    postUrl: position.postUrl || '',
+    detail: position.closeReason ? closeReasonLabel(position.closeReason) : ''
+  };
+}
+
+function eventToMyLedgerRow(event = {}) {
+  const account = eventAccountKey(event);
+  if (account !== 'demo' && account !== 'live') {
+    return null;
+  }
+
+  const signal = event.signal || {};
+  const position = event.exchangePosition || event.paperPosition || event.closedPaperPositions?.[0] || {};
+  const status = String(event.status || '');
+  const pnl = ledgerEventPnl(event);
+  const notional = ledgerNumber(event.sizing?.notional ?? position.notional);
+  return {
+    id: `event:${event.at || ''}:${account}:${status}:${signal.symbol || position.symbol || signal.action || ''}`,
+    kind: 'event',
+    at: event.at,
+    openedAt: event.at,
+    sourceKey: account,
+    sourceLabel: ledgerSourceLabel(account),
+    action: ledgerActionFromEvent(status, signal),
+    symbol: normalizeTradeSymbol(signal.symbol || position.symbol || (signal.action === 'CLOSE_ALL' ? 'TODO' : '')),
+    direction: signal.direction || position.direction || signal.action || '',
+    status: tradeStatusLabel(status),
+    rawStatus: status,
+    statusClass: ledgerStatusClass(status, pnl),
+    entryPrice: signal.entry?.price ?? position.entryPrice,
+    exitPrice: signal.closePrice ?? position.closePrice ?? position.currentPrice,
+    stopLoss: signal.stopLoss ?? position.stopLoss,
+    takeProfit: signal.takeProfit ?? event.takeProfit ?? position.takeProfit,
+    notional,
+    pnl,
+    roi: ledgerRoi(pnl, notional),
+    asset: ledgerAsset(account),
+    postUrl: event.postUrl || '',
+    detail: event.reason ? reasonLabel(event.reason) : eventAmountText(event, account)
+  };
+}
+
+function myLedgerEventShouldShow(event = {}) {
+  const account = eventAccountKey(event);
+  if (account !== 'demo' && account !== 'live') {
+    return false;
+  }
+
+  const status = String(event.status || '').toLowerCase();
+  if (status.startsWith('exchange_') && status.endsWith('_closed')) {
+    return false;
+  }
+
+  return status === 'blocked'
+    || status === 'error'
+    || status.includes('blocked')
+    || status.includes('guarded')
+    || status.endsWith('_no_position')
+    || status.endsWith('_order_sent')
+    || status.includes('_close_')
+    || status.includes('_tp_')
+    || status.includes('_sl_');
+}
+
+function myLedgerEventRepresentedByPosition(event = {}, positionRows = []) {
+  const status = String(event.status || '').toLowerCase();
+  if (!status.endsWith('_order_sent')) {
+    return false;
+  }
+
+  const account = eventAccountKey(event);
+  const symbol = normalizeTradeSymbol(event.signal?.symbol || event.exchangePosition?.symbol || '');
+  const eventAt = Date.parse(event.at || 0);
+  return positionRows.some((row) => {
+    const rowAt = Date.parse(row.openedAt || row.at || 0);
+    return row.sourceKey === account
+      && row.symbol === symbol
+      && Number.isFinite(eventAt)
+      && Number.isFinite(rowAt)
+      && Math.abs(rowAt - eventAt) < 12 * unitMs.hour;
+  });
+}
+
+function renderMyLedgerRow(row) {
+  const postLink = row.postUrl
+    ? `<a class="ledger-post-link" href="${escapeAttribute(row.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    : '-';
+  const statusText = [row.action, row.status].filter(Boolean).join(' - ');
+  return `
+    <tr>
+      <td data-label="Fecha">
+        <strong>${escapeHtml(formatDateTime(row.at))}</strong>
+        <span>${escapeHtml(row.detail || '')}</span>
+      </td>
+      <td data-label="Cuenta"><span class="source-badge ${escapeAttribute(row.sourceKey)}">${escapeHtml(row.sourceLabel)}</span></td>
+      <td data-label="Activo">
+        <strong>${escapeHtml(row.symbol || '-')}</strong>
+        <span>${escapeHtml(row.direction || '-')}</span>
+      </td>
+      <td data-label="Estado"><span class="ledger-status ${escapeAttribute(row.statusClass || 'neutral')}">${escapeHtml(statusText || '-')}</span></td>
+      <td data-label="Entrada / Actual">
+        <strong>${escapeHtml(formatPrice(row.entryPrice))}</strong>
+        <span>${escapeHtml(formatPrice(row.exitPrice))}</span>
+      </td>
+      <td data-label="SL / TP">
+        <strong>${escapeHtml(formatPrice(row.stopLoss))}</strong>
+        <span>${escapeHtml(formatPrice(row.takeProfit))}</span>
+      </td>
+      <td data-label="Margen">${escapeHtml(formatOptionalLedgerMoney(row.notional, row.asset))}</td>
+      <td data-label="PnL / ROI" class="${amountClass(row.pnl)}">
+        <strong>${escapeHtml(formatOptionalLedgerMoney(row.pnl, row.asset))}</strong>
+        <span>${escapeHtml(formatOptionalPercent(row.roi))}</span>
+      </td>
+      <td data-label="Fuente">${postLink}</td>
+    </tr>
+  `;
+}
+
+function renderExternalSheetEmbed() {
+  if (!elements.externalSheetFrame || !elements.externalSheetLink) {
+    return;
+  }
+
+  const source = externalSheetSource();
+  elements.externalSheetStatus.textContent = source.label;
+  elements.externalSheetLink.classList.toggle('hidden', !source.href);
+  if (source.href) {
+    elements.externalSheetLink.href = source.href;
+  }
+
+  if (!source.embedUrl) {
+    elements.externalSheetFrame.removeAttribute('src');
+    elements.externalSheetFrame.classList.add('hidden');
+    elements.externalSheetEmpty?.classList.remove('hidden');
+    return;
+  }
+
+  if (elements.externalSheetFrame.getAttribute('src') !== source.embedUrl) {
+    elements.externalSheetFrame.setAttribute('src', source.embedUrl);
+  }
+  elements.externalSheetFrame.classList.remove('hidden');
+  elements.externalSheetEmpty?.classList.add('hidden');
+}
+
+function externalSheetSource() {
+  const reference = currentReferenceLedger();
+  const portfolio = appState.portfolio || appState.state?.portfolio || {};
+  const href = reference?.url || portfolio.resolvedUrl || portfolio.url || '';
+  const spreadsheetId = portfolio.spreadsheetId || spreadsheetIdFromUrl(href);
+  if (spreadsheetId) {
+    return {
+      href: href || `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit`,
+      embedUrl: `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/preview`,
+      label: reference?.label ? `En vivo - ${reference.label}` : 'En vivo'
+    };
+  }
+
+  return {
+    href,
+    embedUrl: '',
+    label: href ? 'Enlace externo' : 'Sin hoja'
+  };
+}
+
+function spreadsheetIdFromUrl(value) {
+  const match = String(value || '').match(/\/spreadsheets\/d\/([^/?#]+)/);
+  return match?.[1] || '';
+}
+
+function uniqueLedgerRows(rows = []) {
+  const seen = new Set();
+  const unique = [];
+  for (const row of rows) {
+    const key = row.id || `${row.at}:${row.sourceKey}:${row.symbol}:${row.action}:${row.status}`;
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(row);
+  }
+  return unique;
+}
+
+function ledgerActionFromEvent(status, signal = {}) {
+  const value = String(status || '').toLowerCase();
+  if (value.includes('_tp_')) {
+    return 'Take profit';
+  }
+  if (value.includes('_sl_')) {
+    return 'Stop loss';
+  }
+  if (value.includes('_close_')) {
+    return 'Cierre';
+  }
+  if (value.endsWith('_order_sent')) {
+    return 'Apertura';
+  }
+  if (value === 'blocked' || value.includes('blocked')) {
+    return 'Bloqueada';
+  }
+  return signal.action || 'Evento';
+}
+
+function ledgerStatusClass(status, pnl) {
+  const value = String(status || '').toLowerCase();
+  if (value === 'error' || value === 'blocked' || value.includes('blocked') || value.endsWith('_no_position')) {
+    return 'negative';
+  }
+  if (value.includes('guarded')) {
+    return 'warn';
+  }
+  if (Number.isFinite(Number(pnl)) && Number(pnl) !== 0) {
+    return amountClass(pnl);
+  }
+  return 'neutral';
+}
+
+function ledgerEventPnl(event = {}) {
+  const positions = [
+    event.exchangePosition,
+    event.paperPosition,
+    ...(event.closedPaperPositions || [])
+  ].filter(Boolean);
+  return roundPnl(positions.reduce((sum, position) => sum + ledgerPositionPnl(position), 0));
+}
+
+function ledgerPositionPnl(position = {}) {
+  const status = String(position.status || '').toLowerCase();
+  const value = status === 'open'
+    ? position.unrealizedPnl ?? position.paperPnl ?? position.realizedPnl
+    : position.realizedPnl ?? position.paperPnl ?? position.unrealizedPnl;
+  return roundPnl(Number(value || 0));
+}
+
+function ledgerRoi(pnl, notional) {
+  const value = Number(pnl);
+  const base = Number(notional);
+  if (!Number.isFinite(value) || !Number.isFinite(base) || base <= 0) {
+    return null;
+  }
+  return (value / base) * 100;
+}
+
+function ledgerSourceLabel(account) {
+  return account === 'demo' ? 'Demo VST' : 'Real';
+}
+
+function ledgerAsset(account) {
+  return account === 'demo' ? 'VST' : 'USDT';
+}
+
+function ledgerNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatOptionalLedgerMoney(value, asset) {
+  const number = Number(value);
+  return Number.isFinite(number) ? formatMoney(number, asset) : '-';
 }
 
 function renderRealLifecycle() {

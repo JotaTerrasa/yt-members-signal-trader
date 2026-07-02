@@ -113,6 +113,13 @@ pm2 start npm --name yt-members-signal-trader -- run dev
 pm2 save
 ```
 
+También puedes usar el archivo de proceso incluido:
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
 En Windows, si PM2 interpreta mal los argumentos de `npm`, usa el arranque directo:
 
 ```powershell
@@ -211,3 +218,20 @@ pm2 save
 ```
 
 No borres `.data/` ni `.yt-profile/`.
+
+## 10. Empaquetado portable y Docker
+
+El proyecto incluye empaquetado reproducible:
+
+```bash
+npm run package:check
+npm run docker:up
+```
+
+Docker Compose expone `http://localhost:5178` y monta:
+
+- `.data/` para configuración y eventos;
+- `.yt-profile/` para sesiones de Chromium;
+- `docs/strategy-reports/` para informes.
+
+Consulta la guía completa en [Paquetización y ejecución portátil](PACKAGING.md).

@@ -4,6 +4,9 @@ import { parseFuturesSignal, parseFuturesSignals } from './futuresSignalParser.j
 const OPEN_ORDERS_CACHE_MS = 60_000;
 const OPEN_ORDERS_ERROR_LOG_MS = 60_000;
 const OPEN_ORDERS_DEFAULT_BACKOFF_MS = 60_000;
+const CLOSE_GUARD_TAKER_FEE_RATE = 0.0005;
+const CLOSE_GUARD_MIN_NET_PNL = 0;
+const CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT = 0.15;
 
 export class FuturesTrader {
   constructor({ configStore, paperStore, tradeEventStore, onLog, onTrade }) {
@@ -508,12 +511,13 @@ export class FuturesTrader {
       ? await this.paperStore.closeBySymbol({ symbol: signal.symbol, price: closePrice, percent: closePercent, reason: 'youtube_close', post, phase })
       : [];
     const exchangeClose = config.mode !== 'test'
-      ? await this.closeExchangePositions({ client, config, signal, closePercent })
+      ? await this.closeExchangePositions({ client, marketClient, config, signal, closePercent })
       : null;
 
     const event = this.emitTrade({
       ...baseEvent,
       status: closeStatus(config, exchangeClose),
+      reason: exchangeClose?.skipped?.[0]?.reason || null,
       closePrice,
       closePercent,
       closedPaperPositions,
@@ -1026,21 +1030,34 @@ export class FuturesTrader {
     });
   }
 
-  async closeExchangePositions({ client, config = null, signal, closePercent = 100 }) {
+  async closeExchangePositions({ client, marketClient = null, config = null, signal, closePercent = 100 }) {
     const response = await client.getPositions(signal.symbol);
     const positions = (Array.isArray(response.data) ? response.data : [])
       .filter((position) => position.symbol === signal.symbol)
       .filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
 
     if (!positions.length) {
-      return { positions: [], orders: [] };
+      return { positions: [], orders: [], skipped: [] };
     }
 
     const contract = await this.getContract(client, signal.symbol);
     const percent = Math.min(100, Math.max(1, Number(closePercent) || 100));
     const orders = [];
+    const skipped = [];
 
     for (const position of positions) {
+      const guard = await closeGuardForPosition({
+        position,
+        signal,
+        percent,
+        marketClient,
+        fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
+      });
+      if (!guard.ok) {
+        skipped.push({ position, reason: guard.reason, guard });
+        continue;
+      }
+
       if (percent >= 99.9 && position.positionId) {
         orders.push({
           position,
@@ -1076,14 +1093,15 @@ export class FuturesTrader {
       });
     }
 
-    const protectiveCleanup = percent >= 99.9
-      ? await this.cancelProtectiveOrdersForClosedPositions({ client, positions })
+    const closedPositions = orders.map((item) => item.position).filter(Boolean);
+    const protectiveCleanup = percent >= 99.9 && closedPositions.length
+      ? await this.cancelProtectiveOrdersForClosedPositions({ client, positions: closedPositions })
       : { canceled: [], skipped: [] };
     if (config && protectiveCleanup.canceled.length) {
       this.openOrdersCache.delete(openOrdersCacheKey(config));
     }
 
-    return { positions, orders, protectiveCleanup };
+    return { positions, orders, skipped, protectiveCleanup };
   }
 
   async closeAllExchangePositions({ client, config = null, closePercent = 100 }) {
@@ -1568,10 +1586,198 @@ function closeStatus(config, exchangeClose) {
   if (config.mode === 'test') {
     return 'paper_close_sent';
   }
+  if (exchangeClose?.skipped?.length && !exchangeClose?.orders?.length) {
+    return `${config.mode}_close_guarded`;
+  }
   if (!exchangeClose?.orders?.length) {
     return `${config.mode}_close_no_position`;
   }
   return `${config.mode}_close_sent`;
+}
+
+async function closeGuardForPosition({
+  position,
+  signal,
+  percent = 100,
+  marketClient,
+  fetchMarketPrice
+}) {
+  const hasExplicitClosePrice = explicitClosePrice(signal) !== null;
+  const shouldProtectNetPnl = shouldGuardClose({ position, signal });
+  if (!hasExplicitClosePrice && !shouldProtectNetPnl) {
+    return { ok: true };
+  }
+  if (!marketClient || typeof fetchMarketPrice !== 'function') {
+    return { ok: true };
+  }
+
+  const marketPrice = await fetchMarketPrice(position.symbol || signal.symbol).catch(() => null);
+  const slippage = closePriceSlippage({ position, signal, marketPrice });
+  if (slippage && slippage.percent > CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT) {
+    return {
+      ok: false,
+      reason: [
+        'close_price_slippage',
+        `slippage=${roundMoney(slippage.percent)}%`,
+        `limit=${CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT}%`,
+        `signal=${roundMoney(slippage.closePrice)}`,
+        `market=${roundMoney(slippage.marketPrice)}`
+      ].join(':'),
+      marketPrice,
+      slippage
+    };
+  }
+
+  if (!shouldProtectNetPnl) {
+    return { ok: true, marketPrice, slippage };
+  }
+
+  const estimate = estimateCloseNetPnl({ position, signal, percent, marketPrice });
+  if (!estimate.canEstimate) {
+    return { ok: true, marketPrice };
+  }
+  if (estimate.estimatedNetPnl >= CLOSE_GUARD_MIN_NET_PNL) {
+    return { ok: true, marketPrice, estimate };
+  }
+
+  return {
+    ok: false,
+    reason: [
+      'close_net_negative',
+      `net=${roundMoney(estimate.estimatedNetPnl)}`,
+      `market=${roundMoney(estimate.marketPrice)}`,
+      `breakeven=${roundMoney(estimate.breakEvenPrice)}`
+    ].join(':'),
+    marketPrice,
+    estimate
+  };
+}
+
+function explicitClosePrice(signal) {
+  const closePrice = Number(signal?.closePrice);
+  return Number.isFinite(closePrice) && closePrice > 0 ? closePrice : null;
+}
+
+function closePriceSlippage({ position, signal, marketPrice }) {
+  const closePrice = explicitClosePrice(signal);
+  const price = Number(marketPrice);
+  if (closePrice === null || !Number.isFinite(price) || price <= 0) {
+    return null;
+  }
+
+  const direction = positionDirection(position);
+  let percent = 0;
+  if (direction === 'LONG' && price < closePrice) {
+    percent = ((closePrice - price) / closePrice) * 100;
+  } else if (direction === 'SHORT' && price > closePrice) {
+    percent = ((price - closePrice) / closePrice) * 100;
+  }
+
+  if (percent <= 0) {
+    return null;
+  }
+
+  return {
+    direction,
+    closePrice,
+    marketPrice: price,
+    percent: roundMoney(percent)
+  };
+}
+
+function shouldGuardClose({ position, signal }) {
+  const closePrice = explicitClosePrice(signal);
+  if (closePrice === null) {
+    return false;
+  }
+
+  const entryPrice = firstFiniteNumber([position.avgPrice, position.entryPrice, position.price]);
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return false;
+  }
+
+  const direction = positionDirection(position);
+  if (direction === 'LONG') {
+    return closePrice > entryPrice;
+  }
+  if (direction === 'SHORT') {
+    return closePrice < entryPrice;
+  }
+  return false;
+}
+
+function estimateCloseNetPnl({ position, percent = 100, marketPrice }) {
+  const direction = positionDirection(position);
+  const price = Number(marketPrice);
+  const entryPrice = firstFiniteNumber([position.avgPrice, position.entryPrice, position.price]);
+  const available = Math.abs(firstFiniteNumber([position.availableAmt, position.positionAmt, position.quantity]));
+  const ratio = Math.min(100, Math.max(1, Number(percent) || 100)) / 100;
+  const quantity = available * ratio;
+  if (!direction || !Number.isFinite(price) || price <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+    return { canEstimate: false, marketPrice: price };
+  }
+
+  const grossPnl = direction === 'LONG'
+    ? (price - entryPrice) * quantity
+    : (entryPrice - price) * quantity;
+  const previousRealized = firstFiniteNumber([
+    position.realisedProfit,
+    position.realizedProfit,
+    position.realisedPnl,
+    position.realizedPnl
+  ]);
+  const realizedAdjustment = Number.isFinite(previousRealized) ? previousRealized * ratio : 0;
+  const estimatedCloseFee = -Math.abs(price * quantity * CLOSE_GUARD_TAKER_FEE_RATE);
+  const estimatedNetPnl = grossPnl + realizedAdjustment + estimatedCloseFee;
+  const breakEvenPrice = closeBreakEvenPrice({
+    direction,
+    entryPrice,
+    quantity,
+    realizedAdjustment,
+    feeRate: CLOSE_GUARD_TAKER_FEE_RATE
+  });
+
+  return {
+    canEstimate: true,
+    direction,
+    marketPrice: price,
+    entryPrice,
+    quantity,
+    grossPnl: roundMoney(grossPnl),
+    realizedAdjustment: roundMoney(realizedAdjustment),
+    estimatedCloseFee: roundMoney(estimatedCloseFee),
+    estimatedNetPnl: roundMoney(estimatedNetPnl),
+    breakEvenPrice
+  };
+}
+
+function closeBreakEvenPrice({ direction, entryPrice, quantity, realizedAdjustment, feeRate }) {
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return null;
+  }
+  const realizedPerUnit = Number(realizedAdjustment || 0) / quantity;
+  if (direction === 'LONG') {
+    return (entryPrice - realizedPerUnit) / (1 - feeRate);
+  }
+  if (direction === 'SHORT') {
+    return (entryPrice + realizedPerUnit) / (1 + feeRate);
+  }
+  return null;
+}
+
+function positionDirection(position = {}) {
+  const side = String(position.positionSide || position.direction || '').toUpperCase();
+  if (side === 'LONG' || side === 'SHORT') {
+    return side;
+  }
+  const amount = Number(position.positionAmt || position.availableAmt || 0);
+  if (amount > 0) {
+    return 'LONG';
+  }
+  if (amount < 0) {
+    return 'SHORT';
+  }
+  return '';
 }
 
 function marketExecutionSignal(signal, referenceEntryPrice) {
