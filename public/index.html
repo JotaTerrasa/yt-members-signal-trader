@@ -219,13 +219,24 @@
               <input id="bingx-api-secret" type="password" autocomplete="off" placeholder="BingX API secret">
             </div>
             <div class="range-grid">
+              <label for="bingx-monthly-initial-usdt">
+                <span>Capital mes USDT</span>
+                <input id="bingx-monthly-initial-usdt" type="number" min="1" step="1" value="300">
+              </label>
+              <label for="bingx-monthly-order-percent">
+                <span>% fijo por senal</span>
+                <input id="bingx-monthly-order-percent" type="number" min="1" max="100" step="1" value="10">
+              </label>
+            </div>
+            <div class="field-hint">Futuros reales usa capital mensual * porcentaje. Con 300 USDT y 10%, cada ticker abre 30 USDT de margen.</div>
+            <div class="range-grid hidden" aria-hidden="true">
               <label for="bingx-notional">
-                <span>USDT por trade</span>
-                <input id="bingx-notional" type="number" min="2" step="1" value="10">
+                <span>USDT por trade legacy</span>
+                <input id="bingx-notional" type="number" min="2" step="1" value="30">
               </label>
               <label for="bingx-max-notional">
-                <span>Max USDT</span>
-                <input id="bingx-max-notional" type="number" min="2" step="1" value="25">
+                <span>Max USDT legacy</span>
+                <input id="bingx-max-notional" type="number" min="2" step="1" value="30">
               </label>
             </div>
             <div class="range-grid">
@@ -282,15 +293,15 @@
 	            </div>
 	            <div class="range-grid">
 	              <label for="bingx-vst-base-capital">
-	                <span>Capital base VST</span>
-	                <input id="bingx-vst-base-capital" type="number" min="1" step="1" value="1000">
+	                <span>Capital mes VST</span>
+	                <input id="bingx-vst-base-capital" type="number" min="1" step="1" value="300">
 	              </label>
 	              <label for="bingx-vst-capital-percent">
-	                <span>Capital VST por señal %</span>
-	                <input id="bingx-vst-capital-percent" type="number" min="1" max="100" step="1" value="15">
+	                <span>% fijo VST</span>
+	                <input id="bingx-vst-capital-percent" type="number" min="1" max="100" step="1" value="10" readonly>
 	              </label>
 	            </div>
-	            <div class="field-hint">En Demo VST ignora el USDT de la señal y usa base fija * porcentaje. Con 1000 VST y 15%, cada ticker abre 150 VST de margen.</div>
+	            <div class="field-hint">Demo VST usa el mismo porcentaje mensual. Con 300 VST y 10%, cada ticker abre 30 VST de margen.</div>
 	            <div class="range-grid">
               <label for="bingx-daily-loss">
                 <span>Perdida max dia</span>

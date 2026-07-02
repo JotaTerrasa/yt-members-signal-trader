@@ -42,8 +42,11 @@ const defaultConfig = {
     mode: 'test',
     apiKey: '',
     apiSecret: '',
-    defaultNotionalUSDT: 10,
-    maxNotionalUSDT: 25,
+    defaultNotionalUSDT: 30,
+    maxNotionalUSDT: 30,
+    monthlyInitialCapitalUSDT: 300,
+    monthlyInitialCapitalVST: 300,
+    monthlyOrderPercent: 10,
     maxLeverage: 5,
     marginType: 'ISOLATED',
     requireStopLoss: true,
@@ -61,8 +64,8 @@ const defaultConfig = {
     maxSignalLeverage: 125,
     maxSignalAgeMinutes: 180,
     maxEntryDeviationPercent: 5,
-    vstBaseCapital: 1000,
-    vstCapitalPercent: 15,
+    vstBaseCapital: 300,
+    vstCapitalPercent: 10,
     vstPnlResetAt: null,
     livePnlResetAt: null,
     monthlyResetAt: null,
@@ -192,7 +195,7 @@ export class ConfigStore {
   }
 
   getBingX({ includeSecrets = false } = {}) {
-    const bingx = this.data.bingx;
+    const bingx = normalizeBingXConfig(this.data.bingx);
     if (includeSecrets) {
       return { ...bingx };
     }
@@ -203,6 +206,11 @@ export class ConfigStore {
       environment: environmentForMode(bingx.mode),
       defaultNotionalUSDT: bingx.defaultNotionalUSDT,
       maxNotionalUSDT: bingx.maxNotionalUSDT,
+      monthlyInitialCapitalUSDT: bingx.monthlyInitialCapitalUSDT,
+      monthlyInitialCapitalVST: bingx.monthlyInitialCapitalVST,
+      monthlyOrderPercent: bingx.monthlyOrderPercent,
+      monthlyOrderNotionalUSDT: bingx.monthlyOrderNotionalUSDT,
+      monthlyOrderNotionalVST: bingx.monthlyOrderNotionalVST,
       maxLeverage: bingx.maxLeverage,
       marginType: bingx.marginType,
       requireStopLoss: bingx.requireStopLoss,
@@ -236,13 +244,32 @@ export class ConfigStore {
   async updateBingX(input) {
     const current = this.data.bingx;
     const mode = normalizeBingXMode(input.mode);
+    const currentNormalized = normalizeBingXConfig(current);
+    const monthlyInitialCapitalUSDT = positiveNumber(
+      input.monthlyInitialCapitalUSDT,
+      currentNormalized.monthlyInitialCapitalUSDT || defaultConfig.bingx.monthlyInitialCapitalUSDT
+    );
+    const monthlyInitialCapitalVST = positiveNumber(
+      input.monthlyInitialCapitalVST,
+      currentNormalized.monthlyInitialCapitalVST || defaultConfig.bingx.monthlyInitialCapitalVST
+    );
+    const monthlyOrderPercent = clampNumber(
+      input.monthlyOrderPercent,
+      1,
+      100,
+      currentNormalized.monthlyOrderPercent || defaultConfig.bingx.monthlyOrderPercent
+    );
+    const monthlyOrderNotionalUSDT = monthlyOrderNotional(monthlyInitialCapitalUSDT, monthlyOrderPercent);
     const next = {
       enabled: Boolean(input.enabled),
       mode,
       apiKey: current.apiKey,
       apiSecret: current.apiSecret,
-      defaultNotionalUSDT: positiveNumber(input.defaultNotionalUSDT, defaultConfig.bingx.defaultNotionalUSDT),
-      maxNotionalUSDT: positiveNumber(input.maxNotionalUSDT, defaultConfig.bingx.maxNotionalUSDT),
+      defaultNotionalUSDT: monthlyOrderNotionalUSDT,
+      maxNotionalUSDT: monthlyOrderNotionalUSDT,
+      monthlyInitialCapitalUSDT,
+      monthlyInitialCapitalVST,
+      monthlyOrderPercent,
       maxLeverage: clampInteger(input.maxLeverage, 1, 125, defaultConfig.bingx.maxLeverage),
       marginType: clean(input.marginType).toUpperCase() === 'CROSSED' ? 'CROSSED' : 'ISOLATED',
       requireStopLoss: Boolean(input.requireStopLoss),
@@ -260,8 +287,8 @@ export class ConfigStore {
       maxSignalLeverage: clampInteger(input.maxSignalLeverage, 1, 125, defaultConfig.bingx.maxSignalLeverage),
       maxSignalAgeMinutes: clampInteger(input.maxSignalAgeMinutes, 0, 1440, defaultConfig.bingx.maxSignalAgeMinutes),
       maxEntryDeviationPercent: clampNumber(input.maxEntryDeviationPercent, 0, 50, defaultConfig.bingx.maxEntryDeviationPercent),
-      vstBaseCapital: positiveNumber(input.vstBaseCapital, defaultConfig.bingx.vstBaseCapital),
-      vstCapitalPercent: clampNumber(input.vstCapitalPercent, 1, 100, defaultConfig.bingx.vstCapitalPercent),
+      vstBaseCapital: monthlyInitialCapitalVST,
+      vstCapitalPercent: monthlyOrderPercent,
       vstPnlResetAt: input.clearVstPnlReset
         ? null
         : isoDateOrCurrent(input.vstPnlResetAt, current.vstPnlResetAt || defaultConfig.bingx.vstPnlResetAt),
@@ -371,6 +398,42 @@ function environmentForMode(mode) {
   return mode === 'demo' ? 'prod-vst' : 'prod-live';
 }
 
+function normalizeBingXConfig(input = {}) {
+  const monthlyInitialCapitalUSDT = positiveNumber(
+    input.monthlyInitialCapitalUSDT,
+    defaultConfig.bingx.monthlyInitialCapitalUSDT
+  );
+  const monthlyInitialCapitalVST = positiveNumber(
+    input.monthlyInitialCapitalVST,
+    defaultConfig.bingx.monthlyInitialCapitalVST
+  );
+  const monthlyOrderPercent = clampNumber(
+    input.monthlyOrderPercent,
+    1,
+    100,
+    defaultConfig.bingx.monthlyOrderPercent
+  );
+  const monthlyOrderNotionalUSDT = monthlyOrderNotional(monthlyInitialCapitalUSDT, monthlyOrderPercent);
+  const monthlyOrderNotionalVST = monthlyOrderNotional(monthlyInitialCapitalVST, monthlyOrderPercent);
+
+  return {
+    ...input,
+    defaultNotionalUSDT: monthlyOrderNotionalUSDT,
+    maxNotionalUSDT: monthlyOrderNotionalUSDT,
+    monthlyInitialCapitalUSDT,
+    monthlyInitialCapitalVST,
+    monthlyOrderPercent,
+    monthlyOrderNotionalUSDT,
+    monthlyOrderNotionalVST,
+    vstBaseCapital: monthlyInitialCapitalVST,
+    vstCapitalPercent: monthlyOrderPercent
+  };
+}
+
+function monthlyOrderNotional(capital, percent) {
+  return roundMoney(Number(capital || 0) * (Number(percent || 0) / 100));
+}
+
 function tokenPreview(token) {
   if (!token) {
     return '';
@@ -402,6 +465,10 @@ function clampInteger(value, min, max, fallback) {
     return fallback;
   }
   return Math.min(max, Math.max(min, number));
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 10000) / 10000;
 }
 
 function isoDateOrCurrent(value, current) {

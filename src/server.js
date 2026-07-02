@@ -329,6 +329,10 @@ function filterIncomingPosts(payload = {}) {
 }
 
 function tradingPlanForPayload(payload = {}) {
+  if (payload.phase === 'backfill') {
+    return { enabled: false, reason: 'historico en modo lectura', options: {} };
+  }
+
   if (payload.source !== 'telegram_web') {
     return {
       enabled: true,
@@ -767,7 +771,7 @@ const server = createServer(async (request, response) => {
       const portfolio = configStore.getPortfolio();
       const parsedHistorical = buildHistoricalPnl(store.list(), {
         months: requestUrl.searchParams.get('months') || 72,
-        defaultNotionalUSDT: bingx.defaultNotionalUSDT || 10,
+        defaultNotionalUSDT: bingx.monthlyOrderNotionalUSDT || bingx.defaultNotionalUSDT || 30,
         fallbackLeverage: bingx.maxLeverage || 1
       });
       const historical = await applyReferenceLedger(parsedHistorical, {
@@ -2679,8 +2683,8 @@ function fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, bala
 
 function demoBaseline() {
   const config = configStore.getBingX();
-  const value = Number(config.vstBaseCapital || 1000);
-  return Number.isFinite(value) && value > 0 ? value : 1000;
+  const value = Number(config.monthlyInitialCapitalVST || config.vstBaseCapital || 300);
+  return Number.isFinite(value) && value > 0 ? value : 300;
 }
 
 function balanceSummary(balance) {

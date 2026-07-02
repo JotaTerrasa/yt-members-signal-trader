@@ -78,9 +78,10 @@ YouTube URL: https://www.youtube.com/@tu-canal/posts
 Telegram Web URL: https://web.telegram.org/k/#-XXXXXXXXXX
 Monitor: live cada 30 segundos
 BingX mode: dual, Demo VST + live real
-VST base: 1000 VST
-VST por senal: 15%
-Real por orden: valor fijo configurado en UI
+Capital mensual VST: 300 VST
+Capital mensual real: 300 USDT
+Por senal: 10% fijo del capital mensual
+Resultado: 30 VST en demo y 30 USDT en real por ticker
 Apalancamiento: usar el de la senal
 Stop loss obligatorio: activado
 Telegram alertas: activado

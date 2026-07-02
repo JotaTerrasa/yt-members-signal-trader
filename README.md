@@ -210,7 +210,7 @@ No escribas tokens en README, issues, commits ni capturas.
 1. Activa `Auto-operar senales` solo cuando estes listo.
 2. Elige modo: `test`, `demo`, `live` o `dual`.
 3. Pega API key y API secret.
-4. Configura tamano por orden, margen, apalancamiento maximo y limites.
+4. Configura capital mensual, porcentaje fijo por senal, margen, apalancamiento maximo y limites.
 5. Activa `Exigir stop loss`.
 6. Si vas a live, revisa el checklist `Preparado para live`.
 7. Arma live solo desde la UI y con confirmacion consciente.

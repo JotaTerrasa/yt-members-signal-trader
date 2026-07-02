@@ -1,7 +1,19 @@
 const longWords = ['LONG', 'LARGO', 'BUY', 'COMPRA', 'COMPRAR'];
 const shortWords = ['SHORT', 'CORTO', 'SELL', 'VENTA', 'VENDER'];
 const directionWords = [...longWords, ...shortWords];
-const symbolIgnoreWords = new Set(['USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'TPS', 'TAKE', 'PROFIT', 'OBJETIVO', 'OBJETIVOS', 'TARGET', 'TARGETS', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN', 'TOTAL', 'TODO', 'TODOS', 'TODAS']);
+const symbolIgnoreWords = new Set([
+  'USDT', 'USDC', 'BINGX', 'STOP', 'STOPLOSS', 'SL', 'TP', 'TPS', 'TAKE', 'PROFIT', 'OBJETIVO',
+  'OBJETIVOS', 'TARGET', 'TARGETS', 'ENTRY', 'ENTRADA', 'PRECIO', 'APALANCAMIENTO', 'ORDEN',
+  'TOTAL', 'TODO', 'TODOS', 'TODAS', 'A', 'AL', 'DE', 'DEL', 'EL', 'LA', 'LAS', 'LOS', 'UN',
+  'UNA', 'UNO', 'Y', 'O', 'QUE', 'CON', 'POR', 'PARA', 'EN', 'TRAS', 'OS', 'SE', 'SI', 'NO',
+  'AHORA', 'ACTUALIZO', 'BAJO', 'BAJISTAS', 'BENIGNO', 'COBERTURAS', 'DOBLE', 'DOS',
+  'INDIVIDUALES', 'MEDIA', 'PCE', 'PORTFOLIO', 'SEMANAL', 'TENIAMOS', 'ZONA'
+]);
+const managementBaseSymbols = new Set([
+  'BTC', 'ETH', 'SOL', 'SUI', 'XRP', 'ADA', 'DOT', 'LINK', 'AVAX', 'DOGE', 'BNB', 'NEAR',
+  'FET', 'RENDER', 'WIF', 'PEPE', 'TON', 'OP', 'ARB', 'INJ', 'SEI', 'APT', 'LTC', 'BCH',
+  'TRX', 'ETC', 'FIL', 'UNI', 'AAVE', 'ATOM'
+]);
 const baseSymbolAliases = new Map([
   ['BITCOIN', 'BTC'],
   ['ETHEREUM', 'ETH'],
@@ -196,7 +208,7 @@ function parseCloseTargetsFromLine(line) {
       baseSymbol: normalizeBaseSymbol(match[1]),
       price: match[2] ? parseNumberToken(match[2]) : null
     }))
-    .filter((target) => !symbolIgnoreWords.has(target.baseSymbol) && !closeWordsPattern.test(target.baseSymbol));
+    .filter((target) => isManagementSymbolCandidate(target.baseSymbol) && !closeWordsPattern.test(target.baseSymbol));
 }
 
 function looksLikeCloseTickerLine(line) {
@@ -267,7 +279,7 @@ function parseTakeProfitTargetsFromLine(line) {
       baseSymbol: normalizeBaseSymbol(match[1]),
       price: parseNumberToken(match[2])
     }))
-    .filter((target) => !symbolIgnoreWords.has(target.baseSymbol));
+    .filter((target) => isManagementSymbolCandidate(target.baseSymbol));
 }
 
 function parseStopLossModificationSignals(raw) {
@@ -342,7 +354,7 @@ function parseStopLossTargetsFromLine(line) {
       baseSymbol: normalizeBaseSymbol(match[1]),
       price: parseNumberToken(match[2])
     }))
-    .filter((target) => !symbolIgnoreWords.has(target.baseSymbol));
+    .filter((target) => isManagementSymbolCandidate(target.baseSymbol));
 }
 
 function parseBreakEvenSignals(raw) {
@@ -398,12 +410,16 @@ function parseBreakEvenTargets(text) {
 
 function isBreakEvenSymbolCandidate(baseSymbol) {
   if (
-    symbolIgnoreWords.has(baseSymbol)
-    || ['BE', 'BREAK', 'EVEN', 'BREAKEVEN', 'MOVER', 'MUEVE', 'MOVE', 'PONER', 'PASAR', 'SUBIR', 'AJUSTAR', 'ENTRADA', 'ENTRY', 'A', 'AL', 'EN', 'DE', 'DEL', 'EL', 'LA', 'LAS', 'LOS', 'PARA', 'POR'].includes(baseSymbol)
+    !isManagementSymbolCandidate(baseSymbol)
+    || ['BE', 'BREAK', 'EVEN', 'BREAKEVEN', 'MOVER', 'MUEVE', 'MOVE', 'PONER', 'PASAR', 'SUBIR', 'AJUSTAR', 'ENTRADA', 'ENTRY'].includes(baseSymbol)
   ) {
     return false;
   }
-  return baseSymbol.length <= 6 || /\d/.test(baseSymbol);
+  return true;
+}
+
+function isManagementSymbolCandidate(baseSymbol) {
+  return managementBaseSymbols.has(baseSymbol) && !symbolIgnoreWords.has(baseSymbol);
 }
 
 function parseClosePercent(raw) {

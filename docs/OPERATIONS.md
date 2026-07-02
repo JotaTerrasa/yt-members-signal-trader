@@ -130,9 +130,10 @@ Configuracion importante:
 - `Stop obligatorio`: bloquea aperturas sin SL.
 - `Max posiciones`: bloquea nuevas aperturas si se alcanza el limite.
 - `Max leverage senal`: bloquea senales con demasiado apalancamiento.
-- `Capital base VST`: base fija usada en Demo VST.
-- `Capital VST por senal %`: con 1000 VST y 15%, abre 150 VST de margen por ticker.
-- `Real por orden`: se limita por `maxNotionalUSDT` o por el fijo que configures en la UI.
+- `Capital mes USDT`: capital inicial mensual para futuros reales.
+- `Capital mes VST`: capital inicial mensual para Demo VST.
+- `% fijo por senal`: porcentaje fijo aplicado a ambos capitales.
+- Criterio actual: 300 USDT/VST de capital mensual y 10% por senal, es decir 30 USDT en real y 30 VST en demo por ticker.
 
 ## 7. Aperturas
 

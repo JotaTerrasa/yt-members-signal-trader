@@ -815,7 +815,22 @@ export class FuturesTrader {
     const sizing = await this.resolveOrderSizing({ client, signal, config });
     const notional = sizing.notional;
     const exposure = notional * leverage;
-    const quantity = roundDown(exposure / entryPrice, contract.quantityPrecision);
+    const preOrderMarketPrice = forceMarketEntry
+      ? await this.fetchMarketPrice(marketClient, signal.symbol)
+      : marketPrice;
+    const executionEntryPrice = forceMarketEntry ? preOrderMarketPrice : entryPrice;
+    const preOrderStopValidation = validateStopLossAgainstMarket(signal, executionEntryPrice);
+    if (!preOrderStopValidation.ok) {
+      return this.emitTrade({
+        ...baseEvent,
+        status: 'blocked',
+        reason: `entry_missed_${preOrderStopValidation.reason}`,
+        marketPrice: preOrderMarketPrice,
+        referenceEntryPrice
+      });
+    }
+
+    const quantity = roundDown(exposure / executionEntryPrice, contract.quantityPrecision);
 
     if (quantity <= 0 || quantity < contract.tradeMinQuantity || notional < contract.tradeMinUSDT) {
       return this.emitTrade({
@@ -838,9 +853,27 @@ export class FuturesTrader {
       clientOrderId: clientOrderId(post?.id || signal.rawText)
     });
     const test = config.mode === 'test';
-    const response = await client.placeOrder(order, { test });
+    let response;
+    try {
+      response = await client.placeOrder(order, { test });
+    } catch (error) {
+      if (isExchangeStopPriceInvalid(error)) {
+        return this.emitTrade({
+          ...baseEvent,
+          status: 'blocked',
+          reason: `exchange_stop_loss_invalid:${error.message}`,
+          order,
+          sizing,
+          marketPrice: preOrderMarketPrice,
+          entryPrice: executionEntryPrice,
+          referenceEntryPrice,
+          executionEntryType: order.type
+        });
+      }
+      throw error;
+    }
     const paperPosition = test && this.paperStore
-      ? await this.paperStore.openPosition({ signal: executionSignal, post, phase, order, response, entryPrice, quantity, leverage, notional, exposure })
+      ? await this.paperStore.openPosition({ signal: executionSignal, post, phase, order, response, entryPrice: executionEntryPrice, quantity, leverage, notional, exposure })
       : null;
     const bingx = test ? await this.configStore.markDryRunCompleted().catch(() => null) : null;
 
@@ -850,8 +883,8 @@ export class FuturesTrader {
       order,
       response,
       sizing,
-      marketPrice,
-      entryPrice,
+      marketPrice: preOrderMarketPrice,
+      entryPrice: executionEntryPrice,
       referenceEntryPrice,
       executionEntryType: order.type,
       paperPosition,
@@ -907,32 +940,20 @@ export class FuturesTrader {
   async resolveOrderSizing({ client, signal, config }) {
     if (config.mode === 'demo') {
       const balance = await this.fetchAccountCapital(client);
-      const baseCapital = positiveNumber(config.vstBaseCapital, 1000);
-      const percent = clampNumber(config.vstCapitalPercent, 1, 100, 15);
-      const notional = roundMoney(baseCapital * (percent / 100));
+      const sizing = monthlySizingForMode(config, 'demo', balance.asset);
+      const { notional } = sizing;
       if (balance.available < notional) {
         throw new Error(`No hay VST disponible suficiente: hacen falta ${notional} ${balance.asset} y hay ${roundMoney(balance.available)} ${balance.asset}.`);
       }
       return {
-        mode: 'vst_fixed_base_percent',
-        baseCapital,
-        capitalPercent: percent,
+        ...sizing,
         availableCapital: balance.available,
-        asset: balance.asset,
-        notional
+        asset: balance.asset
       };
     }
 
     if (config.mode === 'live') {
-      const configuredNotional = positiveNumber(config.defaultNotionalUSDT, 10);
-      const maxNotional = positiveNumber(config.maxNotionalUSDT, configuredNotional);
-      return {
-        mode: 'live_fixed_notional',
-        asset: 'USDT',
-        configuredNotional,
-        maxNotional,
-        notional: roundMoney(Math.min(configuredNotional, maxNotional))
-      };
+      return monthlySizingForMode(config, 'live', 'USDT');
     }
 
     const signalNotional = Number(signal.notionalUSDT);
@@ -960,7 +981,7 @@ export class FuturesTrader {
     ].map(Number).find((value) => Number.isFinite(value) && value > 0);
 
     if (!Number.isFinite(available) || available <= 0) {
-      throw new Error('No hay capital disponible en BingX VST para calcular el 15%.');
+      throw new Error('No hay capital disponible en BingX VST para calcular el porcentaje mensual.');
     }
 
     return {
@@ -1511,6 +1532,11 @@ function validateStopLossAgainstMarket(signal, marketPrice) {
   return { ok: true };
 }
 
+function isExchangeStopPriceInvalid(error) {
+  const message = String(error?.message || error || '');
+  return /SL Price must be (?:lower|greater) than Last Price/i.test(message);
+}
+
 function orderStatus(config) {
   if (config.mode === 'demo') {
     return 'demo_order_sent';
@@ -1642,6 +1668,23 @@ function executionConfigs(config) {
     { ...config, mode: 'demo' },
     { ...config, mode: 'live' }
   ];
+}
+
+function monthlySizingForMode(config, mode, asset) {
+  const isDemo = mode === 'demo';
+  const baseCapital = positiveNumber(
+    isDemo ? config.monthlyInitialCapitalVST : config.monthlyInitialCapitalUSDT,
+    300
+  );
+  const capitalPercent = clampNumber(config.monthlyOrderPercent, 1, 100, 10);
+  const notional = roundMoney(baseCapital * (capitalPercent / 100));
+  return {
+    mode: isDemo ? 'demo_monthly_initial_capital_percent' : 'live_monthly_initial_capital_percent',
+    asset,
+    baseCapital,
+    capitalPercent,
+    notional
+  };
 }
 
 function asArray(value) {

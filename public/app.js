@@ -149,6 +149,8 @@ const elements = {
   bingxMargin: document.querySelector('#bingx-margin'),
   bingxApiKey: document.querySelector('#bingx-api-key'),
   bingxApiSecret: document.querySelector('#bingx-api-secret'),
+  bingxMonthlyInitialUsdt: document.querySelector('#bingx-monthly-initial-usdt'),
+  bingxMonthlyOrderPercent: document.querySelector('#bingx-monthly-order-percent'),
   bingxNotional: document.querySelector('#bingx-notional'),
   bingxMaxNotional: document.querySelector('#bingx-max-notional'),
   bingxMaxLeverage: document.querySelector('#bingx-max-leverage'),
@@ -2337,7 +2339,7 @@ function renderRealModeBanner() {
     </div>
     <div>
       <span>Orden real</span>
-      <strong>${escapeHtml(formatMoney(bingx.defaultNotionalUSDT || 0, 'USDT'))}</strong>
+      <strong>${escapeHtml(formatMoney(monthlyOrderNotional(bingx, 'USDT'), 'USDT'))}</strong>
     </div>
     <div>
       <span>Ultima ejecucion</span>
@@ -3308,7 +3310,7 @@ function ensureSimulationDefault() {
   if (!simulationBaseSourcePositions().positions.length && appState.pnlLoading) {
     return;
   }
-  const notional = averagePositionNotional() || Number(appState.bingx?.defaultNotionalUSDT || 0) || 10;
+  const notional = averagePositionNotional() || monthlyOrderNotional(appState.bingx || {}, 'USDT') || 30;
   elements.pnlSimNotional.value = String(Math.round(notional * 100) / 100);
 }
 
@@ -4074,6 +4076,13 @@ function renderBingx(bingx = appState.bingx, message = '') {
   }
 
   appState.bingx = bingx;
+  const monthlyInitialCapitalUSDT = Number(bingx.monthlyInitialCapitalUSDT || 300);
+  const monthlyInitialCapitalVST = Number(bingx.monthlyInitialCapitalVST || bingx.vstBaseCapital || 300);
+  const monthlyOrderPercent = Number(bingx.monthlyOrderPercent || bingx.vstCapitalPercent || 10);
+  const monthlyOrderUSDT = monthlyOrderNotional({
+    monthlyInitialCapitalUSDT,
+    monthlyOrderPercent
+  }, 'USDT');
   elements.bingxEnabled.checked = Boolean(bingx.enabled);
   elements.bingxMode.value = bingx.mode || 'test';
   elements.bingxMargin.value = bingx.marginType || 'ISOLATED';
@@ -4081,8 +4090,10 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxApiSecret.value = '';
   elements.bingxApiKey.placeholder = bingx.apiKeyConfigured ? `API key guardada ${bingx.apiKeyPreview}` : 'BingX API key';
   elements.bingxApiSecret.placeholder = bingx.apiSecretConfigured ? `Secret guardado ${bingx.apiSecretPreview}` : 'BingX API secret';
-  elements.bingxNotional.value = bingx.defaultNotionalUSDT || 10;
-  elements.bingxMaxNotional.value = bingx.maxNotionalUSDT || 25;
+  elements.bingxMonthlyInitialUsdt.value = monthlyInitialCapitalUSDT;
+  elements.bingxMonthlyOrderPercent.value = monthlyOrderPercent;
+  elements.bingxNotional.value = monthlyOrderUSDT;
+  elements.bingxMaxNotional.value = monthlyOrderUSDT;
   elements.bingxMaxLeverage.value = bingx.maxLeverage || 5;
   elements.bingxSymbols.value = bingx.allowedSymbols || '';
   elements.bingxRequireSl.checked = Boolean(bingx.requireStopLoss);
@@ -4094,8 +4105,8 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxMaxSignalLeverage.value = bingx.maxSignalLeverage || 125;
   elements.bingxMaxSignalAge.value = bingx.maxSignalAgeMinutes ?? 180;
   elements.bingxMaxEntryDeviation.value = bingx.maxEntryDeviationPercent ?? 5;
-  elements.bingxVstBaseCapital.value = bingx.vstBaseCapital || 1000;
-  elements.bingxVstCapitalPercent.value = bingx.vstCapitalPercent || 15;
+  elements.bingxVstBaseCapital.value = monthlyInitialCapitalVST;
+  elements.bingxVstCapitalPercent.value = monthlyOrderPercent;
   elements.bingxDailyLoss.value = bingx.maxDailyLossUSDT ?? 100;
   elements.bingxMonthlyLoss.value = bingx.maxMonthlyLossUSDT ?? 500;
   elements.bingxDryRunRequired.checked = bingx.dryRunRequired !== false;
@@ -4110,13 +4121,34 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxStatus.classList.toggle('warn', usesLiveMode(bingx.mode) && (ready || bingx.enabled));
 }
 
+function monthlyOrderNotional(bingx = {}, asset = 'USDT') {
+  const base = asset === 'VST'
+    ? Number(bingx.monthlyInitialCapitalVST || bingx.vstBaseCapital || 300)
+    : Number(bingx.monthlyInitialCapitalUSDT || 300);
+  const percent = Number(bingx.monthlyOrderPercent || bingx.vstCapitalPercent || 10);
+  if (!Number.isFinite(base) || base <= 0 || !Number.isFinite(percent) || percent <= 0) {
+    return 30;
+  }
+  return roundPnl(base * (percent / 100));
+}
+
 async function saveBingxConfig() {
+  const monthlyInitialCapitalUSDT = Number(elements.bingxMonthlyInitialUsdt.value);
+  const monthlyInitialCapitalVST = Number(elements.bingxVstBaseCapital.value);
+  const monthlyOrderPercent = Number(elements.bingxMonthlyOrderPercent.value);
+  const monthlyOrderUSDT = monthlyOrderNotional({
+    monthlyInitialCapitalUSDT,
+    monthlyOrderPercent
+  }, 'USDT');
   const payload = {
     enabled: elements.bingxEnabled.checked,
     mode: elements.bingxMode.value,
     marginType: elements.bingxMargin.value,
-    defaultNotionalUSDT: Number(elements.bingxNotional.value),
-    maxNotionalUSDT: Number(elements.bingxMaxNotional.value),
+    defaultNotionalUSDT: monthlyOrderUSDT,
+    maxNotionalUSDT: monthlyOrderUSDT,
+    monthlyInitialCapitalUSDT,
+    monthlyInitialCapitalVST,
+    monthlyOrderPercent,
     maxLeverage: Number(elements.bingxMaxLeverage.value),
     allowedSymbols: elements.bingxSymbols.value,
     requireStopLoss: elements.bingxRequireSl.checked,
@@ -4128,8 +4160,8 @@ async function saveBingxConfig() {
     maxSignalLeverage: Number(elements.bingxMaxSignalLeverage.value),
     maxSignalAgeMinutes: Number(elements.bingxMaxSignalAge.value),
     maxEntryDeviationPercent: Number(elements.bingxMaxEntryDeviation.value),
-    vstBaseCapital: Number(elements.bingxVstBaseCapital.value),
-    vstCapitalPercent: Number(elements.bingxVstCapitalPercent.value),
+    vstBaseCapital: monthlyInitialCapitalVST,
+    vstCapitalPercent: monthlyOrderPercent,
     maxDailyLossUSDT: Number(elements.bingxDailyLoss.value),
     maxMonthlyLossUSDT: Number(elements.bingxMonthlyLoss.value),
     dryRunRequired: elements.bingxDryRunRequired.checked,
