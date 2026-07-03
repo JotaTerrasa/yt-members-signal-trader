@@ -27,6 +27,11 @@ const elements = {
   monthResetStatus: document.querySelector('#month-reset-status'),
   pnlStatus: document.querySelector('#pnl-status'),
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
+  costControlPanel: document.querySelector('#cost-control-panel'),
+  costControlStatus: document.querySelector('#cost-control-status'),
+  costControlSummary: document.querySelector('#cost-control-summary'),
+  costControlSymbols: document.querySelector('#cost-control-symbols'),
+  costControlActions: document.querySelector('#cost-control-actions'),
   performanceSourceGrid: document.querySelector('#performance-source-grid'),
   performanceOverview: document.querySelector('#performance-overview'),
   pnlMonthLabel: document.querySelector('#pnl-month-label'),
@@ -1004,6 +1009,7 @@ function renderPnl() {
   elements.monthReset.disabled = appState.pnlLoading;
   elements.monthResetStatus.textContent = monthResetStatusText(appState.bingx);
   renderPnlSourceGrid(sources, selectedSource.key);
+  renderCostControl(selectedSource, reference);
   const performanceSource = selectedPerformanceSource(sources);
   renderPerformanceSourceGrid(sources, performanceSource.key);
   renderPerformanceOverview(performanceSource, reference);
@@ -1239,6 +1245,285 @@ function renderPnlSourceGrid(sources, selectedKey) {
       </button>
     `;
   }).join('');
+}
+
+function renderCostControl(source = selectedPnlSource(), reference = currentReferenceLedger()) {
+  if (!elements.costControlPanel || !elements.costControlStatus || !elements.costControlSummary) {
+    return;
+  }
+
+  const analysis = buildCostControlAnalysis(costControlSource(source, reference), reference);
+  elements.costControlPanel.classList.toggle('muted', !analysis.available);
+  elements.costControlStatus.textContent = analysis.available
+    ? `${analysis.label} · ${analysis.asset} · ${analysis.costPressureLabel}`
+    : 'Selecciona VST o real';
+
+  if (!analysis.available) {
+    elements.costControlSummary.innerHTML = `
+      <div class="cost-empty">El coste operativo se calcula con datos reales de BingX para Futuros VST o Futuros reales.</div>
+    `;
+    elements.costControlSymbols.innerHTML = '';
+    elements.costControlActions.innerHTML = '';
+    return;
+  }
+
+  elements.costControlSummary.innerHTML = [
+    renderCostMetric('Bruto realizado', formatMoney(analysis.grossRealized, analysis.asset), 'Antes de fees/funding', amountClass(analysis.grossRealized)),
+    renderCostMetric('Fees + funding', formatMoney(analysis.totalCost, analysis.asset), `${formatMoney(analysis.fees, analysis.asset)} fees`, amountClass(analysis.totalCost)),
+    renderCostMetric('Neto realizado', formatMoney(analysis.realized, analysis.asset), 'Despues de costes', amountClass(analysis.realized)),
+    renderCostMetric('Fee por ejecucion', formatMoney(analysis.feePerExecution, analysis.asset), `${analysis.estimatedExecutions} ejecuciones aprox.`, amountClass(-analysis.feePerExecution)),
+    renderCostMetric('Coste round-trip', formatMoney(analysis.roundTripCost, analysis.asset), 'Abrir + cerrar estimado', amountClass(-analysis.roundTripCost)),
+    renderCostMetric('Break-even precio', formatPercent(analysis.breakEvenMovePercent), `${formatPercent(analysis.marginRoiBreakEven)} sobre margen`, analysis.breakEvenMovePercent > 0.18 ? 'amount negative' : analysis.breakEvenMovePercent > 0.1 ? 'warn' : 'amount positive')
+  ].join('');
+
+  elements.costControlSymbols.innerHTML = analysis.symbolRows.length
+    ? analysis.symbolRows.map(renderCostSymbolRow).join('')
+    : '<div class="cost-empty">Sin posiciones suficientes para calcular coste por simbolo.</div>';
+
+  elements.costControlActions.innerHTML = analysis.actions.map((action) => `
+    <div class="cost-action ${escapeAttribute(action.tone)}">
+      <strong>${escapeHtml(action.label)}</strong>
+      <span>${escapeHtml(action.detail)}</span>
+    </div>
+  `).join('');
+}
+
+function costControlSource(source = {}, reference = currentReferenceLedger()) {
+  const sources = pnlSourceCards(reference);
+  if (costSourceHasActivity(source, reference)) {
+    return source;
+  }
+  return sources.find((item) => item.key === 'vst' && costSourceHasActivity(item, reference))
+    || sources.find((item) => item.key === 'live' && costSourceHasActivity(item, reference))
+    || source;
+}
+
+function costSourceHasActivity(source = {}, reference = currentReferenceLedger()) {
+  if (source.key !== 'vst' && source.key !== 'live') {
+    return false;
+  }
+  const positions = positionsForPnlSource(source.key, reference);
+  return positions.length > 0
+    || Math.abs(Number(source.fees || 0)) > 0
+    || Math.abs(Number(source.funding || 0)) > 0
+    || Math.abs(Number(source.realized || 0)) > 0
+    || Math.abs(Number(source.grossRealized || 0)) > 0;
+}
+
+function buildCostControlAnalysis(source = {}, reference = currentReferenceLedger()) {
+  const available = source.key === 'vst' || source.key === 'live';
+  const asset = source.asset || (source.key === 'vst' ? 'VST' : 'USDT');
+  const positions = available ? positionsForPnlSource(source.key, reference) : [];
+  const open = positions.filter((position) => position.status !== 'closed');
+  const closed = positions.filter((position) => position.status === 'closed');
+  const fees = Number(source.fees || 0);
+  const funding = Number(source.funding || 0);
+  const realized = Number(source.realized || 0);
+  const grossRealized = Number(source.grossRealized ?? roundPnl(realized - fees - funding));
+  const totalCost = roundPnl(fees + funding);
+  const marginAverage = averagePositiveNumber(positions.map((position) => position.notional));
+  const exposureAverage = averagePositiveNumber(positions.map(positionExposureForCost));
+  const closedExposureAverage = averagePositiveNumber(closed.map(positionExposureForCost));
+  const estimatedExecutions = Math.max(1, closed.length * 2 + open.length);
+  const feePerExecution = roundPnl(Math.abs(fees) / estimatedExecutions);
+  const fundingPerClosed = closed.length ? Math.abs(funding) / closed.length : 0;
+  const roundTripCost = roundPnl((feePerExecution * 2) + fundingPerClosed);
+  const breakEvenMovePercent = exposureAverage > 0 ? (roundTripCost / exposureAverage) * 100 : null;
+  const marginRoiBreakEven = marginAverage > 0 ? (roundTripCost / marginAverage) * 100 : null;
+  const costPressure = grossRealized
+    ? Math.abs(totalCost) / Math.max(1, Math.abs(grossRealized))
+    : Math.abs(totalCost) > 0 ? Number.POSITIVE_INFINITY : 0;
+  const symbolRows = costSymbolRows(positions, {
+    asset,
+    roundTripCost,
+    fallbackExposure: closedExposureAverage || exposureAverage
+  });
+  const actions = costControlActions({
+    costPressure,
+    grossRealized,
+    totalCost,
+    realized,
+    breakEvenMovePercent,
+    marginRoiBreakEven,
+    symbolRows,
+    source
+  });
+
+  return {
+    available,
+    label: source.label || (source.key === 'vst' ? 'Futuros VST' : 'Futuros reales'),
+    asset,
+    positions,
+    open,
+    closed,
+    fees,
+    funding,
+    realized,
+    grossRealized,
+    totalCost,
+    marginAverage,
+    exposureAverage,
+    estimatedExecutions,
+    feePerExecution,
+    roundTripCost,
+    breakEvenMovePercent,
+    marginRoiBreakEven,
+    costPressure,
+    costPressureLabel: costPressureLabel(costPressure),
+    symbolRows,
+    actions
+  };
+}
+
+function positionExposureForCost(position = {}) {
+  const exposure = Number(position.exposure);
+  if (Number.isFinite(exposure) && exposure > 0) {
+    return exposure;
+  }
+  const notional = Number(position.notional);
+  const leverage = Number(position.leverage);
+  if (Number.isFinite(notional) && notional > 0 && Number.isFinite(leverage) && leverage > 0) {
+    return notional * leverage;
+  }
+  return 0;
+}
+
+function costSymbolRows(positions = [], context = {}) {
+  const bySymbol = new Map();
+  for (const position of positions) {
+    const symbol = normalizeTradeSymbol(position.symbol) || '-';
+    const row = bySymbol.get(symbol) || {
+      symbol,
+      count: 0,
+      closed: 0,
+      wins: 0,
+      pnl: 0,
+      exposureValues: [],
+      marginValues: []
+    };
+    row.count += 1;
+    row.pnl = roundPnl(row.pnl + alignmentPnl(position));
+    if (position.status === 'closed') {
+      row.closed += 1;
+      row.wins += alignmentPnl(position) > 0 ? 1 : 0;
+    }
+    const exposure = positionExposureForCost(position);
+    if (exposure > 0) {
+      row.exposureValues.push(exposure);
+    }
+    const margin = Number(position.notional);
+    if (Number.isFinite(margin) && margin > 0) {
+      row.marginValues.push(margin);
+    }
+    bySymbol.set(symbol, row);
+  }
+
+  return [...bySymbol.values()]
+    .map((row) => {
+      const avgExposure = averagePositiveNumber(row.exposureValues) || context.fallbackExposure || 0;
+      const avgMargin = averagePositiveNumber(row.marginValues);
+      const breakEvenMove = avgExposure > 0 ? (context.roundTripCost / avgExposure) * 100 : null;
+      const breakEvenMarginRoi = avgMargin > 0 ? (context.roundTripCost / avgMargin) * 100 : null;
+      return {
+        ...row,
+        asset: context.asset || 'USDT',
+        avgExposure,
+        avgMargin,
+        breakEvenMove,
+        breakEvenMarginRoi,
+        winRate: row.closed ? (row.wins / row.closed) * 100 : null
+      };
+    })
+    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
+    .slice(0, 5);
+}
+
+function renderCostMetric(label, value, detail, className = '') {
+  return `
+    <div class="cost-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
+}
+
+function renderCostSymbolRow(row) {
+  const pressureClass = row.breakEvenMove > 0.18 ? 'negative' : row.breakEvenMove > 0.1 ? 'warn' : 'positive';
+  return `
+    <div class="cost-symbol-row">
+      <div>
+        <strong>${escapeHtml(row.symbol)}</strong>
+        <span>${escapeHtml(`${row.closed}/${row.count} cerradas · win ${formatPercent(row.winRate)}`)}</span>
+      </div>
+      <div>
+        <span>PnL visible</span>
+        <strong class="${amountClass(row.pnl)}">${escapeHtml(formatMoney(row.pnl, row.asset))}</strong>
+      </div>
+      <div>
+        <span>Break-even</span>
+        <strong class="${escapeAttribute(pressureClass)}">${escapeHtml(formatPercent(row.breakEvenMove))}</strong>
+      </div>
+      <div>
+        <span>Sobre margen</span>
+        <strong>${escapeHtml(formatPercent(row.breakEvenMarginRoi))}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function costControlActions(analysis) {
+  const actions = [];
+  if (!analysis.source?.available) {
+    actions.push({
+      tone: 'warn',
+      label: 'Datos incompletos',
+      detail: 'BingX no ha devuelto todo el historico de costes; usa el ultimo dato disponible.'
+    });
+  }
+  if (analysis.totalCost < 0 && Math.abs(analysis.totalCost) > Math.abs(analysis.grossRealized)) {
+    actions.push({
+      tone: 'negative',
+      label: 'El bruto no paga las fees',
+      detail: 'Aunque las operaciones ganen en bruto, el neto puede quedar rojo si no hay recorrido suficiente.'
+    });
+  }
+  if (analysis.breakEvenMovePercent > 0.12) {
+    actions.push({
+      tone: 'warn',
+      label: 'Exigir mas recorrido',
+      detail: `Cada orden necesita aprox. ${formatPercent(analysis.breakEvenMovePercent)} de precio solo para empatar costes.`
+    });
+  }
+  if (analysis.symbolRows.some((row) => row.pnl < 0 && row.closed >= 2)) {
+    actions.push({
+      tone: 'warn',
+      label: 'Filtrar por simbolo',
+      detail: 'Hay activos con muestra negativa neta; conviene comparar BTC/ETH/SOL/SUI antes de real.'
+    });
+  }
+  actions.push({
+    tone: 'neutral',
+    label: 'Siguiente paso seguro',
+    detail: 'Activar un filtro de coste deberia hacerse con confirmacion explicita porque puede saltarse senales.'
+  });
+  return actions.slice(0, 4);
+}
+
+function costPressureLabel(value) {
+  if (value === Number.POSITIVE_INFINITY) {
+    return 'coste sin bruto';
+  }
+  if (value >= 1) {
+    return 'coste critico';
+  }
+  if (value >= 0.45) {
+    return 'coste alto';
+  }
+  if (value > 0) {
+    return 'coste controlado';
+  }
+  return 'sin coste';
 }
 
 function selectedPerformanceSource(sources = pnlSourceCards()) {

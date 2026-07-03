@@ -724,6 +724,130 @@ textarea {
   font-weight: 800;
 }
 
+.cost-control-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid #cfe3e0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cost-control-panel.muted {
+  background: #f8faf9;
+}
+
+.cost-control-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 8px;
+}
+
+.cost-metric {
+  display: grid;
+  gap: 5px;
+  min-height: 78px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.cost-metric span,
+.cost-metric small,
+.cost-symbol-row span,
+.cost-empty,
+.cost-action span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.cost-metric span,
+.cost-symbol-row span {
+  text-transform: uppercase;
+}
+
+.cost-metric strong {
+  font-size: 0.94rem;
+  overflow-wrap: anywhere;
+}
+
+.cost-metric strong.warn,
+.cost-symbol-row strong.warn {
+  color: #9a6700;
+}
+
+.cost-control-symbols {
+  display: grid;
+  gap: 7px;
+}
+
+.cost-symbol-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.2fr) repeat(3, minmax(96px, 0.8fr));
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cost-symbol-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cost-symbol-row strong {
+  overflow-wrap: anywhere;
+}
+
+.cost-symbol-row strong.positive {
+  color: var(--accent-strong);
+}
+
+.cost-symbol-row strong.negative {
+  color: var(--danger);
+}
+
+.cost-control-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.cost-action {
+  display: grid;
+  gap: 4px;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.cost-action.negative {
+  border-color: rgba(177, 61, 52, 0.28);
+  background: var(--danger-soft);
+}
+
+.cost-action.warn {
+  border-color: rgba(154, 103, 0, 0.26);
+  background: #fff7e0;
+}
+
+.cost-empty {
+  min-height: 52px;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
 .pnl-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.75fr);
@@ -3548,6 +3672,9 @@ summary.dashboard-section-title {
 
   .tool-panel,
   .pnl-source-grid,
+  .cost-control-summary,
+  .cost-control-actions,
+  .cost-symbol-row,
   .performance-source-grid,
   .performance-overview-header,
   .performance-kpi-grid,

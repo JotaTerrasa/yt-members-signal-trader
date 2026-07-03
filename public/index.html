@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=36">
+    <link rel="stylesheet" href="/styles.css?v=37">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=70" defer></script>
+    <script src="/app.js?v=71" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -465,6 +465,15 @@
             </div>
 
             <div id="pnl-source-grid" class="pnl-source-grid" aria-label="Fuentes de PnL"></div>
+            <div class="cost-control-panel" id="cost-control-panel">
+              <div class="trade-section-header">
+                <h3>Coste operativo</h3>
+                <span id="cost-control-status">Sin datos</span>
+              </div>
+              <div class="cost-control-summary" id="cost-control-summary"></div>
+              <div class="cost-control-symbols" id="cost-control-symbols"></div>
+              <div class="cost-control-actions" id="cost-control-actions"></div>
+            </div>
 
             <div class="pnl-hero" aria-label="Resumen principal de PnL">
               <div class="pnl-hero-main">
