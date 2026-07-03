@@ -62,6 +62,10 @@ const elements = {
   historicalSignalTitle: document.querySelector('#historical-signal-title'),
   historicalSignalStatus: document.querySelector('#historical-signal-status'),
   historicalSignalList: document.querySelector('#historical-signal-list'),
+  alignmentStatus: document.querySelector('#alignment-status'),
+  alignmentSummary: document.querySelector('#alignment-summary'),
+  replicaControl: document.querySelector('#replica-control'),
+  alignmentTable: document.querySelector('#alignment-table'),
   performanceTableTitle: document.querySelector('#performance-table-title'),
   performanceTableStatus: document.querySelector('#performance-table-status'),
   pnlSimNotional: document.querySelector('#pnl-sim-notional'),
@@ -236,6 +240,10 @@ async function init() {
   bindEvents();
   await Promise.all([loadState(), loadPosts(), loadTelegram(), loadTelegramSource(), loadStrategyStudy(), loadOperationalStatus(), loadBingx()]);
   connectEvents();
+  window.addEventListener('hashchange', () => {
+    applyHashNavigation();
+  });
+  applyHashNavigation();
   window.lucide?.createIcons();
 }
 
@@ -316,6 +324,27 @@ function bindEvents() {
     appState.ledgerResultSort = appState.ledgerResultSort === 'asc' ? 'desc' : 'asc';
     renderMyLedger();
   });
+  document.querySelector('#sheet-vst-alignment')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-alignment-scroll]');
+    if (!button) {
+      return;
+    }
+    scrollAlignmentTable(button.dataset.alignmentScroll);
+  });
+  document.querySelector('.alignment-wrap')?.addEventListener('wheel', (event) => {
+    const wrap = event.currentTarget;
+    if (!wrap) {
+      return;
+    }
+    const canScrollVertically = wrap.scrollHeight > wrap.clientHeight;
+    const canScrollHorizontally = wrap.scrollWidth > wrap.clientWidth;
+    if (!canScrollVertically && !canScrollHorizontally) {
+      return;
+    }
+    event.preventDefault();
+    wrap.scrollTop += event.deltaY;
+    wrap.scrollLeft += event.deltaX;
+  }, { passive: false });
   elements.postsTab.addEventListener('click', () => switchView('posts'));
   elements.logsTab.addEventListener('click', () => switchView('logs'));
   elements.pnlTab.addEventListener('click', () => {
@@ -1039,6 +1068,7 @@ function renderPnl() {
   renderTickerPnl();
   renderDailyPnl();
   renderHistoricalPnl();
+  renderSheetVstAlignment(reference);
   renderOpenPositions(openPositions);
   renderStrategyStudy();
   renderRealLifecycle();
@@ -2895,6 +2925,715 @@ function renderHistoricalSignals(positions, targetMonth, sourceLabel = 'Google S
   }
 
   elements.historicalSignalList.innerHTML = items.map((position) => renderHistoricalSignalItem(position, asset)).join('');
+}
+
+function renderSheetVstAlignment(reference = currentReferenceLedger()) {
+  if (!elements.alignmentSummary || !elements.alignmentTable || !elements.alignmentStatus) {
+    return;
+  }
+
+  const alignment = buildSheetVstAlignment(reference);
+  const {
+    targetMonth,
+    pairs,
+    sheetClosed,
+    vstClosed,
+    sheetWinRate,
+    vstWinRate,
+    pairedCount,
+    alignedCount,
+    mismatchCount,
+    missingVstCount,
+    extraVstCount
+  } = alignment;
+
+  if (!reference?.positions?.length && !pairs.length) {
+    elements.alignmentStatus.textContent = 'Esperando hoja y VST';
+    elements.alignmentSummary.innerHTML = renderAlignmentMetric('Google Sheet', 'Sin hoja', 'No hay referencia del mes', '')
+      + renderAlignmentMetric('Futuros VST', 'Sin operaciones', 'Aun no hay muestra demo', '');
+    if (elements.replicaControl) {
+      elements.replicaControl.innerHTML = '<div class="replica-empty">El control de replica se activara cuando existan datos de hoja y VST del mes.</div>';
+    }
+    elements.alignmentTable.innerHTML = '<tr><td colspan="6">Cuando haya hoja externa y operaciones VST, aqui veras la comparacion por activo y secuencia.</td></tr>';
+    return;
+  }
+
+  elements.alignmentStatus.textContent = `${formatMonth(targetMonth)} - ${pairedCount} emparejadas`;
+  elements.alignmentSummary.innerHTML = [
+    renderAlignmentMetric('Google Sheet', formatPercent(sheetWinRate), `${sheetClosed.length} cierres`, amountClass((sheetWinRate ?? 50) - 50)),
+    renderAlignmentMetric('Futuros VST', formatPercent(vstWinRate), `${vstClosed.length} cierres`, amountClass((vstWinRate ?? 50) - 50)),
+    renderAlignmentMetric('Alineadas', String(alignedCount), `${pairedCount} pares detectados`, amountClass(alignedCount - mismatchCount)),
+    renderAlignmentMetric('A revisar', String(mismatchCount + missingVstCount + extraVstCount), `${missingVstCount} faltan / ${extraVstCount} extra`, amountClass(-(mismatchCount + missingVstCount + extraVstCount)))
+  ].join('');
+
+  renderReplicaControl(reference, alignment);
+  elements.alignmentTable.innerHTML = pairs.length
+    ? pairs.slice(0, 140).map(renderAlignmentRow).join('')
+    : '<tr><td colspan="6">Sin operaciones del mes para comparar.</td></tr>';
+}
+
+function buildSheetVstAlignment(reference = currentReferenceLedger()) {
+  const targetMonth = currentMonthKey();
+  const sheetRows = (reference?.positions || [])
+    .map((position, index) => ({ ...position, _alignmentOrder: index, _alignmentSource: 'sheet' }))
+    .filter((position) => monthKeyFromValue(position.closedAt || position.openedAt) === targetMonth);
+  const vstRows = positionsForPnlSource('vst', reference)
+    .map((position, index) => ({ ...position, _alignmentOrder: index, _alignmentSource: 'vst' }))
+    .filter((position) => monthKeyFromValue(position.closedAt || position.openedAt) === targetMonth);
+  const pairs = pairAlignmentRows(sheetRows, vstRows);
+  const sheetClosed = sheetRows.filter((position) => position.status === 'closed');
+  const vstClosed = vstRows.filter((position) => position.status === 'closed');
+  const paired = pairs.filter((pair) => pair.sheet && pair.vst);
+  const aligned = paired.filter((pair) => alignmentOutcome(pair.sheet) === alignmentOutcome(pair.vst));
+  const mismatch = paired.filter((pair) => alignmentOutcome(pair.sheet) !== alignmentOutcome(pair.vst));
+
+  return {
+    targetMonth,
+    pairs,
+    sheetRows,
+    vstRows,
+    sheetClosed,
+    vstClosed,
+    sheetWinRate: calculateWinRate(sheetClosed),
+    vstWinRate: calculateWinRate(vstClosed),
+    paired,
+    aligned,
+    mismatch,
+    pairedCount: paired.length,
+    alignedCount: aligned.length,
+    mismatchCount: mismatch.length,
+    missingVstCount: pairs.filter((pair) => pair.sheet && !pair.vst).length,
+    extraVstCount: pairs.filter((pair) => pair.vst && !pair.sheet).length
+  };
+}
+
+function pairAlignmentRows(sheetRows = [], vstRows = []) {
+  const symbols = new Set([
+    ...sheetRows.map((position) => normalizeTradeSymbol(position.symbol)),
+    ...vstRows.map((position) => normalizeTradeSymbol(position.symbol))
+  ].filter(Boolean));
+  const pairs = [];
+
+  for (const symbol of [...symbols].sort()) {
+    const sheetBySymbol = sheetRows
+      .filter((position) => normalizeTradeSymbol(position.symbol) === symbol)
+      .sort(compareAlignmentPositions);
+    const vstBySymbol = vstRows
+      .filter((position) => normalizeTradeSymbol(position.symbol) === symbol)
+      .sort(compareAlignmentPositions);
+    const max = Math.max(sheetBySymbol.length, vstBySymbol.length);
+    for (let index = 0; index < max; index += 1) {
+      pairs.push({
+        symbol,
+        sequence: index + 1,
+        sheet: sheetBySymbol[index] || null,
+        vst: vstBySymbol[index] || null
+      });
+    }
+  }
+
+  return pairs.sort((a, b) => alignmentPairSortValue(b) - alignmentPairSortValue(a) || a.symbol.localeCompare(b.symbol));
+}
+
+function compareAlignmentPositions(a, b) {
+  const timeDiff = alignmentPositionSortValue(a) - alignmentPositionSortValue(b);
+  if (timeDiff !== 0) {
+    return timeDiff;
+  }
+  return Number(a._alignmentOrder || 0) - Number(b._alignmentOrder || 0);
+}
+
+function alignmentPositionSortValue(position = {}) {
+  const parsed = Date.parse(position.openedAt || position.closedAt || 0);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return Number(position._alignmentOrder || 0);
+}
+
+function alignmentPairSortValue(pair = {}) {
+  return Math.max(
+    alignmentPositionSortValue(pair.sheet || {}),
+    alignmentPositionSortValue(pair.vst || {})
+  );
+}
+
+function renderAlignmentMetric(label, value, detail, className = '') {
+  return `
+    <div class="alignment-card">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
+}
+
+function renderReplicaControl(reference, alignment) {
+  if (!elements.replicaControl) {
+    return;
+  }
+
+  const analysis = buildReplicaControlAnalysis(reference, alignment);
+  const actions = replicaRecommendedActions(analysis);
+  const divergences = replicaDivergenceRows(alignment, analysis.scaleRatio);
+  const statusLabel = analysis.reviewCount
+    ? `${analysis.reviewCount} puntos a clavar`
+    : 'Replica alineada';
+  const statusClass = analysis.reviewCount ? (analysis.criticalCount ? 'negative' : 'warn') : 'positive';
+
+  elements.replicaControl.innerHTML = `
+    <div class="replica-header">
+      <div>
+        <strong>Control de replica</strong>
+        <span>Compara hoja escalada, VST visible y BingX oficial. No modifica la operativa.</span>
+      </div>
+      <span class="ledger-status ${escapeAttribute(statusClass)}">${escapeHtml(statusLabel)}</span>
+    </div>
+    <div class="replica-grid">
+      ${renderReplicaMetric(
+        'Hoja escalada',
+        formatMoney(analysis.sheetScaledPnl, 'VST'),
+        `${formatMoney(analysis.sheetPnl, 'USDT')} al ${formatPercent(analysis.scaleRatio * 100)} medio`,
+        amountClass(analysis.sheetScaledPnl)
+      )}
+      ${renderReplicaMetric(
+        'VST posiciones',
+        formatMoney(analysis.vstPositionPnl, 'VST'),
+        `${analysis.vstClosedCount} cerradas / ${analysis.vstOpenCount} abiertas`,
+        amountClass(analysis.vstPositionPnl)
+      )}
+      ${renderReplicaMetric(
+        'BingX oficial',
+        analysis.officialAvailable ? formatMoney(analysis.officialTotal, 'VST') : 'Sin dato',
+        analysis.officialAvailable ? `Realizado ${formatMoney(analysis.officialRealized, 'VST')}` : 'API PnL no disponible',
+        analysis.officialAvailable ? amountClass(analysis.officialTotal) : ''
+      )}
+      ${renderReplicaMetric(
+        'Gap oficial',
+        analysis.officialAvailable ? formatMoney(analysis.officialGap, 'VST') : '-',
+        'BingX oficial vs hoja escalada',
+        analysis.officialAvailable ? amountClass(analysis.officialGap) : ''
+      )}
+      ${renderReplicaMetric(
+        'Fees + funding',
+        analysis.officialAvailable ? formatMoney(analysis.feesFunding, 'VST') : '-',
+        'Coste real que no aparece igual en la hoja',
+        analysis.officialAvailable ? amountClass(analysis.feesFunding) : ''
+      )}
+      ${renderReplicaMetric(
+        'Entradas VST',
+        `${analysis.sentOpenGroups}/${analysis.openSignalGroups}`,
+        `${analysis.blockedThenSentCount} reintentadas / ${analysis.blockedOnlyCount} bloqueadas`,
+        analysis.blockedOnlyCount ? 'amount negative' : analysis.blockedThenSentCount ? 'warn' : 'amount positive'
+      )}
+    </div>
+    <div class="replica-columns">
+      <div class="replica-box">
+        <div class="replica-box-title">
+          <strong>Causas del descuadre</strong>
+          <span>${escapeHtml(formatMonth(analysis.targetMonth))}</span>
+        </div>
+        <div class="replica-list">
+          ${renderReplicaCauseRows(analysis)}
+        </div>
+      </div>
+      <div class="replica-box">
+        <div class="replica-box-title">
+          <strong>Filas que mas mueven el resultado</strong>
+          <span>${escapeHtml(`${divergences.length} principales`)}</span>
+        </div>
+        <div class="replica-list">
+          ${divergences.length ? divergences.map(renderReplicaDivergenceRow).join('') : '<div class="replica-empty">No hay divergencias fuertes en los pares detectados.</div>'}
+        </div>
+      </div>
+      <div class="replica-box wide">
+        <div class="replica-box-title">
+          <strong>Plan para clavarlo</strong>
+          <span>Sin tocar ejecucion aun</span>
+        </div>
+        <div class="replica-action-list">
+          ${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderReplicaMetric(label, value, detail, className = '') {
+  return `
+    <div class="replica-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
+}
+
+function buildReplicaControlAnalysis(reference, alignment) {
+  const sheetPnl = roundPnl(alignment.sheetRows.reduce((sum, position) => sum + alignmentPnl(position), 0));
+  const vstPositionPnl = roundPnl(alignment.vstRows.reduce((sum, position) => sum + alignmentPnl(position), 0));
+  const vstClosed = alignment.vstRows.filter((position) => position.status === 'closed');
+  const vstOpen = alignment.vstRows.filter((position) => position.status !== 'closed');
+  const scale = replicaScale(alignment);
+  const sheetScaledPnl = roundPnl(sheetPnl * scale.ratio);
+  const officialSource = appState.pnlSources?.sources?.vst || null;
+  const officialTotal = finiteOrNull(officialSource?.total);
+  const officialRealized = finiteOrNull(officialSource?.realized);
+  const feesFunding = roundPnl(Number(officialSource?.fees || 0) + Number(officialSource?.funding || 0));
+  const events = buildReplicaEventDiagnostics(alignment.targetMonth);
+  const officialGap = officialTotal == null ? null : roundPnl(officialTotal - sheetScaledPnl);
+  const positionGap = roundPnl(vstPositionPnl - sheetScaledPnl);
+  const mismatchCount = alignment.mismatchCount || 0;
+  const missingVstCount = alignment.missingVstCount || 0;
+  const extraVstCount = alignment.extraVstCount || 0;
+  const reviewCount = mismatchCount
+    + missingVstCount
+    + extraVstCount
+    + events.closeNoPositionOnlyCount
+    + events.blockedOnlyCount
+    + (Math.abs(positionGap) > Math.max(1, Math.abs(sheetScaledPnl) * 0.08) ? 1 : 0)
+    + (officialGap != null && Math.abs(officialGap) > Math.max(1, Math.abs(sheetScaledPnl) * 0.08) ? 1 : 0);
+  const criticalCount = events.blockedOnlyCount
+    + events.closeNoPositionOnlyCount
+    + (officialGap != null && officialGap < -Math.max(5, Math.abs(sheetScaledPnl) * 0.2) ? 1 : 0);
+
+  return {
+    targetMonth: alignment.targetMonth,
+    sheetPnl,
+    sheetScaledPnl,
+    vstPositionPnl,
+    vstClosedCount: vstClosed.length,
+    vstOpenCount: vstOpen.length,
+    scaleRatio: scale.ratio,
+    sheetAverageSize: scale.sheetAverage,
+    vstAverageSize: scale.vstAverage,
+    officialAvailable: officialTotal != null,
+    officialTotal: officialTotal ?? 0,
+    officialRealized: officialRealized ?? 0,
+    officialGap: officialGap ?? 0,
+    positionGap,
+    feesFunding,
+    mismatchCount,
+    missingVstCount,
+    extraVstCount,
+    reviewCount,
+    criticalCount,
+    ...events
+  };
+}
+
+function replicaScale(alignment) {
+  const sheetAverage = averagePositiveNumber(alignment.sheetRows.map((position) => position.notional));
+  const vstAverage = averagePositiveNumber(alignment.vstRows.map((position) => position.notional))
+    || positiveNumber(appState.bingx?.monthlyOrderNotionalVST)
+    || positiveNumber(appState.bingx?.defaultNotionalUSDT)
+    || positiveNumber(appState.bingx?.notional);
+  const ratio = sheetAverage && vstAverage ? vstAverage / sheetAverage : 0;
+  return {
+    ratio,
+    sheetAverage: sheetAverage || 0,
+    vstAverage: vstAverage || 0
+  };
+}
+
+function buildReplicaEventDiagnostics(targetMonth) {
+  const events = demoReplicaEvents(targetMonth);
+  const openGroups = new Map();
+  const closeGroups = new Map();
+
+  for (const event of events) {
+    const action = replicaEventAction(event);
+    const status = String(event.status || '');
+    if (action === 'OPEN') {
+      const group = upsertReplicaEventGroup(openGroups, event, action);
+      if (status === 'demo_order_sent') {
+        group.sent = true;
+      }
+      if (status === 'blocked' && String(event.reason || '').includes('exchange_stop_loss_invalid')) {
+        group.blocked = true;
+        group.reason = event.reason || group.reason;
+      }
+      continue;
+    }
+
+    if (action === 'CLOSE') {
+      const group = upsertReplicaEventGroup(closeGroups, event, action);
+      if (status === 'demo_close_sent') {
+        group.sent = true;
+      }
+      if (status === 'demo_close_no_position') {
+        group.noPosition = true;
+      }
+    }
+  }
+
+  const open = [...openGroups.values()];
+  const close = [...closeGroups.values()];
+  const blockedOnly = open.filter((group) => group.blocked && !group.sent);
+  const blockedThenSent = open.filter((group) => group.blocked && group.sent);
+  const closeNoPositionOnly = close.filter((group) => group.noPosition && !group.sent);
+
+  return {
+    recentEventCount: events.length,
+    openSignalGroups: open.length,
+    sentOpenGroups: open.filter((group) => group.sent).length,
+    blockedOnlyCount: blockedOnly.length,
+    blockedThenSentCount: blockedThenSent.length,
+    closeSignalGroups: close.length,
+    closeNoPositionOnlyCount: closeNoPositionOnly.length,
+    closeNoPositionSymbols: countReplicaGroupsBySymbol(closeNoPositionOnly),
+    blockedOnlySymbols: countReplicaGroupsBySymbol(blockedOnly)
+  };
+}
+
+function demoReplicaEvents(targetMonth) {
+  const resetAt = Date.parse(appState.bingx?.vstPnlResetAt || 0);
+  return (appState.trades || []).filter((event) => {
+    const status = String(event.status || '').toLowerCase();
+    const source = String(event.exchangePosition?.source || event.position?.source || '').toLowerCase();
+    const isDemo = eventAccountKey(event) === 'demo'
+      || String(event.executionMode || '').toLowerCase() === 'demo'
+      || status.startsWith('demo_')
+      || source === 'demo';
+    if (!isDemo) {
+      return false;
+    }
+    const eventTime = Date.parse(event.at || 0);
+    if (Number.isFinite(resetAt) && resetAt > 0) {
+      return Number.isFinite(eventTime) && eventTime >= resetAt;
+    }
+    return monthKeyFromValue(event.at) === targetMonth;
+  });
+}
+
+function replicaEventAction(event = {}) {
+  const signalAction = String(event.signal?.action || '').toUpperCase();
+  const status = String(event.status || '').toLowerCase();
+  if (signalAction === 'CLOSE' || signalAction === 'CLOSE_ALL' || status.includes('_close_')) {
+    return 'CLOSE';
+  }
+  if (signalAction === 'SET_TAKE_PROFIT' || signalAction === 'SET_STOP_LOSS' || signalAction === 'MOVE_SL_BE') {
+    return signalAction;
+  }
+  if (status === 'demo_order_sent' || status === 'blocked' || signalAction === 'OPEN' || event.signal?.entryPrice) {
+    return 'OPEN';
+  }
+  return signalAction || 'OTHER';
+}
+
+function upsertReplicaEventGroup(groups, event, action) {
+  const symbol = replicaEventSymbol(event);
+  const key = [
+    event.postId || event.postUrl || dayKeyFromValue(event.at) || 'sin-post',
+    symbol,
+    event.signal?.direction || event.order?.side || '',
+    action
+  ].join('|');
+  const group = groups.get(key) || {
+    key,
+    symbol,
+    action,
+    firstAt: event.at,
+    postUrl: event.postUrl || '',
+    sent: false,
+    blocked: false,
+    noPosition: false,
+    reason: ''
+  };
+  group.firstAt = newerIso(group.firstAt, event.at);
+  group.postUrl ||= event.postUrl || '';
+  groups.set(key, group);
+  return group;
+}
+
+function replicaEventSymbol(event = {}) {
+  return normalizeTradeSymbol(
+    event.signal?.symbol
+      || event.order?.symbol
+      || event.exchangePosition?.symbol
+      || event.position?.symbol
+      || ''
+  ) || '-';
+}
+
+function countReplicaGroupsBySymbol(groups = []) {
+  const totals = {};
+  for (const group of groups) {
+    totals[group.symbol || '-'] = (totals[group.symbol || '-'] || 0) + 1;
+  }
+  return totals;
+}
+
+function renderReplicaCauseRows(analysis) {
+  const rows = [
+    {
+      label: 'Gap posiciones vs hoja',
+      value: formatMoney(analysis.positionGap, 'VST'),
+      detail: 'Diferencia usando operaciones VST visibles',
+      tone: amountTone(analysis.positionGap)
+    },
+    {
+      label: 'Signo cambiado',
+      value: String(analysis.mismatchCount),
+      detail: 'Pares donde hoja gana y VST pierde, o al reves',
+      tone: analysis.mismatchCount ? 'warn' : 'positive'
+    },
+    {
+      label: 'Faltan en VST',
+      value: String(analysis.missingVstCount),
+      detail: 'Operaciones de hoja sin pareja demo',
+      tone: analysis.missingVstCount ? 'negative' : 'positive'
+    },
+    {
+      label: 'Cierres sin posicion',
+      value: String(analysis.closeNoPositionOnlyCount),
+      detail: replicaSymbolSummary(analysis.closeNoPositionSymbols) || 'Sin cierres perdidos',
+      tone: analysis.closeNoPositionOnlyCount ? 'negative' : 'positive'
+    },
+    {
+      label: 'Bloqueadas sin entrar',
+      value: String(analysis.blockedOnlyCount),
+      detail: replicaSymbolSummary(analysis.blockedOnlySymbols) || 'Sin bloqueos pendientes',
+      tone: analysis.blockedOnlyCount ? 'negative' : 'positive'
+    },
+    {
+      label: 'Reintentos por stop',
+      value: String(analysis.blockedThenSentCount),
+      detail: 'Entradas recuperadas tras precio/SL invalido',
+      tone: analysis.blockedThenSentCount ? 'warn' : 'positive'
+    }
+  ];
+
+  return rows.map((row) => `
+    <div class="replica-row">
+      <div>
+        <strong>${escapeHtml(row.label)}</strong>
+        <span>${escapeHtml(row.detail)}</span>
+      </div>
+      <em class="${escapeAttribute(row.tone)}">${escapeHtml(row.value)}</em>
+    </div>
+  `).join('');
+}
+
+function replicaDivergenceRows(alignment, scaleRatio) {
+  return (alignment.pairs || [])
+    .map((pair) => {
+      const sheetScaled = pair.sheet ? roundPnl(alignmentPnl(pair.sheet) * scaleRatio) : 0;
+      const vstPnl = pair.vst ? alignmentPnl(pair.vst) : 0;
+      return {
+        pair,
+        sheetScaled,
+        vstPnl,
+        diff: roundPnl(vstPnl - sheetScaled),
+        status: alignmentPairStatus(pair)
+      };
+    })
+    .filter((row) => row.status.key !== 'aligned' || Math.abs(row.diff) > 1)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+    .slice(0, 6);
+}
+
+function renderReplicaDivergenceRow(row) {
+  const symbol = row.pair.symbol || '-';
+  const status = row.status;
+  return `
+    <div class="replica-row">
+      <div>
+        <strong>${escapeHtml(`${symbol} #${row.pair.sequence}`)}</strong>
+        <span>Hoja escalada ${escapeHtml(formatMoney(row.sheetScaled, 'VST'))} / VST ${escapeHtml(formatMoney(row.vstPnl, 'VST'))}</span>
+      </div>
+      <em class="${escapeAttribute(status.className)}">${escapeHtml(status.label)}</em>
+    </div>
+  `;
+}
+
+function replicaRecommendedActions(analysis) {
+  const actions = [];
+  if (analysis.blockedOnlyCount) {
+    actions.push('Priorizar cola de reintento para entradas bloqueadas por precio/stop invalido.');
+  }
+  if (analysis.closeNoPositionOnlyCount) {
+    actions.push('Auditar cierres sin posicion: suelen explicar por que la hoja cierra algo que VST ya no tiene abierto.');
+  }
+  if (analysis.mismatchCount) {
+    actions.push('Revisar primero las filas con signo cambiado; son las que mas rompen la replica.');
+  }
+  if (Math.abs(analysis.feesFunding) > 0.01) {
+    actions.push('Separar rendimiento bruto y neto para no confundir estrategia con coste de BingX.');
+  }
+  if (analysis.missingVstCount || analysis.extraVstCount) {
+    actions.push('Comparar secuencia por activo y post para detectar scraping incompleto o duplicado.');
+  }
+  if (!actions.length) {
+    actions.push('La muestra visible esta alineada; mantener monitorizacion y ampliar historico.');
+  }
+  return actions.slice(0, 5);
+}
+
+function replicaSymbolSummary(values = {}) {
+  return topObjectEntries(values, 4)
+    .map(([symbol, count]) => `${symbol} ${count}`)
+    .join(' / ');
+}
+
+function averagePositiveNumber(values = []) {
+  const clean = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (!clean.length) {
+    return 0;
+  }
+  return clean.reduce((sum, value) => sum + value, 0) / clean.length;
+}
+
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function scrollAlignmentTable(direction) {
+  const wrap = document.querySelector('.alignment-wrap');
+  if (!wrap) {
+    return;
+  }
+
+  const verticalStep = Math.max(220, Math.round(wrap.clientHeight * 0.72));
+  const horizontalStep = Math.max(220, Math.round(wrap.clientWidth * 0.66));
+  const moves = {
+    up: { top: -verticalStep, left: 0 },
+    down: { top: verticalStep, left: 0 },
+    left: { top: 0, left: -horizontalStep },
+    right: { top: 0, left: horizontalStep }
+  };
+  const move = moves[direction] || moves.down;
+  wrap.scrollBy({ ...move, behavior: 'smooth' });
+}
+
+function renderAlignmentRow(pair) {
+  const status = alignmentPairStatus(pair);
+  const sheetOutcome = alignmentOutcome(pair.sheet);
+  const vstOutcome = alignmentOutcome(pair.vst);
+  const rowClass = status.key === 'aligned' ? '' : 'needs-review';
+
+  return `
+    <tr class="${escapeAttribute(rowClass)}">
+      <td>
+        <strong>${escapeHtml(String(pair.sequence))}</strong>
+        <span>${escapeHtml(formatAlignmentDate(pair))}</span>
+      </td>
+      <td>
+        <strong>${escapeHtml(pair.symbol || '-')}</strong>
+        <span>${escapeHtml(alignmentSideLabel(pair))}</span>
+      </td>
+      <td>${renderAlignmentPositionCell(pair.sheet, 'USDT', sheetOutcome)}</td>
+      <td>${renderAlignmentPositionCell(pair.vst, 'VST', vstOutcome)}</td>
+      <td>${renderAlignmentReading(pair, sheetOutcome, vstOutcome)}</td>
+      <td><span class="ledger-status ${escapeAttribute(status.className)}">${escapeHtml(status.label)}</span></td>
+    </tr>
+  `;
+}
+
+function renderAlignmentPositionCell(position, asset, outcome = alignmentOutcome(position)) {
+  if (!position) {
+    return '<span class="alignment-muted">Sin registro</span>';
+  }
+  const pnl = alignmentPnl(position);
+  return `
+    <strong class="${amountClass(pnl)}">${escapeHtml(formatMoney(pnl, asset))}</strong>
+    <span>${escapeHtml(alignmentOutcomeLabel(outcome))}</span>
+    <span>Entrada ${escapeHtml(formatPrice(position.entryPrice))} / Salida ${escapeHtml(formatPrice(alignmentExitPrice(position)))}</span>
+  `;
+}
+
+function renderAlignmentReading(pair, sheetOutcome, vstOutcome) {
+  if (pair.sheet && !pair.vst) {
+    return '<strong>Operacion de la hoja sin ejecucion VST</strong><span>Revisar bloqueo, precio o scraping.</span>';
+  }
+  if (pair.vst && !pair.sheet) {
+    return '<strong>Operacion VST extra</strong><span>No aparece en la referencia externa.</span>';
+  }
+  if (sheetOutcome === vstOutcome) {
+    return '<strong>Resultado alineado</strong><span>La direccion del resultado coincide.</span>';
+  }
+  return `<strong>Resultado distinto</strong><span>Sheet ${escapeHtml(alignmentOutcomeLabel(sheetOutcome))} / VST ${escapeHtml(alignmentOutcomeLabel(vstOutcome))}</span>`;
+}
+
+function alignmentPairStatus(pair) {
+  if (pair.sheet && !pair.vst) {
+    return { key: 'missing_vst', label: 'Falta VST', className: 'negative' };
+  }
+  if (pair.vst && !pair.sheet) {
+    return { key: 'extra_vst', label: 'Extra VST', className: 'warn' };
+  }
+  if (alignmentOutcome(pair.sheet) === alignmentOutcome(pair.vst)) {
+    return { key: 'aligned', label: 'Alineada', className: 'positive' };
+  }
+  return { key: 'mismatch', label: 'Diferente', className: 'warn' };
+}
+
+function alignmentOutcome(position) {
+  if (!position) {
+    return 'missing';
+  }
+  if (position.status !== 'closed') {
+    return 'open';
+  }
+  const pnl = alignmentPnl(position);
+  if (pnl > 0) {
+    return 'win';
+  }
+  if (pnl < 0) {
+    return 'loss';
+  }
+  return 'flat';
+}
+
+function alignmentOutcomeLabel(outcome) {
+  if (outcome === 'win') {
+    return 'Ganadora';
+  }
+  if (outcome === 'loss') {
+    return 'Perdedora';
+  }
+  if (outcome === 'open') {
+    return 'Abierta';
+  }
+  if (outcome === 'flat') {
+    return 'Plana';
+  }
+  return 'Sin dato';
+}
+
+function alignmentPnl(position = {}) {
+  return roundPnl(Number(position.paperPnl ?? position.realizedPnl ?? position.unrealizedPnl ?? 0));
+}
+
+function alignmentExitPrice(position = {}) {
+  return position.closePrice ?? position.currentPrice ?? position.markPrice ?? position.entryPrice;
+}
+
+function alignmentSideLabel(pair = {}) {
+  const position = pair.sheet || pair.vst || {};
+  return [position.direction, formatLeverage(position.leverage)].filter(Boolean).join(' / ') || '-';
+}
+
+function formatAlignmentDate(pair = {}) {
+  const position = pair.vst || pair.sheet || {};
+  const date = new Date(position.closedAt || position.openedAt);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return date.toLocaleString('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function renderHistoricalSignalItem(position, asset = 'USDT') {
@@ -5244,6 +5983,29 @@ function switchView(view) {
   elements.postsView.classList.toggle('hidden', !posts);
   elements.logsView.classList.toggle('hidden', !logs);
   elements.pnlView.classList.toggle('hidden', !pnl);
+}
+
+function applyHashNavigation() {
+  if (window.location.hash !== '#sheet-vst-alignment') {
+    return;
+  }
+
+  switchView('pnl');
+  const finish = () => requestAnimationFrame(() => {
+    document.querySelector('#sheet-vst-alignment')?.scrollIntoView({ block: 'start' });
+  });
+
+  if (appState.pnl) {
+    finish();
+    return;
+  }
+
+  loadPnl()
+    .catch((error) => {
+      appState.pnlError = error.message;
+      renderPnl();
+    })
+    .finally(finish);
 }
 
 async function postJson(url, payload) {

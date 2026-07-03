@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=32">
+    <link rel="stylesheet" href="/styles.css?v=36">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=66" defer></script>
+    <script src="/app.js?v=70" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -951,6 +951,36 @@
                   <span id="historical-signal-status">0 señales</span>
                 </div>
                 <div class="trade-history" id="historical-signal-list"></div>
+              </div>
+            </div>
+
+            <div class="alignment-panel" id="sheet-vst-alignment">
+              <div class="trade-section-header">
+                <h3>Alineacion Google Sheet vs VST</h3>
+                <span id="alignment-status">Sin comparar</span>
+              </div>
+              <div class="alignment-summary" id="alignment-summary"></div>
+              <div class="replica-control" id="replica-control"></div>
+              <div class="alignment-controls" aria-label="Navegacion tabla de alineacion">
+                <button type="button" data-alignment-scroll="up">Subir</button>
+                <button type="button" data-alignment-scroll="down">Bajar</button>
+                <button type="button" data-alignment-scroll="left">Izquierda</button>
+                <button type="button" data-alignment-scroll="right">Derecha</button>
+              </div>
+              <div class="pnl-table-wrap compact-table alignment-wrap">
+                <table class="pnl-table alignment-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Activo</th>
+                      <th>Google Sheet</th>
+                      <th>Futuros VST</th>
+                      <th>Lectura</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="alignment-table"></tbody>
+                </table>
               </div>
             </div>
 
