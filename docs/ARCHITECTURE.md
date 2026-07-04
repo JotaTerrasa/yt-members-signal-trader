@@ -104,6 +104,7 @@ Orquesta:
 - bot de Telegram de alertas.
 - Telegram Web como fuente de mensajes.
 - BingX.
+- Cola de reintentos de cierres protegidos por slippage o neto negativo.
 - Portfolio dinámico.
 - PnL histórico.
 
@@ -316,6 +317,8 @@ La UI escucha:
 - `trade`
 - `price`
 
+Los eventos `state` se envían como snapshot completo de `currentState()`. La UI los usa para mantener sincronizados paneles derivados como `closeGuardRetryQueue`, PnL, monitor, Telegram Web y estado BingX aunque el origen del broadcast haya pasado un payload parcial.
+
 ## Ciclo de un item nuevo
 
 1. Scraper extrae posts de YouTube y mensajes de Telegram Web.
@@ -326,6 +329,8 @@ La UI escucha:
 6. Trader ejecuta según modo.
 7. UI recibe eventos por SSE.
 8. PnL se recalcula al actualizar.
+
+Si un cierre queda protegido por slippage o neto negativo, `server.js` lo mantiene en la cola de reintentos y lo expone en `state.closeGuardRetryQueue` hasta que se ejecuta, se resuelve o caduca.
 
 Para Telegram Web, el servidor filtra mensajes sin señales para reducir ruido.
 

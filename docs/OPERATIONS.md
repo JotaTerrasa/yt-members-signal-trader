@@ -172,12 +172,15 @@ Cierres:
 - `CLOSE_ALL` cierra todas las posiciones abiertas.
 - Cierres parciales respetan el porcentaje detectado.
 - En cierres completos, la app intenta cancelar después los SL/TP protectores asociados a esa posición.
+- Si un cierre queda fuera de la zona válida por slippage o neto negativo, entra en `Cierres protegidos` y se reintenta hasta ejecutarse o caducar.
+- El panel `Cierres protegidos` muestra símbolo, modo, porcentaje, precio de señal, mercado, slippage, límite, próximo intento, caducidad y enlace al post si existe.
 
 Notas:
 
 - BingX usa IDs de orden largos; el cliente los conserva como string para evitar redondeo.
 - El replay de una señal live requiere confirmación explícita.
 - Las alertas de SL/órdenes huérfanas tienen una pequeña ventana de gracia tras aperturas y cierres para evitar falsos positivos mientras BingX confirma la posición y sus protectoras.
+- Las alertas Telegram de cierres protegidos se agrupan por evento pendiente para evitar avisos repetidos en cada reintento.
 
 ## 9. Reejecutar una señal fallida
 
@@ -233,6 +236,11 @@ Fuentes:
 - paper local;
 - ingresos de BingX;
 - hoja de referencia si hay URL valida.
+
+Lectura rápida:
+
+- En Demo VST y live real, el resumen compara la equity actual contra el capital inicial configurado del mes.
+- El ROI mensual sigue usando la base mensual; la línea `Equity vs inicial` ayuda a distinguir balance/equity de PnL realizado.
 
 Endpoint:
 
