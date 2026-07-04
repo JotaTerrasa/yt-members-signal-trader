@@ -2885,6 +2885,7 @@ function notifyTradeCriticalEvent(event = {}) {
     event.signal?.symbol ? `${event.signal.symbol} ${event.signal.direction || event.signal.action || ''}`.trim() : '',
     event.status ? `Estado: ${event.status}` : '',
     event.sizing?.notional ? `Orden: ${formatSigned(event.sizing.notional).replace('+', '')} ${event.sizing.asset || 'USDT'}` : '',
+    event.costGuard?.enabled ? costGuardAlertLine(event.costGuard) : '',
     event.takeProfit ? `TP: ${event.takeProfit}` : '',
     event.stopLoss ? `SL: ${event.stopLoss}` : '',
     event.closePercent ? `Cierre: ${event.closePercent}%` : '',
@@ -2901,6 +2902,14 @@ function notifyTradeCriticalEvent(event = {}) {
     .catch((error) => {
       pushLog({ level: 'error', message: `Telegram critical trade: ${error.message}`, at: new Date().toISOString() });
     });
+}
+
+function costGuardAlertLine(costGuard = {}) {
+  const asset = costGuard.asset || 'USDT';
+  const status = costGuard.warn ? 'aviso' : costGuard.status || 'ok';
+  const cost = Number(costGuard.bufferedRoundTripCost || costGuard.estimatedRoundTripCost || 0);
+  const marginRoi = Number(costGuard.breakEvenMarginRoiPercent || 0);
+  return `Coste: ${status} - ${formatSigned(cost).replace('+', '')} ${asset} / BE margen ${formatPercentNumber(marginRoi)}`;
 }
 
 function isTelegramTradeEvent(event = {}) {
@@ -3584,6 +3593,11 @@ function formatSigned(value) {
   const number = Number(value || 0);
   const prefix = number > 0 ? '+' : '';
   return `${prefix}${Math.round((number + Number.EPSILON) * 10000) / 10000}`;
+}
+
+function formatPercentNumber(value) {
+  const number = Number(value || 0);
+  return `${Math.round((number + Number.EPSILON) * 100) / 100}%`;
 }
 
 function currentMonthKey() {

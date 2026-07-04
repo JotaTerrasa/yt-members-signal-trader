@@ -4,9 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=37">
+    <link rel="stylesheet" href="/styles.css?v=39">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/app.js?v=71" defer></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+    <script src="/app.js?v=73" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -291,6 +292,21 @@
 	                <input id="bingx-max-entry-deviation" type="number" min="0" max="50" step="0.1" value="5">
 	              </label>
 	            </div>
+            <label class="check-option">
+              <input id="bingx-cost-guard-enabled" type="checkbox" checked>
+              <span>Filtro de coste en modo aviso</span>
+            </label>
+            <div class="range-grid">
+              <label for="bingx-cost-guard-buffer">
+                <span>Colchon fees x</span>
+                <input id="bingx-cost-guard-buffer" type="number" min="1" max="10" step="0.25" value="2">
+              </label>
+              <label for="bingx-cost-guard-max-margin">
+                <span>Break-even max margen %</span>
+                <input id="bingx-cost-guard-max-margin" type="number" min="0" max="100" step="0.1" value="3">
+              </label>
+            </div>
+            <div class="field-hint">Modo aviso: marca señales caras por comisiones, pero no bloquea entradas automaticamente.</div>
 	            <div class="range-grid">
 	              <label for="bingx-vst-base-capital">
 	                <span>Capital mes VST</span>
@@ -472,6 +488,7 @@
               </div>
               <div class="cost-control-summary" id="cost-control-summary"></div>
               <div class="cost-control-symbols" id="cost-control-symbols"></div>
+              <div class="cost-control-shadow" id="cost-control-shadow"></div>
               <div class="cost-control-actions" id="cost-control-actions"></div>
             </div>
 

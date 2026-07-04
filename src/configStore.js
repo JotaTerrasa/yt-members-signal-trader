@@ -64,6 +64,10 @@ const defaultConfig = {
     maxSignalLeverage: 125,
     maxSignalAgeMinutes: 180,
     maxEntryDeviationPercent: 5,
+    costGuardEnabled: true,
+    costGuardMode: 'warn',
+    costGuardFeeBuffer: 2,
+    costGuardMaxMarginBreakEvenPercent: 3,
     vstBaseCapital: 300,
     vstCapitalPercent: 10,
     vstPnlResetAt: null,
@@ -228,6 +232,10 @@ export class ConfigStore {
       maxSignalLeverage: bingx.maxSignalLeverage,
       maxSignalAgeMinutes: bingx.maxSignalAgeMinutes,
       maxEntryDeviationPercent: bingx.maxEntryDeviationPercent,
+      costGuardEnabled: Boolean(bingx.costGuardEnabled),
+      costGuardMode: bingx.costGuardMode,
+      costGuardFeeBuffer: bingx.costGuardFeeBuffer,
+      costGuardMaxMarginBreakEvenPercent: bingx.costGuardMaxMarginBreakEvenPercent,
       vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
       vstPnlResetAt: bingx.vstPnlResetAt || null,
@@ -287,6 +295,15 @@ export class ConfigStore {
       maxSignalLeverage: clampInteger(input.maxSignalLeverage, 1, 125, defaultConfig.bingx.maxSignalLeverage),
       maxSignalAgeMinutes: clampInteger(input.maxSignalAgeMinutes, 0, 1440, defaultConfig.bingx.maxSignalAgeMinutes),
       maxEntryDeviationPercent: clampNumber(input.maxEntryDeviationPercent, 0, 50, defaultConfig.bingx.maxEntryDeviationPercent),
+      costGuardEnabled: input.costGuardEnabled !== false,
+      costGuardMode: normalizeCostGuardMode(input.costGuardMode),
+      costGuardFeeBuffer: clampNumber(input.costGuardFeeBuffer, 1, 10, defaultConfig.bingx.costGuardFeeBuffer),
+      costGuardMaxMarginBreakEvenPercent: clampNumber(
+        input.costGuardMaxMarginBreakEvenPercent,
+        0,
+        100,
+        defaultConfig.bingx.costGuardMaxMarginBreakEvenPercent
+      ),
       vstBaseCapital: monthlyInitialCapitalVST,
       vstCapitalPercent: monthlyOrderPercent,
       vstPnlResetAt: input.clearVstPnlReset
@@ -398,6 +415,10 @@ function environmentForMode(mode) {
   return mode === 'demo' ? 'prod-vst' : 'prod-live';
 }
 
+function normalizeCostGuardMode(value) {
+  return clean(value).toLowerCase() === 'block' ? 'block' : 'warn';
+}
+
 function normalizeBingXConfig(input = {}) {
   const monthlyInitialCapitalUSDT = positiveNumber(
     input.monthlyInitialCapitalUSDT,
@@ -425,6 +446,15 @@ function normalizeBingXConfig(input = {}) {
     monthlyOrderPercent,
     monthlyOrderNotionalUSDT,
     monthlyOrderNotionalVST,
+    costGuardEnabled: input.costGuardEnabled !== false,
+    costGuardMode: normalizeCostGuardMode(input.costGuardMode),
+    costGuardFeeBuffer: clampNumber(input.costGuardFeeBuffer, 1, 10, defaultConfig.bingx.costGuardFeeBuffer),
+    costGuardMaxMarginBreakEvenPercent: clampNumber(
+      input.costGuardMaxMarginBreakEvenPercent,
+      0,
+      100,
+      defaultConfig.bingx.costGuardMaxMarginBreakEvenPercent
+    ),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent
   };

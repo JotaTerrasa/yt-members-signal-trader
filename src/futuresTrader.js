@@ -5,6 +5,7 @@ const OPEN_ORDERS_CACHE_MS = 60_000;
 const OPEN_ORDERS_ERROR_LOG_MS = 60_000;
 const OPEN_ORDERS_DEFAULT_BACKOFF_MS = 60_000;
 const CLOSE_GUARD_TAKER_FEE_RATE = 0.0005;
+const COST_GUARD_TAKER_FEE_RATE = CLOSE_GUARD_TAKER_FEE_RATE;
 const CLOSE_GUARD_MIN_NET_PNL = 0;
 const CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT = 0.15;
 
@@ -841,13 +842,15 @@ export class FuturesTrader {
       : marketPrice;
     const executionEntryPrice = forceMarketEntry ? preOrderMarketPrice : entryPrice;
     const preOrderStopValidation = validateStopLossAgainstMarket(signal, executionEntryPrice);
+    const costGuard = buildCostGuard({ config, notional, exposure, leverage });
     if (!preOrderStopValidation.ok) {
       return this.emitTrade({
         ...baseEvent,
         status: 'blocked',
         reason: `entry_missed_${preOrderStopValidation.reason}`,
         marketPrice: preOrderMarketPrice,
-        referenceEntryPrice
+        referenceEntryPrice,
+        costGuard
       });
     }
 
@@ -857,7 +860,21 @@ export class FuturesTrader {
       return this.emitTrade({
         ...baseEvent,
         status: 'blocked',
-        reason: `quantity_too_small:${quantity}`
+        reason: `quantity_too_small:${quantity}`,
+        costGuard
+      });
+    }
+
+    if (costGuard.block) {
+      return this.emitTrade({
+        ...baseEvent,
+        status: 'blocked',
+        reason: costGuard.reason,
+        sizing,
+        marketPrice: preOrderMarketPrice,
+        entryPrice: executionEntryPrice,
+        referenceEntryPrice,
+        costGuard
       });
     }
 
@@ -891,7 +908,8 @@ export class FuturesTrader {
           marketPrice: preOrderMarketPrice,
           entryPrice: executionEntryPrice,
           referenceEntryPrice,
-          executionEntryType: order.type
+          executionEntryType: order.type,
+          costGuard
         });
       }
       throw error;
@@ -911,10 +929,14 @@ export class FuturesTrader {
       entryPrice: executionEntryPrice,
       referenceEntryPrice,
       executionEntryType: order.type,
+      costGuard,
       paperPosition,
       bingx
     });
 
+    if (costGuard.warn) {
+      this.log(`${modePrefix(config)} ${signal.symbol} coste alto: break-even ${costGuard.breakEvenMarginRoiPercent}% margen.`, 'warn');
+    }
     this.log(`${modePrefix(config)} ${signal.symbol} ${signal.direction} qty ${quantity}`, test || config.mode === 'demo' ? 'info' : 'warn');
     return result;
   }
@@ -1508,6 +1530,48 @@ function validateSignal(signal, config) {
   }
 
   return { ok: true };
+}
+
+function buildCostGuard({ config = {}, notional = 0, exposure = 0, leverage = 1 } = {}) {
+  const enabled = config.costGuardEnabled !== false;
+  const mode = String(config.costGuardMode || 'warn').toLowerCase() === 'block' ? 'block' : 'warn';
+  const feeRate = COST_GUARD_TAKER_FEE_RATE;
+  const buffer = clampNumber(config.costGuardFeeBuffer, 1, 10, 2);
+  const maxMarginBreakEven = clampNumber(config.costGuardMaxMarginBreakEvenPercent, 0, 100, 3);
+  const baseRoundTripCost = roundMoney(Number(exposure || 0) * feeRate * 2);
+  const bufferedRoundTripCost = roundMoney(baseRoundTripCost * buffer);
+  const breakEvenPriceMovePercent = exposure > 0
+    ? roundMoney((bufferedRoundTripCost / exposure) * 100)
+    : 0;
+  const breakEvenMarginRoiPercent = notional > 0
+    ? roundMoney((bufferedRoundTripCost / notional) * 100)
+    : 0;
+  const warn = enabled && maxMarginBreakEven > 0 && breakEvenMarginRoiPercent > maxMarginBreakEven;
+  const reason = warn
+    ? `cost_guard_margin_break_even:${breakEvenMarginRoiPercent}>${maxMarginBreakEven}`
+    : '';
+
+  return {
+    enabled,
+    mode,
+    status: enabled ? warn ? 'warn' : 'ok' : 'off',
+    warn,
+    block: warn && mode === 'block',
+    reason,
+    asset: config.mode === 'demo' ? 'VST' : 'USDT',
+    feeRate,
+    buffer,
+    maxMarginBreakEvenPercent: maxMarginBreakEven,
+    notional: roundMoney(notional),
+    exposure: roundMoney(exposure),
+    leverage,
+    estimatedOpenFee: roundMoney(Number(exposure || 0) * feeRate),
+    estimatedCloseFee: roundMoney(Number(exposure || 0) * feeRate),
+    estimatedRoundTripCost: baseRoundTripCost,
+    bufferedRoundTripCost,
+    breakEvenPriceMovePercent,
+    breakEvenMarginRoiPercent
+  };
 }
 
 function validateSignalAge(post = {}, phase = '', config = {}) {

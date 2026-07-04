@@ -31,6 +31,7 @@ const elements = {
   costControlStatus: document.querySelector('#cost-control-status'),
   costControlSummary: document.querySelector('#cost-control-summary'),
   costControlSymbols: document.querySelector('#cost-control-symbols'),
+  costControlShadow: document.querySelector('#cost-control-shadow'),
   costControlActions: document.querySelector('#cost-control-actions'),
   performanceSourceGrid: document.querySelector('#performance-source-grid'),
   performanceOverview: document.querySelector('#performance-overview'),
@@ -184,6 +185,9 @@ const elements = {
   bingxMaxSignalLeverage: document.querySelector('#bingx-max-signal-leverage'),
   bingxMaxSignalAge: document.querySelector('#bingx-max-signal-age'),
   bingxMaxEntryDeviation: document.querySelector('#bingx-max-entry-deviation'),
+  bingxCostGuardEnabled: document.querySelector('#bingx-cost-guard-enabled'),
+  bingxCostGuardBuffer: document.querySelector('#bingx-cost-guard-buffer'),
+  bingxCostGuardMaxMargin: document.querySelector('#bingx-cost-guard-max-margin'),
   bingxVstBaseCapital: document.querySelector('#bingx-vst-base-capital'),
   bingxVstCapitalPercent: document.querySelector('#bingx-vst-capital-percent'),
   bingxDailyLoss: document.querySelector('#bingx-daily-loss'),
@@ -206,6 +210,13 @@ const elements = {
   bingxStatus: document.querySelector('#bingx-status'),
   clientError: document.querySelector('#client-error')
 };
+
+const PLOTLY_CDN_SOURCES = [
+  'https://cdn.plot.ly/plotly-2.35.2.min.js',
+  'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js',
+  'https://unpkg.com/plotly.js-dist-min@2.35.2/plotly.min.js'
+];
+let plotlyLoadPromise = null;
 
 const appState = {
   state: null,
@@ -238,6 +249,8 @@ const appState = {
   risk: null,
   logs: []
 };
+
+const COST_GUARD_TAKER_FEE_RATE = 0.0005;
 
 init();
 
@@ -1263,6 +1276,7 @@ function renderCostControl(source = selectedPnlSource(), reference = currentRefe
       <div class="cost-empty">El coste operativo se calcula con datos reales de BingX para Futuros VST o Futuros reales.</div>
     `;
     elements.costControlSymbols.innerHTML = '';
+    elements.costControlShadow.innerHTML = '';
     elements.costControlActions.innerHTML = '';
     return;
   }
@@ -1279,6 +1293,8 @@ function renderCostControl(source = selectedPnlSource(), reference = currentRefe
   elements.costControlSymbols.innerHTML = analysis.symbolRows.length
     ? analysis.symbolRows.map(renderCostSymbolRow).join('')
     : '<div class="cost-empty">Sin posiciones suficientes para calcular coste por simbolo.</div>';
+
+  elements.costControlShadow.innerHTML = renderCostShadow(analysis.shadow);
 
   elements.costControlActions.innerHTML = analysis.actions.map((action) => `
     <div class="cost-action ${escapeAttribute(action.tone)}">
@@ -1333,6 +1349,7 @@ function buildCostControlAnalysis(source = {}, reference = currentReferenceLedge
   const costPressure = grossRealized
     ? Math.abs(totalCost) / Math.max(1, Math.abs(grossRealized))
     : Math.abs(totalCost) > 0 ? Number.POSITIVE_INFINITY : 0;
+  const shadow = costGuardShadow(positions, source);
   const symbolRows = costSymbolRows(positions, {
     asset,
     roundTripCost,
@@ -1346,7 +1363,8 @@ function buildCostControlAnalysis(source = {}, reference = currentReferenceLedge
     breakEvenMovePercent,
     marginRoiBreakEven,
     symbolRows,
-    source
+    source,
+    shadow
   });
 
   return {
@@ -1370,8 +1388,100 @@ function buildCostControlAnalysis(source = {}, reference = currentReferenceLedge
     marginRoiBreakEven,
     costPressure,
     costPressureLabel: costPressureLabel(costPressure),
+    shadow,
     symbolRows,
     actions
+  };
+}
+
+function costGuardShadow(positions = [], source = {}) {
+  const asset = source.asset || (source.key === 'vst' ? 'VST' : 'USDT');
+  const enabled = appState.bingx?.costGuardEnabled !== false;
+  const buffer = positiveNumber(appState.bingx?.costGuardFeeBuffer) || 2;
+  const threshold = Number(appState.bingx?.costGuardMaxMarginBreakEvenPercent ?? 3);
+  const rows = positions.map((position) => {
+    const exposure = positionExposureForCost(position);
+    const notional = Number(position.notional || 0);
+    const estimatedRoundTripCost = roundPnl(exposure * COST_GUARD_TAKER_FEE_RATE * 2 * buffer);
+    const breakEvenMarginRoi = notional > 0 ? (estimatedRoundTripCost / notional) * 100 : 0;
+    const flagged = enabled && threshold > 0 && breakEvenMarginRoi > threshold;
+    return {
+      symbol: normalizeTradeSymbol(position.symbol) || '-',
+      status: position.status,
+      pnl: alignmentPnl(position),
+      estimatedRoundTripCost,
+      breakEvenMarginRoi,
+      flagged
+    };
+  });
+  const flagged = rows.filter((row) => row.flagged);
+  const closedFlagged = flagged.filter((row) => row.status === 'closed');
+  const flaggedPnl = roundPnl(flagged.reduce((sum, row) => sum + row.pnl, 0));
+  const flaggedCost = roundPnl(flagged.reduce((sum, row) => sum + row.estimatedRoundTripCost, 0));
+  const winners = closedFlagged.filter((row) => row.pnl > 0).length;
+  const losers = closedFlagged.filter((row) => row.pnl < 0).length;
+  return {
+    enabled,
+    asset,
+    buffer,
+    threshold,
+    rows,
+    flagged,
+    flaggedCount: flagged.length,
+    totalCount: rows.length,
+    closedFlaggedCount: closedFlagged.length,
+    flaggedPnl,
+    flaggedCost,
+    winners,
+    losers,
+    recommendation: costShadowRecommendation({ flagged, closedFlagged, flaggedPnl, flaggedCost })
+  };
+}
+
+function renderCostShadow(shadow = {}) {
+  if (!shadow.totalCount) {
+    return '';
+  }
+
+  return `
+    <div class="cost-shadow-header">
+      <div>
+        <strong>Modo sombra del filtro</strong>
+        <span>No bloquea. Simula que habria pasado con umbral ${escapeHtml(formatPercent(shadow.threshold))} y colchon x${escapeHtml(String(shadow.buffer))}.</span>
+      </div>
+      <span class="ledger-status ${escapeAttribute(shadow.recommendation.className)}">${escapeHtml(shadow.recommendation.label)}</span>
+    </div>
+    <div class="cost-shadow-grid">
+      ${renderCostMetric('Marcadas', `${shadow.flaggedCount}/${shadow.totalCount}`, `${shadow.closedFlaggedCount} cerradas con resultado`, shadow.flaggedCount ? 'warn' : 'amount positive')}
+      ${renderCostMetric('PnL marcado', formatMoney(shadow.flaggedPnl, shadow.asset), 'Resultado de lo que habria filtrado', amountClass(shadow.flaggedPnl))}
+      ${renderCostMetric('Coste estimado', formatMoney(shadow.flaggedCost, shadow.asset), 'Coste que habria evitado no entrando', amountClass(-shadow.flaggedCost))}
+      ${renderCostMetric('W/L marcadas', `${shadow.winners}/${shadow.losers}`, 'Ganadoras/perdedoras dentro del filtro', shadow.losers > shadow.winners ? 'amount positive' : 'warn')}
+    </div>
+  `;
+}
+
+function costShadowRecommendation({ flagged = [], closedFlagged = [], flaggedPnl = 0, flaggedCost = 0 } = {}) {
+  if (!flagged.length) {
+    return {
+      label: 'sin bloqueo',
+      className: 'positive'
+    };
+  }
+  if (closedFlagged.length < 20) {
+    return {
+      label: 'seguir midiendo',
+      className: 'warn'
+    };
+  }
+  if (flaggedPnl < 0 && Math.abs(flaggedPnl) > flaggedCost * 0.35) {
+    return {
+      label: 'bloqueo VST candidato',
+      className: 'positive'
+    };
+  }
+  return {
+    label: 'mantener aviso',
+    className: 'warn'
   };
 }
 
@@ -2094,6 +2204,7 @@ function renderPnlCurve() {
   const maxValue = Math.max(...values);
   const minValue = Math.min(...values);
   const drawdown = calculateMaxDrawdown(values);
+  const chartId = 'pnl-plotly-curve';
   const curveStatusText = actualSource
     ? `${items.length} puntos reales/detectados - ${source.label}`
     : `${items.length} operaciones simuladas - ${source.label}`;
@@ -2116,8 +2227,10 @@ function renderPnlCurve() {
         <span>${escapeHtml(curvePanelStatus)}</span>
       </div>
       ${items.length ? `
-        ${renderLineSvg(values, finalValue)}
-        <div class="curve-stats">
+        <div class="plotly-curve-shell">
+          <div id="${chartId}" class="plotly-curve-chart" role="img" aria-label="Curva interactiva de PnL acumulado"></div>
+        </div>
+        <div class="curve-stats plotly-curve-stats">
           <div>
             <span>Neto detectado</span>
             <strong class="${amountClass(finalValue)}">${escapeHtml(formatMoney(finalValue, source.asset))}</strong>
@@ -2139,6 +2252,281 @@ function renderPnlCurve() {
       ` : '<div class="pnl-chart-empty">Sin operaciones detectadas para graficar.</div>'}
     </section>
   `;
+
+  if (items.length) {
+    requestAnimationFrame(() => {
+      renderPlotlyPnlCurve(chartId, items, {
+        asset: source.asset || 'USDT',
+        sourceLabel: source.label,
+        title: actualSource ? 'PnL acumulado detectado' : 'PnL acumulado simulado',
+        finalValue,
+        maxValue,
+        minValue,
+        drawdown
+      });
+    });
+  }
+}
+
+function renderPlotlyPnlCurve(chartId, items, options = {}) {
+  const chart = document.getElementById(chartId);
+  if (!chart) {
+    return;
+  }
+
+  if (!window.Plotly?.react) {
+    chart.innerHTML = '<div class="pnl-chart-empty">Cargando grafica interactiva...</div>';
+    loadPlotlyLibrary()
+      .then(() => renderPlotlyPnlCurve(chartId, items, options))
+      .catch(() => {
+        chart.innerHTML = '<div class="pnl-chart-empty">Plotly no esta disponible. Revisa la conexion y refresca la pagina.</div>';
+      });
+    return;
+  }
+
+  const asset = options.asset || 'USDT';
+  const points = plotlyCurvePoints(items);
+  const isPositive = Number(options.finalValue || 0) >= 0;
+  const lineColor = isPositive ? '#087b76' : '#d73731';
+  const fillColor = isPositive ? 'rgba(8, 123, 118, 0.13)' : 'rgba(215, 55, 49, 0.11)';
+
+  const trace = {
+    type: 'scatter',
+    mode: 'lines+markers',
+    x: points.map((point) => point.x),
+    y: points.map((point) => point.equity),
+    text: points.map((point) => point.label),
+    customdata: points.map((point) => [
+      formatMoney(point.pnl, asset),
+      formatMoney(point.equity, asset),
+      point.symbol || '-'
+    ]),
+    hovertemplate: [
+      '<b>%{text}</b>',
+      'Operacion: %{customdata[2]}',
+      'PnL: %{customdata[0]}',
+      'Acumulado: %{customdata[1]}',
+      '<extra></extra>'
+    ].join('<br>'),
+    line: {
+      color: lineColor,
+      width: 3,
+      shape: 'spline',
+      smoothing: 0.35
+    },
+    marker: {
+      color: lineColor,
+      size: points.map((point, index) => (index === points.length - 1 ? 11 : 6)),
+      line: {
+        color: '#ffffff',
+        width: 1.5
+      }
+    },
+    fill: 'tozeroy',
+    fillcolor: fillColor,
+    name: options.sourceLabel || 'PnL'
+  };
+
+  const yValues = points.map((point) => point.equity);
+  const maxAbs = Math.max(1, ...yValues.map((value) => Math.abs(Number(value || 0))));
+  const tickSuffix = ` ${asset}`;
+  const layout = {
+    autosize: true,
+    height: 360,
+    margin: { l: 62, r: 24, t: 26, b: 48 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: '#fbfefd',
+    hovermode: 'x unified',
+    showlegend: false,
+    font: {
+      family: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      color: '#102226'
+    },
+    xaxis: {
+      title: '',
+      showgrid: false,
+      zeroline: false,
+      tickfont: { size: 11, color: '#627579' },
+      linecolor: '#d7e5e1',
+      automargin: true
+    },
+    yaxis: {
+      title: '',
+      gridcolor: '#e6f0ed',
+      zeroline: true,
+      zerolinecolor: '#a7bab5',
+      zerolinewidth: 1,
+      tickfont: { size: 11, color: '#627579' },
+      ticksuffix: tickSuffix,
+      range: paddedPlotlyRange(yValues, maxAbs),
+      automargin: true
+    },
+    annotations: [
+      {
+        xref: 'paper',
+        yref: 'paper',
+        x: 0,
+        y: 1.08,
+        xanchor: 'left',
+        yanchor: 'top',
+        showarrow: false,
+        align: 'left',
+        text: `<b>${escapePlotlyText(options.title || 'PnL acumulado')}</b><br><span style="color:#65767a">${escapePlotlyText(options.sourceLabel || '')}</span>`,
+        font: { size: 13 }
+      },
+      {
+        xref: 'paper',
+        yref: 'paper',
+        x: 1,
+        y: 1.08,
+        xanchor: 'right',
+        yanchor: 'top',
+        showarrow: false,
+        align: 'right',
+        text: `<b>${escapePlotlyText(formatMoney(options.finalValue || 0, asset))}</b><br><span style="color:#65767a">Drawdown ${escapePlotlyText(formatMoney(-(options.drawdown || 0), asset))}</span>`,
+        font: { size: 13, color: lineColor }
+      }
+    ]
+  };
+
+  const config = {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+    toImageButtonOptions: {
+      format: 'png',
+      filename: `futures-magician-${asset.toLowerCase()}-curve`,
+      height: 720,
+      width: 1280,
+      scale: 2
+    }
+  };
+
+  window.Plotly.react(chart, [trace], layout, config);
+}
+
+function loadPlotlyLibrary() {
+  if (window.Plotly?.react) {
+    return Promise.resolve(window.Plotly);
+  }
+  if (plotlyLoadPromise) {
+    return plotlyLoadPromise;
+  }
+
+  plotlyLoadPromise = PLOTLY_CDN_SOURCES
+    .reduce((chain, src) => chain.catch(() => loadPlotlyScript(src)), Promise.reject(new Error('plotly_pending')))
+    .then(() => {
+      if (!window.Plotly?.react) {
+        throw new Error('plotly_missing');
+      }
+      return window.Plotly;
+    })
+    .catch((error) => {
+      plotlyLoadPromise = null;
+      throw error;
+    });
+
+  return plotlyLoadPromise;
+}
+
+function loadPlotlyScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = Array.from(document.scripts).find((script) => script.src === src);
+    if (existing?.dataset.plotlyLoaded === 'true' && window.Plotly?.react) {
+      resolve();
+      return;
+    }
+    if (existing && document.readyState === 'complete' && !window.Plotly?.react) {
+      reject(new Error(`plotly_missing:${src}`));
+      return;
+    }
+
+    const script = existing || document.createElement('script');
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`plotly_timeout:${src}`));
+      }
+    }, 15000);
+
+    script.onload = () => {
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timeout);
+        script.dataset.plotlyLoaded = 'true';
+        resolve();
+      }
+    };
+    script.onerror = () => {
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timeout);
+        reject(new Error(`plotly_error:${src}`));
+      }
+    };
+
+    if (!existing) {
+      script.src = src;
+      script.async = true;
+      script.dataset.plotlyDynamic = 'true';
+      document.head.appendChild(script);
+    } else if (window.Plotly?.react) {
+      window.clearTimeout(timeout);
+      settled = true;
+      resolve();
+    }
+  });
+}
+
+function plotlyCurvePoints(items) {
+  const useDates = items.every((item) => Number.isFinite(Date.parse(item.at || '')));
+  const firstTimestamp = useDates ? Date.parse(items[0]?.at || '') : null;
+  const startX = Number.isFinite(firstTimestamp)
+    ? new Date(Math.max(0, firstTimestamp - 60 * 1000)).toISOString()
+    : 0;
+  return [
+    {
+      x: startX,
+      label: 'Inicio',
+      symbol: '',
+      pnl: 0,
+      equity: 0
+    },
+    ...items.map((item, index) => ({
+      x: plotlyPointX(item, index, useDates),
+      label: `${index + 1}. ${item.symbol || 'Operacion'}`,
+      symbol: item.symbol || '-',
+      pnl: Number(item.pnl || 0),
+      equity: Number(item.equity || 0)
+    }))
+  ];
+}
+
+function plotlyPointX(item, index, useDates = true) {
+  if (!useDates) {
+    return index + 1;
+  }
+  const timestamp = Date.parse(item.at || '');
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : index + 1;
+}
+
+function paddedPlotlyRange(values, maxAbs) {
+  const min = Math.min(0, ...values);
+  const max = Math.max(0, ...values);
+  if (min === max) {
+    return [-maxAbs, maxAbs];
+  }
+  const padding = Math.max((max - min) * 0.16, maxAbs * 0.08);
+  return [min - padding, max + padding];
+}
+
+function escapePlotlyText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function renderAccountWaterfall(source) {
@@ -5303,6 +5691,9 @@ function auditSnapshotText(event = {}) {
 }
 
 function auditFeeFundingText(event = {}) {
+  if (event.costGuard?.enabled) {
+    return costGuardText(event.costGuard);
+  }
   const raw = event.exchangePosition?.raw || {};
   const realized = raw.realisedProfit || raw.realizedProfit;
   return realized ? `realizado ${realized}` : '-';
@@ -5492,7 +5883,8 @@ function eventTone(event) {
 
 function eventAmountText(event, account) {
   if (event.sizing?.notional) {
-    return formatMoney(event.sizing.notional, event.sizing.asset || (account === 'demo' ? 'VST' : 'USDT'));
+    const amount = formatMoney(event.sizing.notional, event.sizing.asset || (account === 'demo' ? 'VST' : 'USDT'));
+    return event.costGuard?.warn ? `${amount} · ${costGuardText(event.costGuard)}` : amount;
   }
   if (event.closePercent) {
     return `${event.closePercent}% cierre`;
@@ -5501,6 +5893,12 @@ function eventAmountText(event, account) {
     return `TP ${formatPrice(event.takeProfit)}`;
   }
   return '';
+}
+
+function costGuardText(costGuard = {}) {
+  const asset = costGuard.asset || 'USDT';
+  const label = costGuard.warn ? 'Coste aviso' : 'Coste ok';
+  return `${label}: ${formatMoney(costGuard.bufferedRoundTripCost || costGuard.estimatedRoundTripCost || 0, asset)} / BE ${formatPercent(costGuard.breakEvenMarginRoiPercent)}`;
 }
 
 function newerIso(a, b) {
@@ -5655,6 +6053,9 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxMaxSignalLeverage.value = bingx.maxSignalLeverage || 125;
   elements.bingxMaxSignalAge.value = bingx.maxSignalAgeMinutes ?? 180;
   elements.bingxMaxEntryDeviation.value = bingx.maxEntryDeviationPercent ?? 5;
+  elements.bingxCostGuardEnabled.checked = bingx.costGuardEnabled !== false;
+  elements.bingxCostGuardBuffer.value = bingx.costGuardFeeBuffer ?? 2;
+  elements.bingxCostGuardMaxMargin.value = bingx.costGuardMaxMarginBreakEvenPercent ?? 3;
   elements.bingxVstBaseCapital.value = monthlyInitialCapitalVST;
   elements.bingxVstCapitalPercent.value = monthlyOrderPercent;
   elements.bingxDailyLoss.value = bingx.maxDailyLossUSDT ?? 100;
@@ -5710,6 +6111,10 @@ async function saveBingxConfig() {
     maxSignalLeverage: Number(elements.bingxMaxSignalLeverage.value),
     maxSignalAgeMinutes: Number(elements.bingxMaxSignalAge.value),
     maxEntryDeviationPercent: Number(elements.bingxMaxEntryDeviation.value),
+    costGuardEnabled: elements.bingxCostGuardEnabled.checked,
+    costGuardMode: 'warn',
+    costGuardFeeBuffer: Number(elements.bingxCostGuardBuffer.value),
+    costGuardMaxMarginBreakEvenPercent: Number(elements.bingxCostGuardMaxMargin.value),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent,
     maxDailyLossUSDT: Number(elements.bingxDailyLoss.value),
