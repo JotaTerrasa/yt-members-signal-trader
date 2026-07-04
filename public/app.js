@@ -33,6 +33,9 @@ const elements = {
   costControlSymbols: document.querySelector('#cost-control-symbols'),
   costControlShadow: document.querySelector('#cost-control-shadow'),
   costControlActions: document.querySelector('#cost-control-actions'),
+  protectedClosePanel: document.querySelector('#protected-close-panel'),
+  protectedCloseStatus: document.querySelector('#protected-close-status'),
+  protectedCloseList: document.querySelector('#protected-close-list'),
   performanceSourceGrid: document.querySelector('#performance-source-grid'),
   performanceOverview: document.querySelector('#performance-overview'),
   pnlMonthLabel: document.querySelector('#pnl-month-label'),
@@ -228,6 +231,7 @@ const appState = {
   bingx: null,
   pnl: null,
   pnlSources: null,
+  replicaAudit: null,
   pnlSource: '',
   performanceSource: '',
   performanceRange: '1D',
@@ -730,17 +734,25 @@ async function loadPnl() {
   renderPnl();
 
   try {
-    const [historicalResponse, sourcesResponse] = await Promise.all([
+    const [historicalResponse, sourcesResponse, replicaAuditResponse] = await Promise.all([
       fetchJson('/api/historical-pnl?months=72'),
       fetchJson('/api/bingx/pnl-sources').catch((error) => ({
         ok: false,
         error: error.message,
         sources: {},
         positions: {}
+      })),
+      fetchJson('/api/replica-audit').catch((error) => ({
+        ok: false,
+        error: error.message,
+        audit: null
       }))
     ]);
     const historical = historicalResponse.historical;
     appState.pnlSources = sourcesResponse;
+    appState.replicaAudit = replicaAuditResponse.audit || {
+      error: replicaAuditResponse.error || ''
+    };
     appState.pnlMeta = {
       cached: Boolean(sourcesResponse.cached),
       stale: Boolean(sourcesResponse.stale),
@@ -1023,6 +1035,7 @@ function renderPnl() {
   elements.monthResetStatus.textContent = monthResetStatusText(appState.bingx);
   renderPnlSourceGrid(sources, selectedSource.key);
   renderCostControl(selectedSource, reference);
+  renderProtectedClosePanel();
   const performanceSource = selectedPerformanceSource(sources);
   renderPerformanceSourceGrid(sources, performanceSource.key);
   renderPerformanceOverview(performanceSource, reference);
@@ -1244,12 +1257,18 @@ function defaultPnlSourceKey(sources) {
 function renderPnlSourceGrid(sources, selectedKey) {
   elements.pnlSourceGrid.innerHTML = sources.map((source) => {
     const lines = sourceSecondaryLines(source);
+    const equityBaseline = sourceEquityBaselineSnapshot(source);
     return `
       <button class="pnl-source-card source-${escapeAttribute(source.key)} ${source.key === selectedKey ? 'active' : ''} ${source.available ? '' : 'unavailable'}" type="button" data-pnl-source="${escapeAttribute(source.key)}">
         <span>${escapeHtml(source.label)}</span>
         <strong class="${sourcePrimaryClass(source)}">${escapeHtml(formatSourceMoney(sourcePrimaryValue(source), source))}</strong>
         <small>${escapeHtml(source.modeLabel)} · ${escapeHtml(sourcePrimaryLabel(source))}</small>
         <em class="${escapeAttribute(sourceMonthlyRoiClass(source))}">${escapeHtml(sourceMonthlyRoiLabel(source))}</em>
+        ${equityBaseline ? `
+          <em class="pnl-equity-baseline ${escapeAttribute(amountClass(equityBaseline.delta))}">
+            ${escapeHtml(`Equity vs capital inicial: ${formatPercent(equityBaseline.percent)}`)}
+          </em>
+        ` : ''}
         ${lines.length ? `
           <div>
             ${lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}
@@ -1302,6 +1321,157 @@ function renderCostControl(source = selectedPnlSource(), reference = currentRefe
       <span>${escapeHtml(action.detail)}</span>
     </div>
   `).join('');
+}
+
+function renderProtectedClosePanel() {
+  if (!elements.protectedClosePanel || !elements.protectedCloseStatus || !elements.protectedCloseList) {
+    return;
+  }
+
+  const items = protectedCloseQueueItems();
+  elements.protectedClosePanel.classList.toggle('muted', !items.length);
+  elements.protectedCloseStatus.textContent = items.length
+    ? `${items.length} cierre(s) esperando zona valida`
+    : 'Sin cierres pendientes';
+  elements.protectedCloseList.innerHTML = items.length
+    ? items.map(renderProtectedCloseItem).join('')
+    : '<div class="protected-close-empty">No hay cierres protegidos pendientes. Si la proteccion bloquea un cierre, aparecera aqui hasta que se ejecute o caduque.</div>';
+}
+
+function protectedCloseQueueItems() {
+  return [...(appState.state?.closeGuardRetryQueue || [])]
+    .sort((a, b) => Date.parse(a.expiresAt || 0) - Date.parse(b.expiresAt || 0));
+}
+
+function renderProtectedCloseItem(item = {}) {
+  const parsed = parseCloseGuardReason(item.lastReason);
+  const modeLabel = item.executionMode === 'demo' ? 'Demo VST' : 'Live real';
+  const limit = parsed.limitPercent ?? parsed.limit;
+  const slippage = parsed.slippagePercent ?? parsed.slippage;
+  const nextRunText = timeUntilLabel(item.nextRunAt, 'proximo intento');
+  const expiresText = timeUntilLabel(item.expiresAt, 'caduca');
+  const postLink = item.postUrl
+    ? `<a href="${escapeAttribute(item.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    : '';
+  const reasonText = protectedCloseReasonText(parsed, item.lastReason);
+  const reasonClass = protectedCloseReasonClass(parsed);
+
+  return `
+    <article class="protected-close-item ${escapeAttribute(reasonClass)}">
+      <div class="protected-close-head">
+        <div>
+          <strong>${escapeHtml(normalizeTradeSymbol(item.symbol) || 'Cierre pendiente')}</strong>
+          <span>${escapeHtml(`${modeLabel} - ${item.closePercent || 100}% cierre - ${item.attempts || 0} reintentos`)}</span>
+        </div>
+        <span class="ledger-status warn">Protegido</span>
+      </div>
+      <div class="protected-close-grid">
+        <div>
+          <span>Señal</span>
+          <strong>${escapeHtml(formatPrice(item.closePrice || parsed.signal))}</strong>
+        </div>
+        <div>
+          <span>Mercado</span>
+          <strong>${escapeHtml(formatPrice(parsed.market))}</strong>
+        </div>
+        <div>
+          <span>Slippage</span>
+          <strong class="${escapeAttribute(slippage && limit && slippage > limit ? 'negative' : 'warn')}">${escapeHtml(formatGuardPercent(slippage))}</strong>
+        </div>
+        <div>
+          <span>Límite</span>
+          <strong>${escapeHtml(formatGuardPercent(limit))}</strong>
+        </div>
+      </div>
+      <div class="protected-close-meta">
+        <span>${escapeHtml(reasonText)}</span>
+        <span>${escapeHtml(nextRunText)}</span>
+        <span>${escapeHtml(expiresText)}</span>
+        ${postLink}
+      </div>
+    </article>
+  `;
+}
+
+function parseCloseGuardReason(reason = '') {
+  const [type = '', ...parts] = String(reason || '').split(':');
+  const parsed = { type };
+  for (const part of parts) {
+    const match = part.match(/^([^=]+)=(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const key = match[1].trim();
+    const rawValue = match[2].trim();
+    const number = Number(rawValue.replace('%', '').replace(',', '.'));
+    parsed[key] = Number.isFinite(number) ? number : rawValue;
+    if (key === 'slippage') {
+      parsed.slippagePercent = parsed[key];
+    }
+    if (key === 'limit') {
+      parsed.limitPercent = parsed[key];
+    }
+  }
+  return parsed;
+}
+
+function protectedCloseReasonText(parsed = {}, fallback = '') {
+  if (parsed.type === 'close_price_slippage') {
+    return 'Protegido por slippage: espera a que el mercado vuelva cerca del precio de cierre señalado.';
+  }
+  if (parsed.type === 'close_net_negative') {
+    return 'Protegido por neto negativo: evita cerrar si el cierre sale peor que el umbral configurado.';
+  }
+  return reasonLabel(fallback || parsed.type || 'close_guarded');
+}
+
+function protectedCloseReasonClass(parsed = {}) {
+  if (parsed.type === 'close_price_slippage') {
+    return 'warn';
+  }
+  if (parsed.type === 'close_net_negative') {
+    return 'negative';
+  }
+  return 'neutral';
+}
+
+function timeUntilLabel(value, label) {
+  const timestamp = Date.parse(value || 0);
+  if (!Number.isFinite(timestamp)) {
+    return `${label}: -`;
+  }
+  const diff = timestamp - Date.now();
+  if (diff <= 0) {
+    return `${label}: vencido`;
+  }
+  return `${label}: ${formatMilliseconds(diff)}`;
+}
+
+function formatMilliseconds(ms) {
+  const minutes = Math.floor(ms / unitMs.minute);
+  if (minutes < 1) {
+    return '<1 min';
+  }
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+function formatGuardPercent(value) {
+  if (value == null) {
+    return '-';
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  return `${number.toLocaleString('es-ES', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3
+  })}%`;
 }
 
 function costControlSource(source = {}, reference = currentReferenceLedger()) {
@@ -1677,6 +1847,7 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
   const winRate = source.winRate ?? calculateWinRate(closed);
   const scenario = performanceScenario(open);
   const closedCount = Number(source.closedTrades || closed.length || 0);
+  const equityBaseline = sourceEquityBaselineSnapshot(source);
   const statusLine = [
     source.status,
     `${open.length} abiertas`,
@@ -1698,6 +1869,14 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
         ? `Base ${formatMoney(sourceMonthlyRoiBaseline(source), asset)}`
         : 'Sin capital base'
     },
+    ...(equityBaseline ? [
+      {
+        label: 'Equity vs inicial',
+        value: formatMoney(equityBaseline.delta, equityBaseline.asset),
+        className: amountClass(equityBaseline.delta),
+        detail: `${formatPercent(equityBaseline.percent)} sobre ${formatMoney(equityBaseline.baseline, equityBaseline.asset)}`
+      }
+    ] : []),
     {
       label: 'Realizado',
       value: formatOptionalMoney(source.realized, asset),
@@ -2025,6 +2204,34 @@ function sourceMonthlyRoiClass(source = {}) {
   return amountClass(sourceMonthlyRoi(source));
 }
 
+function sourceEquityBaselineSnapshot(source = {}) {
+  if (source.key !== 'vst' && source.key !== 'live') {
+    return null;
+  }
+  const baseline = positiveFiniteNumber(source.roiBaseline ?? source.baseline);
+  const equity = finiteNumber(source.balance?.equity ?? source.equity, null);
+  if (!baseline || equity == null) {
+    return null;
+  }
+  const asset = source.asset || source.balance?.asset || 'USDT';
+  const delta = roundPnl(equity - baseline);
+  return {
+    asset,
+    baseline,
+    equity,
+    delta,
+    percent: (delta / baseline) * 100
+  };
+}
+
+function sourceEquityBaselineText(source = {}) {
+  const snapshot = sourceEquityBaselineSnapshot(source);
+  if (!snapshot) {
+    return '';
+  }
+  return `Equity vs capital inicial: ${formatMoney(snapshot.delta, snapshot.asset)} (${formatPercent(snapshot.percent)})`;
+}
+
 function monthResetStatusText(bingx = {}) {
   if (!bingx?.vstPnlResetAt && !bingx?.livePnlResetAt) {
     return 'Sin reset mensual';
@@ -2119,14 +2326,22 @@ function sourcePrimaryLabel(source) {
 }
 
 function sourcePrimaryClass(source) {
+  const equityBaseline = sourceEquityBaselineSnapshot(source);
+  if (equityBaseline) {
+    return amountClass(equityBaseline.delta);
+  }
   return source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))
     ? 'amount'
     : amountClass(source.total);
 }
 
 function sourceHeroDetail(source) {
+  const equityBaselineText = sourceEquityBaselineText(source);
   if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
-    return `${formatSourceMoney(source.total, source)} resultado demo mes`;
+    return [
+      `${formatSourceMoney(source.total, source)} resultado demo mes`,
+      equityBaselineText
+    ].filter(Boolean).join(' Â· ');
   }
   return `${formatSourceMoney(source.realized, source)} realizado · ${formatSourceMoney(source.floating, source)} flotante`;
 }
@@ -3829,6 +4044,7 @@ function renderReplicaControl(reference, alignment) {
         </div>
       </div>
     </div>
+    ${renderReplicaAudit(appState.replicaAudit)}
   `;
 }
 
@@ -3840,6 +4056,158 @@ function renderReplicaMetric(label, value, detail, className = '') {
       <small>${escapeHtml(detail)}</small>
     </div>
   `;
+}
+
+function renderReplicaAudit(audit = appState.replicaAudit) {
+  if (!audit) {
+    return `
+      <div class="replica-audit">
+        <div class="replica-box-title">
+          <strong>Auditoria operacion por operacion</strong>
+          <span>Cargando</span>
+        </div>
+        <div class="replica-empty">Cargando comparador Hoja / replica teorica / BingX VST...</div>
+      </div>
+    `;
+  }
+
+  if (audit.error) {
+    return `
+      <div class="replica-audit">
+        <div class="replica-box-title">
+          <strong>Auditoria operacion por operacion</strong>
+          <span>No disponible</span>
+        </div>
+        <div class="replica-empty">${escapeHtml(audit.error)}</div>
+      </div>
+    `;
+  }
+
+  const summary = audit.summary || {};
+  const rows = audit.rows || [];
+  const criticalRows = rows.filter((row) => row.severity === 'negative').length;
+  const warningRows = rows.filter((row) => row.severity === 'warn').length;
+  const bingxFees = Number(summary.bingxFees || 0);
+  const bingxFunding = Number(summary.bingxFunding || 0);
+
+  return `
+    <div class="replica-audit">
+      <div class="replica-box-title">
+        <strong>Auditoria operacion por operacion</strong>
+        <span>${escapeHtml(`${rows.length} filas - ${criticalRows} criticas - ${warningRows} revisar`)}</span>
+      </div>
+      <div class="replica-audit-grid">
+        ${renderReplicaMetric('Hoja externa', formatMoney(summary.sheetPnl, 'USDT'), `${summary.sheetRows || 0} filas`, amountClass(summary.sheetPnl))}
+        ${renderReplicaMetric('Replica teorica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
+        ${renderReplicaMetric('BingX bruto', formatMoney(summary.bingxGross, 'VST'), `${summary.vstCloses || 0} cierres`, amountClass(summary.bingxGross))}
+        ${renderReplicaMetric('BingX neto', formatMoney(summary.bingxNet, 'VST'), `${formatMoney(bingxFees + bingxFunding, 'VST')} costes`, amountClass(summary.bingxNet))}
+        ${renderReplicaMetric('Gap neto', formatMoney(summary.netGap, 'VST'), 'BingX neto vs replica teorica', amountClass(summary.netGap))}
+      </div>
+      <div class="replica-issue-strip">
+        ${renderReplicaIssuePills(summary.issueCounts)}
+      </div>
+      <div class="replica-audit-wrap">
+        <table class="replica-audit-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Activo</th>
+              <th>Hoja externa</th>
+              <th>Replica teorica</th>
+              <th>BingX VST</th>
+              <th>Desvio</th>
+              <th>Causa</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.length ? rows.slice(0, 160).map(renderReplicaAuditRow).join('') : '<tr><td colspan="7">Sin filas auditables todavia.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderReplicaIssuePills(issueCounts = {}) {
+  const entries = Object.entries(issueCounts || {})
+    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0));
+  if (!entries.length) {
+    return '<span class="replica-issue-pill positive">Sin incidencias clasificadas</span>';
+  }
+  return entries.map(([label, count]) => `
+    <span class="replica-issue-pill ${escapeAttribute(replicaIssueClass(label))}">
+      ${escapeHtml(label)} ${escapeHtml(String(count))}
+    </span>
+  `).join('');
+}
+
+function replicaIssueClass(label = '') {
+  if (/no ejecutada|stop|signo|fees/i.test(label)) {
+    return 'negative';
+  }
+  if (/desviada|extra|abierta|diferencia/i.test(label)) {
+    return 'warn';
+  }
+  return 'positive';
+}
+
+function renderReplicaAuditRow(row = {}) {
+  const sheet = row.sheet || {};
+  const replica = row.replica || {};
+  const vst = row.vst || {};
+  const diff = row.diff || {};
+  const postLink = vst.postUrl
+    ? `<a href="${escapeAttribute(vst.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    : '';
+  return `
+    <tr class="${escapeAttribute(row.severity || 'neutral')}">
+      <td>
+        <strong>${escapeHtml(String(row.orderNumber || row.sequence || '-'))}</strong>
+        <span>${escapeHtml(formatAuditDate(vst.closingAt || vst.openingAt))}</span>
+      </td>
+      <td>
+        <strong>${escapeHtml(row.symbol || '-')}</strong>
+        <span>${escapeHtml(row.direction || '-')}</span>
+      </td>
+      <td>
+        <strong class="${amountClass(sheet.pnl)}">${escapeHtml(formatOptionalMoney(sheet.pnl, 'USDT'))}</strong>
+        <span>${escapeHtml(`Entrada ${formatPrice(sheet.entry)} / Salida ${formatPrice(sheet.exit)}`)}</span>
+      </td>
+      <td>
+        <strong class="${amountClass(replica.pnl)}">${escapeHtml(formatOptionalMoney(replica.pnl, 'VST'))}</strong>
+        <span>${escapeHtml(`${formatOptionalMoney(replica.notional, 'VST')} margen`)}</span>
+      </td>
+      <td>
+        <strong class="${amountClass(vst.netPnl)}">${escapeHtml(formatOptionalMoney(vst.netPnl, 'VST'))}</strong>
+        <span>${escapeHtml(`Bruto ${formatOptionalMoney(vst.grossPnl, 'VST')} / Coste ${formatOptionalMoney(vst.fees, 'VST')}`)}</span>
+      </td>
+      <td>
+        <strong class="${amountClass(diff.net)}">${escapeHtml(formatOptionalMoney(diff.net, 'VST'))}</strong>
+        <span>${escapeHtml(`E ${formatOptionalPercent(diff.entryPercent)} / S ${formatOptionalPercent(diff.closePercent)}`)}</span>
+      </td>
+      <td>
+        <strong>${escapeHtml(row.cause || '-')}</strong>
+        <span>${escapeHtml(row.detail || '')}</span>
+        ${postLink}
+      </td>
+    </tr>
+  `;
+}
+
+function formatAuditDate(value) {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return date.toLocaleString('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function buildReplicaControlAnalysis(reference, alignment) {

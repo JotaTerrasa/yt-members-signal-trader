@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=39">
+    <link rel="stylesheet" href="/styles.css?v=42">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-    <script src="/app.js?v=73" defer></script>
+    <script src="/app.js?v=76" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -490,6 +490,14 @@
               <div class="cost-control-symbols" id="cost-control-symbols"></div>
               <div class="cost-control-shadow" id="cost-control-shadow"></div>
               <div class="cost-control-actions" id="cost-control-actions"></div>
+            </div>
+
+            <div class="protected-close-panel muted" id="protected-close-panel">
+              <div class="trade-section-header">
+                <h3>Cierres protegidos</h3>
+                <span id="protected-close-status">Sin cierres pendientes</span>
+              </div>
+              <div class="protected-close-list" id="protected-close-list"></div>
             </div>
 
             <div class="pnl-hero" aria-label="Resumen principal de PnL">

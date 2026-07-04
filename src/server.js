@@ -92,6 +92,7 @@ const futuresTrader = new FuturesTrader({
 const clients = new Set();
 let pnlCache = null;
 let pnlSourcesCache = null;
+let replicaAuditCache = null;
 let pnlLastGood = null;
 let pnlSourcesLastGood = null;
 let pnlBackoffUntil = 0;
@@ -118,6 +119,7 @@ const liveProtectionGraceUntil = new Map();
 const liveOrphanGraceUntil = new Map();
 const pendingStopLossRetries = new Map();
 const pendingCloseGuardRetries = new Map();
+const closeGuardTelegramNotifications = new Set();
 
 const state = {
   browserOpen: false,
@@ -917,6 +919,16 @@ function closeGuardRetryKeyFromEvent(event = {}) {
   ].join('|');
 }
 
+function closeGuardTelegramKeyFromEvent(event = {}) {
+  return closeGuardRetryKeyFromEvent(event) || [
+    String(event.executionMode || '').toLowerCase(),
+    event.postId || '',
+    normalizePositionSymbol(event.signal?.symbol || ''),
+    event.signal?.closePrice || '',
+    event.signal?.closePercent || event.closePercent || 100
+  ].join('|');
+}
+
 function hasOpenPositionForStopLossRetry(item) {
   const symbol = normalizePositionSymbol(item.signal.symbol);
   const direction = String(item.signal.direction || '').toUpperCase();
@@ -1467,6 +1479,16 @@ const server = createServer(async (request, response) => {
       const portfolio = configStore.getPortfolio();
       const reference = await loadReferenceLedger({ month, portfolioUrl: portfolioSourceForReference(portfolio) });
       return sendJson(response, { ok: true, reference });
+    }
+
+    if (requestUrl.pathname === '/api/replica-audit' && request.method === 'GET') {
+      const month = requestUrl.searchParams.get('month') || currentMonthKey();
+      if (replicaAuditCache?.month === month && Date.now() - replicaAuditCache.at < PNL_CACHE_TTL_MS) {
+        return sendJson(response, { ok: true, audit: replicaAuditCache.audit, cached: true });
+      }
+      const audit = await buildReplicaAudit({ month });
+      replicaAuditCache = { month, at: Date.now(), audit };
+      return sendJson(response, { ok: true, audit });
     }
 
     if (requestUrl.pathname === '/api/portfolio' && request.method === 'GET') {
@@ -2879,6 +2901,9 @@ function notifyTradeCriticalEvent(event = {}) {
   if (!isTelegramTradeEvent(event)) {
     return;
   }
+  if (!shouldNotifyTradeTelegram(event)) {
+    return;
+  }
 
   const title = telegramTradeTitle(event);
   const details = [
@@ -2902,6 +2927,40 @@ function notifyTradeCriticalEvent(event = {}) {
     .catch((error) => {
       pushLog({ level: 'error', message: `Telegram critical trade: ${error.message}`, at: new Date().toISOString() });
     });
+}
+
+function shouldNotifyTradeTelegram(event = {}) {
+  const status = String(event.status || '');
+  if (isCloseGuardRetryStatus(status)) {
+    const key = closeGuardTelegramKeyFromEvent(event);
+    if (!key) {
+      return true;
+    }
+    if (closeGuardTelegramNotifications.has(key)) {
+      return false;
+    }
+    closeGuardTelegramNotifications.add(key);
+    return true;
+  }
+
+  if (isCloseGuardTerminalStatus(status) || isCloseExecutionStatusForRetry(status)) {
+    const key = closeGuardTelegramKeyFromEvent(event);
+    if (key) {
+      closeGuardTelegramNotifications.delete(key);
+    }
+  }
+
+  return true;
+}
+
+function isCloseGuardRetryStatus(status = '') {
+  const value = String(status || '');
+  return value === 'demo_close_guarded' || value === 'live_close_guarded';
+}
+
+function isCloseGuardTerminalStatus(status = '') {
+  const value = String(status || '');
+  return value === 'demo_close_guard_expired' || value === 'live_close_guard_expired';
 }
 
 function costGuardAlertLine(costGuard = {}) {
@@ -2949,6 +3008,9 @@ function telegramTradeTitle(event = {}) {
   }
   if (status.includes('close_all')) {
     return `Cierre total ${suffix}`;
+  }
+  if (status.includes('close_guard_expired')) {
+    return `Cierre ${suffix} protegido expirado`;
   }
   if (status.includes('close_guard')) {
     return `Cierre ${suffix} protegido`;
@@ -3288,7 +3350,8 @@ function handleEvents(response) {
 }
 
 function broadcast(event, payload) {
-  const message = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  const data = event === 'state' ? currentState() : payload;
+  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of clients) {
     client.write(message);
   }
@@ -3521,6 +3584,422 @@ function emptyPnlSource(key, label, modeLabel, asset, error = '') {
     records: 0,
     winRate: null
   };
+}
+
+async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
+  const portfolio = configStore.getPortfolio();
+  const reference = await loadReferenceLedger({ month, portfolioUrl: portfolioSourceForReference(portfolio) });
+  const config = configStore.getBingX({ includeSecrets: true });
+  const publicConfig = configStore.getBingX();
+  const sheetRows = (reference?.positions || [])
+    .map((position, index) => ({ ...position, _auditOrder: index }))
+    .filter((position) => monthKeyFromIso(position.closedAt || position.openedAt) === month)
+    .sort(compareAuditSheetRows);
+  const monthWindow = auditMonthWindow({ month, resetAt: config.vstPnlResetAt });
+  const incomeRows = await demoIncomeRows({ config, monthWindow });
+  const events = tradeEventStore.list()
+    .filter(Boolean)
+    .filter((event) => auditEventInWindow(event, monthWindow))
+    .filter((event) => auditEventIsDemo(event));
+  const rows = buildReplicaAuditRows({
+    sheetRows,
+    incomeRows,
+    events,
+    defaultNotional: publicConfig.defaultNotionalUSDT || publicConfig.monthlyOrderNotionalUSDT || 0
+  });
+  const summary = summarizeReplicaAudit({
+    rows,
+    sheetRows,
+    incomeRows,
+    events,
+    reference,
+    config: publicConfig,
+    monthWindow
+  });
+
+  return {
+    month,
+    generatedAt: new Date().toISOString(),
+    source: {
+      label: reference?.sheetName || reference?.source?.label || formatMonthLabel(month),
+      url: reference?.spreadsheetUrl || reference?.source?.spreadsheetUrl || portfolioSourceForReference(portfolio),
+      startingCapital: reference?.startingCapital ?? null,
+      equity: reference?.equity ?? null
+    },
+    window: {
+      startAt: new Date(monthWindow.startTime).toISOString(),
+      endAt: new Date(monthWindow.endTime).toISOString(),
+      resetAt: config.vstPnlResetAt || null
+    },
+    summary,
+    rows
+  };
+}
+
+async function demoIncomeRows({ config, monthWindow }) {
+  if (!config.apiKey || !config.apiSecret) {
+    return [];
+  }
+  const client = futuresTrader.client({ ...config, mode: 'demo' });
+  const response = await client.getIncome({
+    startTime: monthWindow.startTime,
+    endTime: monthWindow.endTime,
+    limit: 1000
+  });
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], defaultNotional = 0 }) {
+  const sheetBySymbol = groupAuditRowsBySymbol(sheetRows, auditPositionSymbol);
+  const openingsBySymbol = groupAuditRowsBySymbol(auditOpeningEvents(events), (event) => auditEventSymbol(event));
+  const closeEventsBySymbol = groupAuditRowsBySymbol(auditCloseEvents(events), (event) => auditEventSymbol(event));
+  const realizedBySymbol = groupAuditRowsBySymbol(auditIncomeByType(incomeRows, 'REALIZED_PNL'), (record) => auditIncomeSymbol(record));
+  const openingFeesBySymbol = groupAuditRowsBySymbol(auditFeeRows(incomeRows, 'opening'), (record) => auditIncomeSymbol(record));
+  const closingFeesBySymbol = groupAuditRowsBySymbol(auditFeeRows(incomeRows, 'closing'), (record) => auditIncomeSymbol(record));
+  const fundingBySymbol = auditFundingBySymbol(incomeRows);
+  const symbols = new Set([
+    ...sheetBySymbol.keys(),
+    ...openingsBySymbol.keys(),
+    ...realizedBySymbol.keys()
+  ].filter(Boolean));
+  const rows = [];
+
+  for (const symbol of [...symbols].sort()) {
+    const sheet = sheetBySymbol.get(symbol) || [];
+    const openings = openingsBySymbol.get(symbol) || [];
+    const closes = realizedBySymbol.get(symbol) || [];
+    const closeEvents = closeEventsBySymbol.get(symbol) || [];
+    const openingFees = openingFeesBySymbol.get(symbol) || [];
+    const closingFees = closingFeesBySymbol.get(symbol) || [];
+    const max = Math.max(sheet.length, openings.length, closes.length);
+    const fundingShare = closes.length ? Number(fundingBySymbol.get(symbol) || 0) / closes.length : 0;
+
+    for (let index = 0; index < max; index += 1) {
+      rows.push(replicaAuditRow({
+        symbol,
+        sequence: index + 1,
+        sheet: sheet[index] || null,
+        opening: openings[index] || null,
+        realized: closes[index] || null,
+        closeEvent: closeEvents[index] || null,
+        openingFee: openingFees[index] || null,
+        closingFee: closingFees[index] || null,
+        fundingShare,
+        defaultNotional
+      }));
+    }
+  }
+
+  return rows.sort((left, right) => (
+    Number(left.orderNumber || 9999) - Number(right.orderNumber || 9999)
+    || left.symbol.localeCompare(right.symbol)
+    || left.sequence - right.sequence
+  ));
+}
+
+function replicaAuditRow({
+  symbol,
+  sequence,
+  sheet,
+  opening,
+  realized,
+  closeEvent,
+  openingFee,
+  closingFee,
+  fundingShare,
+  defaultNotional
+}) {
+  const sheetPnl = auditNumber(sheet?.realizedPnl ?? sheet?.paperPnl, null);
+  const sheetNotional = auditNumber(sheet?.notional, 0);
+  const entryPrice = auditOpeningPrice(opening);
+  const closePrice = auditClosePrice(closeEvent);
+  const notional = auditNumber(opening?.sizing?.notional, 0) || auditNumber(opening?.notional, 0) || auditNumber(defaultNotional, 0);
+  const scaleRatio = sheetNotional > 0 && notional > 0 ? notional / sheetNotional : 0;
+  const replicaPnl = sheetPnl == null ? null : roundMoney(sheetPnl * scaleRatio);
+  const grossPnl = realized ? roundMoney(Number(realized.income || 0)) : null;
+  const fees = roundMoney(Number(openingFee?.income || 0) + Number(closingFee?.income || 0) + Number(fundingShare || 0));
+  const netPnl = grossPnl == null ? null : roundMoney(grossPnl + fees);
+  const entryDiffPercent = auditPercentDiff(entryPrice, sheet?.entryPrice);
+  const closeDiffPercent = auditPercentDiff(closePrice, sheet?.closePrice || sheet?.currentPrice);
+  const diffGross = grossPnl == null || replicaPnl == null ? null : roundMoney(grossPnl - replicaPnl);
+  const diffNet = netPnl == null || replicaPnl == null ? null : roundMoney(netPnl - replicaPnl);
+  const status = auditRowStatus({
+    sheet,
+    opening,
+    realized,
+    closeEvent,
+    replicaPnl,
+    grossPnl,
+    netPnl,
+    fees,
+    entryDiffPercent,
+    closeDiffPercent
+  });
+
+  return {
+    id: [symbol, sequence, sheet?.orderNumber || 'extra'].join('|'),
+    orderNumber: sheet?.orderNumber || null,
+    symbol,
+    sequence,
+    direction: sheet?.direction || opening?.signal?.direction || closeEvent?.signal?.direction || '',
+    sheet: sheet ? {
+      entry: auditRound(sheet.entryPrice),
+      exit: auditRound(sheet.closePrice || sheet.currentPrice),
+      pnl: auditRound(sheetPnl),
+      notional: auditRound(sheetNotional),
+      outcome: sheet.outcome || ''
+    } : null,
+    replica: {
+      notional: auditRound(notional),
+      scaleRatio: auditRound(scaleRatio),
+      pnl: auditRound(replicaPnl)
+    },
+    vst: {
+      entry: auditRound(entryPrice),
+      exit: auditRound(closePrice),
+      grossPnl: auditRound(grossPnl),
+      fees: auditRound(fees),
+      netPnl: auditRound(netPnl),
+      openingAt: opening?.at || null,
+      closingAt: realized ? new Date(Number(realized.time || 0)).toISOString() : closeEvent?.at || null,
+      closeStatus: closeEvent?.status || '',
+      closeReason: closeEvent?.reason || '',
+      postUrl: opening?.postUrl || closeEvent?.postUrl || ''
+    },
+    diff: {
+      gross: auditRound(diffGross),
+      net: auditRound(diffNet),
+      entryPercent: auditRound(entryDiffPercent),
+      closePercent: auditRound(closeDiffPercent)
+    },
+    cause: status.cause,
+    detail: status.detail,
+    severity: status.severity
+  };
+}
+
+function auditRowStatus({
+  sheet,
+  opening,
+  realized,
+  closeEvent,
+  replicaPnl,
+  grossPnl,
+  netPnl,
+  fees,
+  entryDiffPercent,
+  closeDiffPercent
+}) {
+  if (sheet && !opening) {
+    return { cause: 'No ejecutada en VST', detail: 'Existe en la hoja, pero no hay apertura demo emparejada.', severity: 'negative' };
+  }
+  if (!sheet && opening) {
+    return { cause: 'Extra en VST', detail: 'Hay apertura demo que no aparece en la hoja externa.', severity: 'warn' };
+  }
+  if (opening && !realized) {
+    return { cause: 'Abierta o sin cierre', detail: 'La señal entró, pero no hay cierre realizado emparejado en BingX.', severity: 'warn' };
+  }
+  if (String(closeEvent?.status || '') === 'exchange_stop_closed') {
+    return { cause: 'Stop antes del cierre', detail: 'BingX cerró por stop antes de poder replicar la salida de la hoja.', severity: 'negative' };
+  }
+  if (replicaPnl != null && netPnl != null && Math.sign(replicaPnl) !== Math.sign(netPnl) && Math.abs(replicaPnl) > 0.01 && Math.abs(netPnl) > 0.01) {
+    return { cause: 'Signo distinto', detail: 'La hoja gana/pierde en sentido contrario al neto VST.', severity: 'negative' };
+  }
+  if (grossPnl != null && Math.abs(Number(fees || 0)) > Math.max(0.5, Math.abs(grossPnl) * 0.6)) {
+    return { cause: 'Fees dominan', detail: 'El coste de abrir/cerrar pesa demasiado frente al bruto de la operación.', severity: 'negative' };
+  }
+  if (entryDiffPercent != null && entryDiffPercent > 0.15) {
+    return { cause: 'Entrada desviada', detail: 'La entrada real queda lejos de la entrada de la hoja.', severity: 'warn' };
+  }
+  if (closeDiffPercent != null && closeDiffPercent > 0.15) {
+    return { cause: 'Salida desviada', detail: 'El cierre real queda lejos del cierre de la hoja.', severity: 'warn' };
+  }
+  if (replicaPnl != null && netPnl != null && Math.abs(netPnl - replicaPnl) > Math.max(1, Math.abs(replicaPnl) * 0.25)) {
+    return { cause: 'Diferencia de ejecución', detail: 'La diferencia neta supera el margen normal de réplica.', severity: 'warn' };
+  }
+  return { cause: 'Alineada', detail: 'La operación está razonablemente cerca de la réplica teórica.', severity: 'positive' };
+}
+
+function summarizeReplicaAudit({ rows, sheetRows, incomeRows, events, reference, config, monthWindow }) {
+  const sheetPnl = roundMoney(sheetRows.reduce((sum, row) => sum + Number(row.realizedPnl ?? row.paperPnl ?? 0), 0));
+  const replicaPnl = roundMoney(rows.reduce((sum, row) => sum + Number(row.replica?.pnl || 0), 0));
+  const bingxGross = roundMoney(rows.reduce((sum, row) => sum + Number(row.vst?.grossPnl || 0), 0));
+  const bingxFees = roundMoney(auditIncomeByType(incomeRows, 'TRADING_FEE').reduce((sum, row) => sum + Number(row.income || 0), 0));
+  const bingxFunding = roundMoney(auditIncomeByType(incomeRows, 'FUNDING_FEE').reduce((sum, row) => sum + Number(row.income || 0), 0));
+  const bingxNet = roundMoney(bingxGross + bingxFees + bingxFunding);
+  const openings = auditOpeningEvents(events);
+  const closes = auditIncomeByType(incomeRows, 'REALIZED_PNL');
+  const issueCounts = rows.reduce((totals, row) => {
+    totals[row.cause] = (totals[row.cause] || 0) + 1;
+    return totals;
+  }, {});
+  const worstRows = [...rows]
+    .filter((row) => Number.isFinite(Number(row.diff?.net)))
+    .sort((left, right) => Math.abs(Number(right.diff.net || 0)) - Math.abs(Number(left.diff.net || 0)))
+    .slice(0, 8)
+    .map((row) => row.id);
+
+  return {
+    sheetRows: sheetRows.length,
+    vstOpenings: openings.length,
+    vstCloses: closes.length,
+    incomeRecords: incomeRows.length,
+    eventRecords: events.length,
+    sheetPnl,
+    replicaPnl,
+    bingxGross,
+    bingxFees,
+    bingxFunding,
+    bingxNet,
+    grossGap: roundMoney(bingxGross - replicaPnl),
+    netGap: roundMoney(bingxNet - replicaPnl),
+    monthlyOrderPercent: config.monthlyOrderPercent || null,
+    monthlyInitialCapitalVST: config.monthlyInitialCapitalVST || config.vstBaseCapital || null,
+    defaultNotionalVST: config.defaultNotionalUSDT || null,
+    startingCapital: reference?.startingCapital ?? null,
+    equity: reference?.equity ?? null,
+    issueCounts,
+    worstRows,
+    resetApplied: Number.isFinite(monthWindow.resetAt) && monthWindow.resetAt > 0
+  };
+}
+
+function auditMonthWindow({ month, resetAt = null }) {
+  const [year, monthNumber] = String(month || currentMonthKey()).split('-').map(Number);
+  const start = new Date(year, (monthNumber || 1) - 1, 1);
+  const next = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+  const now = Date.now();
+  const resetTime = Date.parse(resetAt || 0);
+  const sameResetMonth = Number.isFinite(resetTime) && currentMonthKeyForDate(new Date(resetTime)) === month;
+  const startTime = sameResetMonth ? Math.max(start.getTime(), resetTime) : start.getTime();
+  return {
+    startTime,
+    endTime: Math.min(next.getTime() - 1, now),
+    resetAt: sameResetMonth ? resetTime : 0
+  };
+}
+
+function auditEventInWindow(event = {}, window) {
+  event = event || {};
+  const timestamp = Date.parse(event.at || 0);
+  return Number.isFinite(timestamp) && timestamp >= window.startTime && timestamp <= window.endTime;
+}
+
+function auditEventIsDemo(event = {}) {
+  event = event || {};
+  const status = String(event.status || '').toLowerCase();
+  const mode = String(event.executionMode || '').toLowerCase();
+  const source = String(event.exchangePosition?.source || event.position?.source || '').toLowerCase();
+  return mode === 'demo' || status.startsWith('demo_') || source === 'demo';
+}
+
+function auditOpeningEvents(events = []) {
+  return events
+    .filter((event) => String(event.status || '') === 'demo_order_sent')
+    .sort(compareAuditEventTime);
+}
+
+function auditCloseEvents(events = []) {
+  return events
+    .filter((event) => (
+      String(event.status || '') === 'exchange_signal_closed'
+      || String(event.status || '') === 'exchange_stop_closed'
+      || String(event.status || '') === 'exchange_position_closed'
+    ))
+    .sort(compareAuditEventTime);
+}
+
+function auditIncomeByType(rows = [], type = '') {
+  const target = String(type || '').toUpperCase();
+  return rows
+    .filter((row) => String(row.incomeType || '').toUpperCase() === target)
+    .sort((left, right) => Number(left.time || 0) - Number(right.time || 0));
+}
+
+function auditFeeRows(rows = [], phase = '') {
+  const pattern = new RegExp(phase, 'i');
+  return auditIncomeByType(rows, 'TRADING_FEE')
+    .filter((row) => pattern.test(String(row.info || '')));
+}
+
+function auditFundingBySymbol(rows = []) {
+  const totals = new Map();
+  for (const row of auditIncomeByType(rows, 'FUNDING_FEE')) {
+    const symbol = auditIncomeSymbol(row);
+    totals.set(symbol, roundMoney((totals.get(symbol) || 0) + Number(row.income || 0)));
+  }
+  return totals;
+}
+
+function groupAuditRowsBySymbol(rows = [], symbolFactory) {
+  const groups = new Map();
+  for (const row of rows) {
+    const symbol = symbolFactory(row);
+    if (!symbol) {
+      continue;
+    }
+    if (!groups.has(symbol)) {
+      groups.set(symbol, []);
+    }
+    groups.get(symbol).push(row);
+  }
+  return groups;
+}
+
+function compareAuditSheetRows(left, right) {
+  return Number(left.orderNumber || left._auditOrder || 0) - Number(right.orderNumber || right._auditOrder || 0);
+}
+
+function compareAuditEventTime(left, right) {
+  return Date.parse(left.at || 0) - Date.parse(right.at || 0);
+}
+
+function auditPositionSymbol(position = {}) {
+  position = position || {};
+  return normalizePositionSymbol(position.symbol || '');
+}
+
+function auditEventSymbol(event = {}) {
+  event = event || {};
+  return normalizePositionSymbol(event.signal?.symbol || event.order?.symbol || event.exchangePosition?.symbol || '');
+}
+
+function auditIncomeSymbol(record = {}) {
+  record = record || {};
+  return normalizePositionSymbol(record.symbol || '');
+}
+
+function auditOpeningPrice(event = {}) {
+  event = event || {};
+  return auditNumber(event.entryPrice ?? event.response?.data?.order?.avgPrice ?? event.marketPrice, null);
+}
+
+function auditClosePrice(event = {}) {
+  event = event || {};
+  return auditNumber(event.exchangePosition?.closePrice ?? event.exchangePosition?.currentPrice ?? event.closePrice, null);
+}
+
+function auditPercentDiff(actual, expected) {
+  const left = Number(actual);
+  const right = Number(expected);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || right <= 0) {
+    return null;
+  }
+  return Math.abs(left - right) / right * 100;
+}
+
+function auditNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function auditRound(value) {
+  return value == null || !Number.isFinite(Number(value)) ? null : roundMoney(value);
+}
+
+function formatMonthLabel(month) {
+  const [year, value] = String(month || '').split('-');
+  return value && year ? `${value}/${year}` : String(month || '');
 }
 
 function summarizePnlRows(rows = []) {
