@@ -486,7 +486,7 @@ export class FuturesTrader {
     return event;
   }
 
-  async executeCloseSignalWithConfig(signal, { post, phase } = {}, config) {
+  async executeCloseSignalWithConfig(signal, { post, phase, forceCloseAfterGuard = false, closeGuardExpiredReason = '' } = {}, config) {
     const baseEvent = {
       at: new Date().toISOString(),
       signal,
@@ -512,15 +512,18 @@ export class FuturesTrader {
       ? await this.paperStore.closeBySymbol({ symbol: signal.symbol, price: closePrice, percent: closePercent, reason: 'youtube_close', post, phase })
       : [];
     const exchangeClose = config.mode !== 'test'
-      ? await this.closeExchangePositions({ client, marketClient, config, signal, closePercent })
+      ? await this.closeExchangePositions({ client, marketClient, config, signal, closePercent, skipCloseGuard: forceCloseAfterGuard })
       : null;
 
     const event = this.emitTrade({
       ...baseEvent,
       status: closeStatus(config, exchangeClose),
-      reason: exchangeClose?.skipped?.[0]?.reason || null,
+      reason: forceCloseAfterGuard
+        ? `close_guard_expired_force_market${closeGuardExpiredReason ? `:${closeGuardExpiredReason}` : ''}`
+        : exchangeClose?.skipped?.[0]?.reason || null,
       closePrice,
       closePercent,
+      closeGuardFallback: Boolean(forceCloseAfterGuard),
       closedPaperPositions,
       exchangeClose
     });
@@ -1052,7 +1055,7 @@ export class FuturesTrader {
     });
   }
 
-  async closeExchangePositions({ client, marketClient = null, config = null, signal, closePercent = 100 }) {
+  async closeExchangePositions({ client, marketClient = null, config = null, signal, closePercent = 100, skipCloseGuard = false }) {
     const response = await client.getPositions(signal.symbol);
     const positions = (Array.isArray(response.data) ? response.data : [])
       .filter((position) => position.symbol === signal.symbol)
@@ -1068,16 +1071,18 @@ export class FuturesTrader {
     const skipped = [];
 
     for (const position of positions) {
-      const guard = await closeGuardForPosition({
-        position,
-        signal,
-        percent,
-        marketClient,
-        fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
-      });
-      if (!guard.ok) {
-        skipped.push({ position, reason: guard.reason, guard });
-        continue;
+      if (!skipCloseGuard) {
+        const guard = await closeGuardForPosition({
+          position,
+          signal,
+          percent,
+          marketClient,
+          fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
+        });
+        if (!guard.ok) {
+          skipped.push({ position, reason: guard.reason, guard });
+          continue;
+        }
       }
 
       if (percent >= 99.9 && position.positionId) {

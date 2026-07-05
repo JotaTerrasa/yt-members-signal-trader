@@ -599,7 +599,7 @@ function scheduleCloseGuardRetryTimer(item, delayMs = CLOSE_GUARD_RETRY_INTERVAL
   const delay = Math.max(1000, Number(delayMs || CLOSE_GUARD_RETRY_INTERVAL_MS));
   item.nextRunAt = new Date(Date.now() + delay).toISOString();
   item.timer = setTimeout(() => {
-    runCloseGuardRetry(item.key).catch((error) => {
+    runCloseGuardRetry(item.key).catch(async (error) => {
       const current = pendingCloseGuardRetries.get(item.key);
       if (!current) {
         return;
@@ -611,7 +611,7 @@ function scheduleCloseGuardRetryTimer(item, delayMs = CLOSE_GUARD_RETRY_INTERVAL
         message: `Reintento cierre protegido ${current.signal.symbol}: ${error.message}`,
         at: new Date().toISOString()
       });
-      rescheduleOrExpireCloseGuardRetry(current, `retry_error:${error.message}`);
+      await rescheduleOrExpireCloseGuardRetry(current, `retry_error:${error.message}`);
     });
   }, delay);
   item.timer.unref();
@@ -697,7 +697,7 @@ async function runCloseGuardRetry(key) {
   item.timer = null;
 
   if (closeGuardRetryExpired(item)) {
-    expireCloseGuardRetry(item, item.lastReason || 'retry_expired');
+    await executeExpiredCloseGuardFallback(item, item.lastReason || 'retry_expired');
     return;
   }
 
@@ -740,7 +740,7 @@ async function runCloseGuardRetry(key) {
 
   if (shouldQueueCloseGuardRetry(result)) {
     item.lastReason = closeGuardEventReason(result) || item.lastReason;
-    rescheduleOrExpireCloseGuardRetry(item, item.lastReason);
+    await rescheduleOrExpireCloseGuardRetry(item, item.lastReason);
     return;
   }
 
@@ -793,13 +793,13 @@ function rescheduleOrExpireStopLossRetry(item, reason) {
   broadcast('state', state);
 }
 
-function rescheduleOrExpireCloseGuardRetry(item, reason) {
+async function rescheduleOrExpireCloseGuardRetry(item, reason) {
   if (!item || !pendingCloseGuardRetries.has(item.key)) {
     return;
   }
   item.lastReason = reason || item.lastReason;
   if (closeGuardRetryExpired(item)) {
-    expireCloseGuardRetry(item, item.lastReason || 'retry_expired');
+    await executeExpiredCloseGuardFallback(item, item.lastReason || 'retry_expired');
     return;
   }
   scheduleCloseGuardRetryTimer(item, CLOSE_GUARD_RETRY_INTERVAL_MS);
@@ -831,6 +831,58 @@ function expireStopLossRetry(item, reason = 'retry_expired') {
   };
   recordTradeEvent(event);
   notifyTradeCriticalEvent(event);
+}
+
+async function executeExpiredCloseGuardFallback(item, reason = 'retry_expired') {
+  if (!item || !pendingCloseGuardRetries.has(item.key)) {
+    return;
+  }
+
+  const baseConfig = configStore.getBingX({ includeSecrets: true });
+  if (!baseConfig.enabled) {
+    expireCloseGuardRetry(item, 'bingx_disabled');
+    return;
+  }
+  if (!configAllowsRetryMode(baseConfig.mode, item.executionMode)) {
+    expireCloseGuardRetry(item, `mode_changed:${baseConfig.mode}`);
+    return;
+  }
+  if (item.executionMode === 'live' && !baseConfig.liveConfirmed) {
+    expireCloseGuardRetry(item, 'live_not_confirmed');
+    return;
+  }
+
+  const config = {
+    ...baseConfig,
+    mode: item.executionMode
+  };
+  const finalReason = reason || item.lastReason || 'retry_expired';
+  item.lastReason = finalReason;
+  item.lastCheckedAt = new Date().toISOString();
+
+  pushLog({
+    level: 'warn',
+    message: `Cierre protegido expirado ${item.executionMode}: cerrando ${item.signal.symbol} a mercado.`,
+    at: new Date().toISOString()
+  });
+
+  try {
+    const result = await futuresTrader.executeCloseSignalWithConfig(item.signal, {
+      post: item.post,
+      phase: 'close_guard_expired_fallback',
+      forceCloseAfterGuard: true,
+      closeGuardExpiredReason: finalReason
+    }, config);
+
+    if (isCloseExecutionStatusForRetry(result?.status)) {
+      clearCloseGuardRetry(item.key, 'expired_force_closed');
+      return;
+    }
+
+    expireCloseGuardRetry(item, result?.reason || result?.status || finalReason);
+  } catch (error) {
+    expireCloseGuardRetry(item, `fallback_error:${error.message}`);
+  }
 }
 
 function expireCloseGuardRetry(item, reason = 'retry_expired') {
