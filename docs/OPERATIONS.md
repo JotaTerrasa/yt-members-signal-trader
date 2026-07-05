@@ -173,6 +173,7 @@ Cierres:
 - Cierres parciales respetan el porcentaje detectado.
 - En cierres completos, la app intenta cancelar después los SL/TP protectores asociados a esa posición.
 - Si un cierre queda fuera de la zona válida por slippage o neto negativo, entra en `Cierres protegidos` y se reintenta hasta ejecutarse o caducar.
+- Al caducar, intenta un cierre final a mercado omitiendo la guarda de slippage/neto negativo, siempre que BingX siga activo, el modo no haya cambiado y `live` siga confirmado.
 - El panel `Cierres protegidos` muestra símbolo, modo, porcentaje, precio de señal, mercado, slippage, límite, próximo intento, caducidad y enlace al post si existe.
 
 Notas:

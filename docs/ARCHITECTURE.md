@@ -330,7 +330,7 @@ Los eventos `state` se envían como snapshot completo de `currentState()`. La UI
 7. UI recibe eventos por SSE.
 8. PnL se recalcula al actualizar.
 
-Si un cierre queda protegido por slippage o neto negativo, `server.js` lo mantiene en la cola de reintentos y lo expone en `state.closeGuardRetryQueue` hasta que se ejecuta, se resuelve o caduca.
+Si un cierre queda protegido por slippage o neto negativo, `server.js` lo mantiene en la cola de reintentos y lo expone en `state.closeGuardRetryQueue`. Mientras no caduque, reintenta con la guarda activa. Al caducar, valida que BingX siga activo, que el modo no haya cambiado y que `live` siga confirmado; si esas condiciones se cumplen, ordena a `futuresTrader.js` un cierre final a mercado con `skipCloseGuard`.
 
 Para Telegram Web, el servidor filtra mensajes sin señales para reducir ruido.
 

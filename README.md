@@ -36,7 +36,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Mantiene anti-duplicados para evitar repetir señales ya procesadas.
 - Reconcilia lo que la app cree que existe con lo que BingX devuelve.
 - Muestra PnL real, hoja de Google de referencia, ROI mensual, historial auditable, línea de vida de señales e incidencias.
-- Destaca equity frente al capital inicial y muestra la cola de cierres protegidos cuando un cierre espera una zona válida.
+- Destaca equity frente al capital inicial y muestra la cola de cierres protegidos cuando un cierre espera una zona válida o el fallback final a mercado.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
 - Genera backups redactados sin credenciales.
 
@@ -269,6 +269,7 @@ Durante la sesión:
 - Revisa `Historial de señales` para auditar la señal original, orden enviada, respuesta de BingX, PnL y motivo.
 - Revisa `Rendimiento` para comparar futuros reales y Google Sheet.
 - Revisa `Cierres protegidos` si un cierre queda retenido por slippage o neto negativo; no abras nuevas posiciones para probarlo.
+- Si un cierre protegido caduca, la app intenta un cierre final a mercado omitiendo la guarda solo si el modo sigue vigente y `live` sigue confirmado.
 - Revisa `Estudio estratégico` para conclusiones estadísticas, no para ejecutar decisiones autónomas todavía.
 
 ## Seguridad y límites
@@ -316,7 +317,7 @@ Incluye:
 - ROI mensual.
 - Equity frente al capital inicial en Demo VST y live real.
 - Simulador de capital inicial para Google Sheet.
-- Cierres protegidos pendientes, con precio de señal, mercado, slippage, límite, próximo intento y caducidad.
+- Cierres protegidos pendientes, con precio de señal, mercado, slippage, límite, próximo intento, caducidad y fallback final a mercado.
 - Guardia nocturna.
 - Incidencias 24h.
 - Preparado para live.
