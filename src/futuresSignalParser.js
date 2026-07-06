@@ -29,8 +29,8 @@ const baseSymbolAliases = new Map([
   ['DOGE', 'DOGE'],
   ['BNB', 'BNB']
 ]);
-const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
-const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CERRAR|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
+const closeWordsPattern = /\b(CIERRE|CIERRES|CIERRO|CUERRE|CUERRES|CERRAR|CERRAD|CERRADLO|CERRADLA|CERRADLOS|CERRADLAS|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
+const closeLineStartPattern = /^\W*(CIERRE|CIERRES|CIERRO|CUERRE|CUERRES|CERRAR|CERRAD|CERRADLO|CERRADLA|CERRADLOS|CERRADLAS|CERRAMOS|CERRADO|CERRANDO|CLOSED?|CLOSE|SALIR|SALIMOS|FUERA)\b/i;
 const takeProfitLineStartPattern = /^\W*(TPS?|TAKE\s*PROFITS?|TAKE\s*PROFIT|OBJETIVOS?|TARGETS?)\b/i;
 const listPrefixPattern = /^\W*(?:(?:PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SEPTIMO|OCTAVO|NOVENO|DECIMO|FIRST|SECOND|THIRD|\d+)\s*[:.)-]\s*)/i;
 const symbolPricePattern = /\b([A-Z]{2,12})\.?(?:\s*[-/]\s*USDT|\s*USDT)?\s+(?:(?:A|AL|EN|TO|AT|@|=|->)\s*)?(?:BINGX\s*)?(\d+(?:[.,]\d+)?\s*[kK]?)\b/gi;
@@ -162,6 +162,8 @@ function parseCloseAllSignals(raw) {
     /\bCERRAR\s+TODO(?:S|AS)?\b/i,
     /\bCIERRE\s+(?:TOTAL\s+)?TODO(?:S|AS)?\b/i,
     /\bCIERRE\s+TOTAL\s+DE\s+TODO(?:S|AS)?\b/i,
+    /\bCUERRE\s+(?:TOTAL\s+)?TODO(?:S|AS)?\b/i,
+    /\bCUERRE\s+TOTAL\s+DE\s+TODO(?:S|AS)?\b/i,
     /\bCERRAMOS\s+TODO(?:S|AS)?\b/i,
     /\bCLOSE\s+ALL\b/i,
     /\bCLOSE\s+EVERYTHING\b/i,
