@@ -209,6 +209,8 @@ SOL 92.4
 
 Cierra el porcentaje indicado. Si dice `MITAD`, `HALF` o `PARCIAL` sin porcentaje, usa 50%.
 
+El encabezado de cierre admite variantes como `CIERRO`, `CERRAR`, `CERRAMOS`, `CERRAD`, `CERRADLO`, `CLOSE`, `SALIR`, `SALIMOS`, `FUERA` y la errata `CUERRE`/`CUERRES`.
+
 ## Cierre global
 
 Formatos:
@@ -217,6 +219,7 @@ Formatos:
 CERRADLO TODO
 CERRAR TODO
 CIERRE TOTAL TODO
+CUERRE TOTAL TODO
 CERRAMOS TODO
 SALIMOS DE TODO
 ```
