@@ -244,9 +244,10 @@ No escribas tokens en README, issues, commits ni capturas.
 2. Elige modo: `test`, `demo`, `live` o `dual`.
 3. Pega API key y API secret.
 4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
-5. Activa `Exigir stop loss`.
-6. Si vas a live, revisa el checklist `Preparado para live`.
-7. Arma live solo desde la UI y con confirmación consciente.
+5. Deja `Filtro de coste activo` en `Bloquear señales caras` si quieres impedir entradas cuyo break-even estimado por fees supere el margen configurado; usa `Solo avisar` solo si aceptas revisar manualmente esas señales.
+6. Activa `Exigir stop loss`.
+7. Si vas a live, revisa el checklist `Preparado para live`.
+8. Arma live solo desde la UI y con confirmación consciente.
 
 ## Operación diaria
 
@@ -257,6 +258,7 @@ Antes de dejar la app funcionando:
 - En la UI, `Monitor live activo` debe estar verde.
 - `API BingX validada` debe estar verde si usas BingX.
 - `Stop loss obligatorio` debe estar verde.
+- `Filtro de coste` debe estar en el modo esperado: bloqueo para operación conservadora o aviso para revisión manual.
 - `Seguro real BingX` debe indicar que no faltan SL/TP críticos.
 - `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestión.
 - `Guardia nocturna` debe estar estable.

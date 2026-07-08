@@ -84,6 +84,7 @@ Por señal: 10% fijo del capital mensual
 Resultado: 30 VST en demo y 30 USDT en real por ticker
 Apalancamiento: usar el de la señal
 Stop loss obligatorio: activado
+Filtro de coste: activo en modo bloqueo
 Telegram alertas: activado
 Telegram Web ejecución: gestión de posiciones
 Telegram Web aperturas: desactivadas salvo confirmación explícita

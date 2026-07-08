@@ -130,6 +130,7 @@ Configuración importante:
 - `Stop obligatorio`: bloquea aperturas sin SL.
 - `Max posiciones`: bloquea nuevas aperturas si se alcanza el límite.
 - `Max leverage señal`: bloquea señales con demasiado apalancamiento.
+- `Filtro de coste`: en modo `block` bloquea entradas cuyo break-even estimado por fees supere el margen máximo configurado; en modo `warn` solo marca el aviso.
 - `Capital mes USDT`: capital inicial mensual para futuros reales.
 - `Capital mes VST`: capital inicial mensual para Demo VST.
 - `% fijo por señal`: porcentaje fijo aplicado a ambos capitales.
@@ -140,7 +141,7 @@ Configuración importante:
 Cuando detecta una apertura:
 
 1. Valida que BingX esté activado.
-2. Valida allowlist, stop loss y riesgo.
+2. Valida allowlist, stop loss, riesgo y filtro de coste.
 3. Consulta contrato y ticker en BingX.
 4. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
 5. Calcula cantidad según modo.
@@ -288,6 +289,7 @@ No compartas esa URL: la UI permite operar.
 - Revisa allowlist.
 - Revisa stop loss.
 - Revisa apalancamiento máximo.
+- Revisa el filtro de coste, su modo y el break-even máximo de margen.
 - Revisa capital disponible.
 - Revisa confirmación live.
 
