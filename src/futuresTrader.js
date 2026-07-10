@@ -6,7 +6,6 @@ const OPEN_ORDERS_ERROR_LOG_MS = 60_000;
 const OPEN_ORDERS_DEFAULT_BACKOFF_MS = 60_000;
 const CLOSE_GUARD_TAKER_FEE_RATE = 0.0005;
 const COST_GUARD_TAKER_FEE_RATE = CLOSE_GUARD_TAKER_FEE_RATE;
-const CLOSE_GUARD_MIN_NET_PNL = 0;
 const CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT = 0.15;
 
 export class FuturesTrader {
@@ -18,6 +17,7 @@ export class FuturesTrader {
     this.onTrade = onTrade;
     this.contractCache = new Map();
     this.openOrdersCache = new Map();
+    this.riskSnapshots = new Map();
   }
 
   parse(text) {
@@ -524,6 +524,7 @@ export class FuturesTrader {
       closePrice,
       closePercent,
       closeGuardFallback: Boolean(forceCloseAfterGuard),
+      closeWarnings: exchangeClose?.warnings || [],
       closedPaperPositions,
       exchangeClose
     });
@@ -532,6 +533,9 @@ export class FuturesTrader {
       this.log(`PAPER CLOSE ${signal.symbol} ${closePercent}% @ ${closePrice} (${closedPaperPositions.length})`, 'info');
     } else if (exchangeClose?.orders?.length) {
       this.log(`${modePrefix(config)} CLOSE ${signal.symbol} ${closePercent}% (${exchangeClose.orders.length})`, config.mode === 'live' ? 'warn' : 'info');
+      if (exchangeClose.warnings?.length) {
+        this.log(`${modePrefix(config)} CLOSE ${signal.symbol} ejecutado con desviacion respecto al precio publicado.`, 'warn');
+      }
     } else {
       this.log(`Cierre detectado para ${signal.symbol}, sin posicion paper abierta.`, 'warn');
     }
@@ -800,7 +804,7 @@ export class FuturesTrader {
     }
 
     const leverage = leverageResult.value;
-    const riskValidation = this.validateRisk(signal, config, { leverage });
+    const riskValidation = await this.validateRisk(signal, config, { leverage, client });
     if (!riskValidation.ok) {
       return this.emitTrade({
         ...baseEvent,
@@ -836,6 +840,17 @@ export class FuturesTrader {
         referenceEntryPrice
       });
     }
+    const stopDistanceValidation = validateStopDistance(signal, entryPrice, config);
+    if (!stopDistanceValidation.ok) {
+      return this.emitTrade({
+        ...baseEvent,
+        status: 'blocked',
+        reason: stopDistanceValidation.reason,
+        marketPrice,
+        referenceEntryPrice,
+        stopDistancePercent: stopDistanceValidation.distancePercent
+      });
+    }
 
     const sizing = await this.resolveOrderSizing({ client, signal, config });
     const notional = sizing.notional;
@@ -845,7 +860,14 @@ export class FuturesTrader {
       : marketPrice;
     const executionEntryPrice = forceMarketEntry ? preOrderMarketPrice : entryPrice;
     const preOrderStopValidation = validateStopLossAgainstMarket(signal, executionEntryPrice);
-    const costGuard = buildCostGuard({ config, notional, exposure, leverage });
+    const costGuard = buildCostGuard({
+      config,
+      signal,
+      entryPrice: executionEntryPrice,
+      notional,
+      exposure,
+      leverage
+    });
     if (!preOrderStopValidation.ok) {
       return this.emitTrade({
         ...baseEvent,
@@ -1069,6 +1091,7 @@ export class FuturesTrader {
     const percent = Math.min(100, Math.max(1, Number(closePercent) || 100));
     const orders = [];
     const skipped = [];
+    const warnings = [];
 
     for (const position of positions) {
       if (!skipCloseGuard) {
@@ -1080,8 +1103,7 @@ export class FuturesTrader {
           fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
         });
         if (!guard.ok) {
-          skipped.push({ position, reason: guard.reason, guard });
-          continue;
+          warnings.push({ position, reason: guard.reason, guard });
         }
       }
 
@@ -1128,7 +1150,7 @@ export class FuturesTrader {
       this.openOrdersCache.delete(openOrdersCacheKey(config));
     }
 
-    return { positions, orders, skipped, protectiveCleanup };
+    return { positions, orders, skipped, warnings, protectiveCleanup };
   }
 
   async closeAllExchangePositions({ client, config = null, closePercent = 100 }) {
@@ -1446,8 +1468,20 @@ export class FuturesTrader {
     return { positions, orders, canceled, skipped };
   }
 
-  validateRisk(signal, config, { leverage }) {
-    const snapshot = this.paperStore?.riskSnapshot?.() || {};
+  async validateRisk(signal, config, { leverage, client }) {
+    let snapshot;
+    try {
+      snapshot = config.mode === 'test'
+        ? this.paperStore?.riskSnapshot?.() || {}
+        : await this.exchangeRiskSnapshot({ client, config });
+      this.riskSnapshots.set(config.mode, snapshot);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `risk_snapshot_unavailable:${conciseError(error)}`,
+        snapshot: this.riskSnapshots.get(config.mode) || {}
+      };
+    }
     const maxOpenPositions = Number(config.maxOpenPositions || 0);
     if (maxOpenPositions > 0 && Number(snapshot.openPositions || 0) >= maxOpenPositions) {
       return { ok: false, reason: `max_open_positions:${snapshot.openPositions}/${maxOpenPositions}`, snapshot };
@@ -1487,11 +1521,86 @@ export class FuturesTrader {
   }
 
   riskSnapshot() {
-    return this.paperStore?.riskSnapshot?.() || {
+    const config = this.configStore.getBingX();
+    return this.riskSnapshots.get(config.mode) || this.paperStore?.riskSnapshot?.() || {
       openPositions: 0,
       openExposure: 0,
       dailyPnl: 0,
       monthlyPnl: 0
+    };
+  }
+
+  async refreshRiskSnapshot({ mode = null, maxAgeMs = 30_000 } = {}) {
+    const baseConfig = this.configStore.getBingX({ includeSecrets: true });
+    const config = { ...baseConfig, ...(mode ? { mode } : {}) };
+    if (config.mode === 'dual') {
+      const [demo, live] = await Promise.all([
+        this.refreshRiskSnapshot({ mode: 'demo', maxAgeMs }),
+        this.refreshRiskSnapshot({ mode: 'live', maxAgeMs })
+      ]);
+      return {
+        openPositions: Number(demo.openPositions || 0) + Number(live.openPositions || 0),
+        openExposure: roundMoney(Number(demo.openExposure || 0) + Number(live.openExposure || 0)),
+        dailyPnl: roundMoney(Number(demo.dailyPnl || 0) + Number(live.dailyPnl || 0)),
+        monthlyPnl: roundMoney(Number(demo.monthlyPnl || 0) + Number(live.monthlyPnl || 0)),
+        day: localDayKey(),
+        month: localMonthKey(),
+        source: 'dual',
+        accounts: { demo, live },
+        capturedAt: new Date().toISOString()
+      };
+    }
+    if (config.mode === 'test') {
+      return this.paperStore?.riskSnapshot?.() || this.riskSnapshot();
+    }
+    const cached = this.riskSnapshots.get(config.mode);
+    if (cached?.capturedAt && Date.now() - Date.parse(cached.capturedAt) < maxAgeMs) {
+      return cached;
+    }
+    const snapshot = await this.exchangeRiskSnapshot({
+      client: this.client(config),
+      config,
+      includePnl: true
+    });
+    this.riskSnapshots.set(config.mode, snapshot);
+    return snapshot;
+  }
+
+  async exchangeRiskSnapshot({ client, config, includePnl = false }) {
+    const positionsResponse = await client.getPositions();
+    const positions = (Array.isArray(positionsResponse.data) ? positionsResponse.data : [])
+      .filter((position) => Math.abs(Number(position.availableAmt || position.positionAmt || 0)) > 0);
+    const openExposure = positions.reduce((sum, position) => sum + Math.abs(firstFiniteNumber([
+      position.positionValue,
+      position.notional,
+      position.positionNotional,
+      Number(position.availableAmt || position.positionAmt || 0) * Number(position.markPrice || position.avgPrice || 0)
+    ]) || 0), 0);
+    const needsPnl = includePnl || Number(config.maxDailyLossUSDT || 0) > 0 || Number(config.maxMonthlyLossUSDT || 0) > 0;
+    let dailyPnl = 0;
+    let monthlyPnl = 0;
+
+    if (needsPnl) {
+      const now = new Date();
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const configuredReset = timestampMs(pnlResetAtForMode(config));
+      const startTime = configuredReset ? Math.max(monthStart, configuredReset) : monthStart;
+      const incomeResponse = await client.getIncome({ startTime, endTime: Date.now(), limit: 1000 });
+      const incomeRows = Array.isArray(incomeResponse.data) ? incomeResponse.data : [];
+      monthlyPnl = incomeRows.reduce((sum, row) => sum + Number(row.income || 0), 0);
+      dailyPnl = incomeRows.reduce((sum, row) => Number(row.time || 0) >= dayStart ? sum + Number(row.income || 0) : sum, 0);
+    }
+
+    return {
+      openPositions: positions.length,
+      openExposure: roundMoney(openExposure),
+      dailyPnl: roundMoney(dailyPnl),
+      monthlyPnl: roundMoney(monthlyPnl),
+      day: localDayKey(),
+      month: localMonthKey(),
+      source: config.mode,
+      capturedAt: new Date().toISOString()
     };
   }
 
@@ -1537,7 +1646,7 @@ function validateSignal(signal, config) {
   return { ok: true };
 }
 
-function buildCostGuard({ config = {}, notional = 0, exposure = 0, leverage = 1 } = {}) {
+export function buildCostGuard({ config = {}, signal = {}, entryPrice = 0, notional = 0, exposure = 0, leverage = 1 } = {}) {
   const enabled = config.costGuardEnabled !== false;
   const mode = String(config.costGuardMode || 'warn').toLowerCase() === 'block' ? 'block' : 'warn';
   const feeRate = COST_GUARD_TAKER_FEE_RATE;
@@ -1551,17 +1660,43 @@ function buildCostGuard({ config = {}, notional = 0, exposure = 0, leverage = 1 
   const breakEvenMarginRoiPercent = notional > 0
     ? roundMoney((bufferedRoundTripCost / notional) * 100)
     : 0;
-  const warn = enabled && maxMarginBreakEven > 0 && breakEvenMarginRoiPercent > maxMarginBreakEven;
-  const reason = warn
-    ? `cost_guard_margin_break_even:${breakEvenMarginRoiPercent}>${maxMarginBreakEven}`
-    : '';
+  const stopDistancePercent = directionalDistancePercent({
+    direction: signal.direction,
+    from: entryPrice,
+    to: signal.stopLoss,
+    favorable: false
+  });
+  const stopRisk = stopDistancePercent == null ? null : roundMoney(exposure * (stopDistancePercent / 100));
+  const costToStopRiskPercent = stopRisk > 0
+    ? roundMoney((bufferedRoundTripCost / stopRisk) * 100)
+    : null;
+  const target = nearestValidTakeProfit(signal, entryPrice);
+  const targetDistancePercent = target == null ? null : directionalDistancePercent({
+    direction: signal.direction,
+    from: entryPrice,
+    to: target,
+    favorable: true
+  });
+  const targetGrossPnl = targetDistancePercent == null
+    ? null
+    : roundMoney(exposure * (targetDistancePercent / 100));
+  const targetNetAfterBufferedCost = targetGrossPnl == null
+    ? null
+    : roundMoney(targetGrossPnl - bufferedRoundTripCost);
+  const highCost = enabled && maxMarginBreakEven > 0 && breakEvenMarginRoiPercent > maxMarginBreakEven;
+  const targetEdgeKnown = targetNetAfterBufferedCost != null;
+  const block = enabled && mode === 'block' && targetEdgeKnown && targetNetAfterBufferedCost <= 0;
+  const warn = enabled && (highCost || block);
+  const reason = block
+    ? `cost_guard_non_positive_target_edge:${targetNetAfterBufferedCost}`
+    : highCost ? `cost_guard_margin_break_even:${breakEvenMarginRoiPercent}>${maxMarginBreakEven}` : '';
 
   return {
     enabled,
     mode,
-    status: enabled ? warn ? 'warn' : 'ok' : 'off',
+    status: enabled ? block ? 'blocked' : warn ? 'warn' : 'ok' : 'off',
     warn,
-    block: warn && mode === 'block',
+    block,
     reason,
     asset: config.mode === 'demo' ? 'VST' : 'USDT',
     feeRate,
@@ -1575,11 +1710,47 @@ function buildCostGuard({ config = {}, notional = 0, exposure = 0, leverage = 1 
     estimatedRoundTripCost: baseRoundTripCost,
     bufferedRoundTripCost,
     breakEvenPriceMovePercent,
-    breakEvenMarginRoiPercent
+    breakEvenMarginRoiPercent,
+    stopDistancePercent,
+    stopRisk,
+    costToStopRiskPercent,
+    target,
+    targetDistancePercent,
+    targetGrossPnl,
+    targetNetAfterBufferedCost,
+    targetEdgeKnown
   };
 }
 
-function validateSignalAge(post = {}, phase = '', config = {}) {
+function nearestValidTakeProfit(signal = {}, entryPrice = 0) {
+  const entry = Number(entryPrice);
+  if (!Number.isFinite(entry) || entry <= 0) {
+    return null;
+  }
+  const direction = String(signal.direction || '').toUpperCase();
+  const candidates = (Array.isArray(signal.takeProfits) ? signal.takeProfits : [signal.takeProfit])
+    .map(Number)
+    .filter((price) => Number.isFinite(price) && price > 0)
+    .filter((price) => direction === 'SHORT' ? price < entry : price > entry)
+    .sort((left, right) => Math.abs(left - entry) - Math.abs(right - entry));
+  return candidates[0] ?? null;
+}
+
+function directionalDistancePercent({ direction, from, to, favorable }) {
+  const start = Number(from);
+  const end = Number(to);
+  if (!Number.isFinite(start) || start <= 0 || !Number.isFinite(end) || end <= 0) {
+    return null;
+  }
+  const normalizedDirection = String(direction || '').toUpperCase();
+  const signed = normalizedDirection === 'SHORT'
+    ? (start - end) / start * 100
+    : (end - start) / start * 100;
+  const distance = favorable ? signed : -signed;
+  return distance > 0 ? roundMoney(distance) : null;
+}
+
+export function validateSignalAge(post = {}, phase = '', config = {}) {
   if (phase === 'manual_replay' || phase === 'manual_probe') {
     return { ok: true };
   }
@@ -1588,20 +1759,55 @@ function validateSignalAge(post = {}, phase = '', config = {}) {
     return { ok: true };
   }
 
-  const timestamp = Date.parse(post.firstSeenAt || post.scrapedAt || post.publishedAt || 0);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+  const relativeAge = relativePublishedAgeMinutes(post.publishedText);
+  const timestamp = Date.parse(post.publishedAt || post.firstSeenAt || post.scrapedAt || 0);
+  const timestampAge = Number.isFinite(timestamp) && timestamp > 0
+    ? (Date.now() - timestamp) / 60000
+    : null;
+  const ageMinutes = relativeAge == null ? timestampAge : Math.max(relativeAge, timestampAge || 0);
+  if (ageMinutes == null) {
     return { ok: true };
   }
-
-  const ageMinutes = (Date.now() - timestamp) / 60000;
   if (ageMinutes > maxMinutes) {
-    return { ok: false, reason: `stale_signal:${Math.round(ageMinutes)}m>${maxMinutes}m` };
+    return { ok: false, reason: `stale_signal:${roundMoney(ageMinutes)}m>${maxMinutes}m` };
   }
   return { ok: true };
 }
 
-function validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config, forceMarketEntry = false }) {
-  if (forceMarketEntry || signal.entry?.type !== 'LIMIT') {
+function relativePublishedAgeMinutes(value) {
+  const text = String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) {
+    return null;
+  }
+  if (/^(ahora|just now|now)$/.test(text)) {
+    return 0;
+  }
+  if (/^(ayer|yesterday)$/.test(text)) {
+    return 24 * 60;
+  }
+  const match = text.match(/hace\s+(un|una|uno|\d+)\s+([a-z]+)/)
+    || text.match(/(a|an|one|\d+)\s+([a-z]+)\s+ago/);
+  if (!match) {
+    return null;
+  }
+  const amount = /^(un|una|uno|a|an|one)$/.test(match[1]) ? 1 : Number(match[1]);
+  const unit = match[2];
+  if (/^seg|^sec|^second/.test(unit)) return amount / 60;
+  if (/^min|^minute/.test(unit)) return amount;
+  if (/^hora|^hour/.test(unit)) return amount * 60;
+  if (/^dia|^day/.test(unit)) return amount * 24 * 60;
+  if (/^semana|^week/.test(unit)) return amount * 7 * 24 * 60;
+  return null;
+}
+
+export function validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, config, forceMarketEntry = false }) {
+  if (signal.entry?.type !== 'LIMIT') {
     return { ok: true };
   }
   const maxDeviation = Number(config.maxEntryDeviationPercent || 0);
@@ -1610,11 +1816,43 @@ function validateEntryDeviation({ signal, marketPrice, referenceEntryPrice, conf
   if (!Number.isFinite(maxDeviation) || maxDeviation <= 0 || !Number.isFinite(reference) || !Number.isFinite(market) || market <= 0) {
     return { ok: true };
   }
-  const deviation = Math.abs(reference - market) / market * 100;
+  const direction = String(signal.direction || '').toUpperCase();
+  const signedDeviation = direction === 'SHORT'
+    ? (reference - market) / reference * 100
+    : (market - reference) / reference * 100;
+  const deviation = forceMarketEntry ? Math.max(0, signedDeviation) : Math.abs(reference - market) / reference * 100;
   if (deviation > maxDeviation) {
-    return { ok: false, reason: `entry_deviation_too_high:${roundMoney(deviation)}%>${maxDeviation}%` };
+    const reason = forceMarketEntry ? 'entry_adverse_deviation_too_high' : 'entry_deviation_too_high';
+    return {
+      ok: false,
+      reason: `${reason}:${roundMoney(deviation)}%>${maxDeviation}%`,
+      deviationPercent: roundMoney(deviation),
+      signedDeviationPercent: roundMoney(signedDeviation)
+    };
   }
-  return { ok: true };
+  return {
+    ok: true,
+    deviationPercent: roundMoney(deviation),
+    signedDeviationPercent: roundMoney(signedDeviation)
+  };
+}
+
+export function validateStopDistance(signal = {}, entryPrice = 0, config = {}) {
+  const maximum = Number(config.maxStopDistancePercent || 0);
+  const entry = Number(entryPrice);
+  const stop = Number(signal.stopLoss);
+  if (!Number.isFinite(maximum) || maximum <= 0 || !Number.isFinite(entry) || entry <= 0 || !Number.isFinite(stop) || stop <= 0) {
+    return { ok: true };
+  }
+  const distancePercent = Math.abs(entry - stop) / entry * 100;
+  if (distancePercent > maximum) {
+    return {
+      ok: false,
+      reason: `stop_loss_distance_too_high:${roundMoney(distancePercent)}%>${maximum}%`,
+      distancePercent: roundMoney(distancePercent)
+    };
+  }
+  return { ok: true, distancePercent: roundMoney(distancePercent) };
 }
 
 function validateStopLossAgainstMarket(signal, marketPrice) {
@@ -2439,4 +2677,16 @@ function roundMoney(value) {
 
 function startOfLocalDayIso(now = new Date()) {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+}
+
+function localDayKey(now = new Date()) {
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function localMonthKey(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }

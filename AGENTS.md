@@ -22,9 +22,11 @@ La app es un servidor Node.js local con frontend estático:
 - `src/bingxClient.js`: cliente REST firmado de BingX.
 - `src/paperTradeStore.js`: trading local/paper.
 - `src/referenceLedger.js`: lectura de hoja de Google de referencia.
+- `src/replicaAuditMatcher.js`: emparejamiento fiable entre hoja, aperturas, cierres y costes.
 - `src/tradeEventStore.js`: auditoría de eventos reales/demo/paper.
 - `public/app.js`, `public/index.html`, `public/styles.css`: UI local.
 - `scripts/strategyStudy.js`: informe estadístico de operativa.
+- `scripts/systemAudit.js`: auditoría integral reproducible y segura para Git.
 - `docs/`: documentación operativa.
 
 ## Archivos que no se suben
@@ -75,6 +77,7 @@ Validación estática:
 
 ```bash
 npm run lint
+npm test
 git diff --check
 ```
 
@@ -82,6 +85,7 @@ Informe estratégico:
 
 ```bash
 npm run study:strategy
+npm run audit:system
 ```
 
 PM2:
@@ -108,6 +112,7 @@ pm2 save
 - Preserva aperturas `LONG` y `SHORT`, cierres, cierre total, TP, SL, break even y mensajes mixtos.
 - No relajes el requisito de stop loss obligatorio.
 - No elimines protecciones anti-duplicado.
+- Mantén pruebas con mensajes mixtos, errores tipográficos conocidos, LONG, SHORT y cierre total.
 - Si cambias parseo, prueba manualmente con mensajes reales anonimizados usando `/api/bingx/parse-test` o una verificacion local equivalente.
 
 ### Motor BingX y riesgo
@@ -119,6 +124,9 @@ pm2 save
   - demo VST;
   - paper/test local.
 - Cualquier cambio en tamaños de orden, apalancamiento, SL/TP o modo live debe quedar visible en UI y documentado.
+- Los cierres explícitos deben ejecutarse inmediatamente; el precio publicado sirve para auditar slippage, no para retener la salida.
+- Las aperturas a mercado no deben perseguir un precio desfavorable por encima de la tolerancia configurada.
+- Los límites de riesgo de demo/live deben consultar la cuenta BingX, no el almacén paper.
 
 ### Scraping YouTube / Telegram Web
 
@@ -145,11 +153,12 @@ pm2 save
 
 1. `git status --short` entendido.
 2. `npm run lint` ejecutado si tocaste `src/`, `public/` o `scripts/`.
-3. `git diff --check` sin errores.
-4. No hay secretos reales en el diff.
-5. Si tocaste UI, verificaste localhost en navegador.
-6. Si tocaste trading, no ejecutaste acciones reales sin confirmación.
-7. Si hiciste commit, la autoría debe ser:
+3. `npm test` ejecutado si tocaste parser, trading, riesgo, auditoría o persistencia.
+4. `git diff --check` sin errores.
+5. No hay secretos reales en el diff.
+6. Si tocaste UI, verificaste localhost en navegador.
+7. Si tocaste trading, no ejecutaste acciones reales sin confirmación.
+8. Si hiciste commit, la autoría debe ser:
 
 ```text
 jotaterrasa <165782559+JotaTerrasa@users.noreply.github.com>

@@ -188,9 +188,12 @@ const elements = {
   bingxMaxSignalLeverage: document.querySelector('#bingx-max-signal-leverage'),
   bingxMaxSignalAge: document.querySelector('#bingx-max-signal-age'),
   bingxMaxEntryDeviation: document.querySelector('#bingx-max-entry-deviation'),
+  bingxMaxStopDistance: document.querySelector('#bingx-max-stop-distance'),
   bingxCostGuardEnabled: document.querySelector('#bingx-cost-guard-enabled'),
+  bingxCostGuardMode: document.querySelector('#bingx-cost-guard-mode'),
   bingxCostGuardBuffer: document.querySelector('#bingx-cost-guard-buffer'),
   bingxCostGuardMaxMargin: document.querySelector('#bingx-cost-guard-max-margin'),
+  bingxEstimatedFeeRebate: document.querySelector('#bingx-estimated-fee-rebate'),
   bingxVstBaseCapital: document.querySelector('#bingx-vst-base-capital'),
   bingxVstCapitalPercent: document.querySelector('#bingx-vst-capital-percent'),
   bingxDailyLoss: document.querySelector('#bingx-daily-loss'),
@@ -346,15 +349,16 @@ function bindEvents() {
     appState.ledgerResultSort = appState.ledgerResultSort === 'asc' ? 'desc' : 'asc';
     renderMyLedger();
   });
-  document.querySelector('#sheet-vst-alignment')?.addEventListener('click', (event) => {
+  const alignmentPanel = document.querySelector('#sheet-vst-alignment');
+  alignmentPanel?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-alignment-scroll]');
     if (!button) {
       return;
     }
     scrollAlignmentTable(button.dataset.alignmentScroll);
   });
-  document.querySelector('.alignment-wrap')?.addEventListener('wheel', (event) => {
-    const wrap = event.currentTarget;
+  alignmentPanel?.addEventListener('wheel', (event) => {
+    const wrap = event.target.closest('.replica-audit-wrap, .alignment-wrap');
     if (!wrap) {
       return;
     }
@@ -1782,11 +1786,19 @@ function costControlActions(analysis) {
       detail: 'Hay activos con muestra negativa neta; conviene comparar BTC/ETH/SOL/SUI antes de real.'
     });
   }
-  actions.push({
-    tone: 'neutral',
-    label: 'Siguiente paso seguro',
-    detail: 'Activar un filtro de coste deberia hacerse con confirmacion explicita porque puede saltarse senales.'
-  });
+  if (appState.bingx?.costGuardEnabled !== false && appState.bingx?.costGuardMode === 'block') {
+    actions.push({
+      tone: 'neutral',
+      label: 'Bloqueo de coste activo',
+      detail: 'Solo bloquea si un TP explicito no cubre el coste estimado; sin objetivo, avisa y conserva la replica.'
+    });
+  } else {
+    actions.push({
+      tone: 'neutral',
+      label: 'Siguiente paso seguro',
+      detail: 'Activar un filtro de coste deberia hacerse con confirmacion explicita porque puede saltarse senales.'
+    });
+  }
   return actions.slice(0, 4);
 }
 
@@ -3204,7 +3216,7 @@ function renderTelegramWatchPanel() {
   const refreshStale = active
     && refreshSeconds > 0
     && Number.isFinite(refreshAge)
-    && refreshAge > Math.max(refreshSeconds * 2.5, 900);
+    && refreshAge > Math.max(refreshSeconds * 2.5, 120);
   const recentMissing = active
     && lastMissing
     && Number.isFinite(secondsSinceIso(lastMissing.at))
@@ -3816,10 +3828,56 @@ function renderHistoricalSignals(positions, targetMonth, sourceLabel = 'Google S
 }
 
 function renderSheetVstAlignment(reference = currentReferenceLedger()) {
-  if (!elements.alignmentSummary || !elements.alignmentTable || !elements.alignmentStatus) {
+  if (!elements.alignmentSummary || !elements.alignmentStatus || !elements.replicaControl) {
     return;
   }
 
+  const audit = appState.replicaAudit;
+  if (audit?.summary && Array.isArray(audit.rows)) {
+    renderOfficialSheetVstAlignment(audit);
+    return;
+  }
+
+  elements.alignmentStatus.textContent = audit?.error ? 'Auditoría no disponible' : 'Cargando auditoría';
+  elements.alignmentSummary.innerHTML = renderAlignmentMetric(
+    'Control oficial',
+    audit?.error ? 'Sin datos' : 'Cargando',
+    audit?.error || 'Consultando Google Sheet y BingX VST',
+    audit?.error ? 'amount negative' : ''
+  );
+  elements.replicaControl.innerHTML = renderReplicaAudit(audit);
+}
+
+function renderOfficialSheetVstAlignment(audit) {
+  const summary = audit.summary || {};
+  const rows = audit.rows || [];
+  const hasNumericResult = (value) => value !== null
+    && value !== undefined
+    && value !== ''
+    && Number.isFinite(Number(value));
+  const sheetRows = rows.filter((row) => hasNumericResult(row.sheet?.pnl));
+  const vstRows = rows.filter((row) => hasNumericResult(row.vst?.netPnl));
+  const sheetWins = sheetRows.filter((row) => Number(row.sheet.pnl) > 0).length;
+  const vstWins = vstRows.filter((row) => Number(row.vst.netPnl) > 0).length;
+  const sheetWinRate = sheetRows.length ? (sheetWins / sheetRows.length) * 100 : null;
+  const vstWinRate = vstRows.length ? (vstWins / vstRows.length) * 100 : null;
+  const sheetCount = Number(summary.sheetRows || rows.length || 0);
+  const executedCount = Number(summary.vstOpenings || 0);
+  const missingCount = Math.max(0, sheetCount - executedCount);
+  const alignedCount = Number(summary.issueCounts?.Alineada || 0);
+  const reviewCount = Math.max(0, rows.length - alignedCount);
+
+  elements.alignmentStatus.textContent = `${formatMonth(audit.month)} - ${executedCount}/${sheetCount} aperturas ejecutadas`;
+  elements.alignmentSummary.innerHTML = [
+    renderAlignmentMetric('Google Sheet', formatPercent(sheetWinRate), `${sheetRows.length} operaciones`, amountClass((sheetWinRate ?? 50) - 50)),
+    renderAlignmentMetric('BingX VST', formatPercent(vstWinRate), `${vstRows.length} resultados auditables`, amountClass((vstWinRate ?? 50) - 50)),
+    renderAlignmentMetric('Ejecutadas', `${executedCount}/${sheetCount}`, `${missingCount} no ejecutadas`, missingCount ? 'amount negative' : 'amount positive'),
+    renderAlignmentMetric('Alineadas', String(alignedCount), `${reviewCount} requieren revisión`, reviewCount ? 'warn' : 'amount positive')
+  ].join('');
+  elements.replicaControl.innerHTML = renderReplicaAudit(audit);
+}
+
+function renderLegacySheetVstAlignment(reference = currentReferenceLedger()) {
   const alignment = buildSheetVstAlignment(reference);
   const {
     targetMonth,
@@ -3855,9 +3913,11 @@ function renderSheetVstAlignment(reference = currentReferenceLedger()) {
   ].join('');
 
   renderReplicaControl(reference, alignment);
-  elements.alignmentTable.innerHTML = pairs.length
+  if (elements.alignmentTable) {
+    elements.alignmentTable.innerHTML = pairs.length
     ? pairs.slice(0, 140).map(renderAlignmentRow).join('')
     : '<tr><td colspan="6">Sin operaciones del mes para comparar.</td></tr>';
+  }
 }
 
 function buildSheetVstAlignment(reference = currentReferenceLedger()) {
@@ -4101,6 +4161,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Replica teorica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
         ${renderReplicaMetric('BingX bruto', formatMoney(summary.bingxGross, 'VST'), `${summary.vstCloses || 0} cierres`, amountClass(summary.bingxGross))}
         ${renderReplicaMetric('BingX neto', formatMoney(summary.bingxNet, 'VST'), `${formatMoney(bingxFees + bingxFunding, 'VST')} costes`, amountClass(summary.bingxNet))}
+        ${renderReplicaMetric('Neto con devolucion', formatMoney(summary.bingxNetAfterEstimatedRebate, 'VST'), `${formatPercent(summary.estimatedCommissionRebatePercent)} de fees, escenario`, amountClass(summary.bingxNetAfterEstimatedRebate))}
         ${renderReplicaMetric('Gap neto', formatMoney(summary.netGap, 'VST'), 'BingX neto vs replica teorica', amountClass(summary.netGap))}
       </div>
       <div class="replica-issue-strip">
@@ -4159,11 +4220,15 @@ function renderReplicaAuditRow(row = {}) {
   const postLink = vst.postUrl
     ? `<a href="${escapeAttribute(vst.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
     : '';
+  const aggregation = Number(vst.aggregatedOpenings || 1) > 1
+    ? `<span>${escapeHtml(`${vst.aggregatedOpenings} entradas agregadas`)}</span>`
+    : '';
   return `
     <tr class="${escapeAttribute(row.severity || 'neutral')}">
       <td>
         <strong>${escapeHtml(String(row.orderNumber || row.sequence || '-'))}</strong>
         <span>${escapeHtml(formatAuditDate(vst.closingAt || vst.openingAt))}</span>
+        ${aggregation}
       </td>
       <td>
         <strong>${escapeHtml(row.symbol || '-')}</strong>
@@ -4538,7 +4603,7 @@ function finiteOrNull(value) {
 }
 
 function scrollAlignmentTable(direction) {
-  const wrap = document.querySelector('.alignment-wrap');
+  const wrap = document.querySelector('.replica-audit-wrap, .alignment-wrap');
   if (!wrap) {
     return;
   }
@@ -6265,7 +6330,9 @@ function eventAmountText(event, account) {
 
 function costGuardText(costGuard = {}) {
   const asset = costGuard.asset || 'USDT';
-  const label = costGuard.warn ? 'Coste aviso' : 'Coste ok';
+  const label = costGuard.block
+    ? 'Coste bloqueo'
+    : costGuard.warn ? 'Coste aviso' : 'Coste ok';
   return `${label}: ${formatMoney(costGuard.bufferedRoundTripCost || costGuard.estimatedRoundTripCost || 0, asset)} / BE ${formatPercent(costGuard.breakEvenMarginRoiPercent)}`;
 }
 
@@ -6347,7 +6414,7 @@ function renderTelegramSource(telegramSource = appState.telegramSource, message 
   elements.telegramSourceEnabled.checked = Boolean(telegramSource.enabled);
   elements.telegramSourceUrl.value = telegramSource.url || '';
   elements.telegramSourceMax.value = telegramSource.maxMessages || 40;
-  elements.telegramSourceRefresh.value = telegramSource.refreshSeconds || 300;
+  elements.telegramSourceRefresh.value = telegramSource.refreshSeconds || 30;
   elements.telegramSourceExecute.checked = Boolean(telegramSource.executeSignals);
   elements.telegramSourceOpenSignals.checked = Boolean(telegramSource.executeOpenSignals);
   elements.telegramSourceLiveConfirm.checked = Boolean(telegramSource.liveConfirmed);
@@ -6419,11 +6486,14 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxMaxOpen.value = bingx.maxOpenPositions || 5;
   elements.bingxMaxDailyOrders.value = bingx.maxDailyOrders ?? 0;
   elements.bingxMaxSignalLeverage.value = bingx.maxSignalLeverage || 125;
-  elements.bingxMaxSignalAge.value = bingx.maxSignalAgeMinutes ?? 180;
-  elements.bingxMaxEntryDeviation.value = bingx.maxEntryDeviationPercent ?? 5;
+  elements.bingxMaxSignalAge.value = bingx.maxSignalAgeMinutes ?? 5;
+  elements.bingxMaxEntryDeviation.value = bingx.maxEntryDeviationPercent ?? 0.15;
+  elements.bingxMaxStopDistance.value = bingx.maxStopDistancePercent ?? 5;
   elements.bingxCostGuardEnabled.checked = bingx.costGuardEnabled !== false;
+  elements.bingxCostGuardMode.value = bingx.costGuardMode || 'block';
   elements.bingxCostGuardBuffer.value = bingx.costGuardFeeBuffer ?? 2;
   elements.bingxCostGuardMaxMargin.value = bingx.costGuardMaxMarginBreakEvenPercent ?? 3;
+  elements.bingxEstimatedFeeRebate.value = bingx.estimatedCommissionRebatePercent ?? 22;
   elements.bingxVstBaseCapital.value = monthlyInitialCapitalVST;
   elements.bingxVstCapitalPercent.value = monthlyOrderPercent;
   elements.bingxDailyLoss.value = bingx.maxDailyLossUSDT ?? 100;
@@ -6479,10 +6549,12 @@ async function saveBingxConfig() {
     maxSignalLeverage: Number(elements.bingxMaxSignalLeverage.value),
     maxSignalAgeMinutes: Number(elements.bingxMaxSignalAge.value),
     maxEntryDeviationPercent: Number(elements.bingxMaxEntryDeviation.value),
+    maxStopDistancePercent: Number(elements.bingxMaxStopDistance.value),
     costGuardEnabled: elements.bingxCostGuardEnabled.checked,
-    costGuardMode: 'warn',
+    costGuardMode: elements.bingxCostGuardMode.value,
     costGuardFeeBuffer: Number(elements.bingxCostGuardBuffer.value),
     costGuardMaxMarginBreakEvenPercent: Number(elements.bingxCostGuardMaxMargin.value),
+    estimatedCommissionRebatePercent: Number(elements.bingxEstimatedFeeRebate.value),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent,
     maxDailyLossUSDT: Number(elements.bingxDailyLoss.value),

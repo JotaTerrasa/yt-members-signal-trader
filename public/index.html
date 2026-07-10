@@ -106,7 +106,7 @@
                 </label>
                 <label for="telegram-source-refresh">
                   <span>Recargar pestaña (s)</span>
-                  <input id="telegram-source-refresh" type="number" min="30" max="3600" step="30" value="300">
+                  <input id="telegram-source-refresh" type="number" min="30" max="3600" step="30" value="30">
                 </label>
               </div>
               <label class="check-option" for="telegram-source-execute">
@@ -283,30 +283,47 @@
 	              </label>
 	              <label for="bingx-max-signal-age">
 	                <span>Edad max senal min</span>
-	                <input id="bingx-max-signal-age" type="number" min="0" max="1440" step="5" value="180">
+	                <input id="bingx-max-signal-age" type="number" min="0" max="1440" step="1" value="5">
 	              </label>
 	            </div>
 	            <div class="range-grid">
 	              <label for="bingx-max-entry-deviation">
 	                <span>Desvio entrada %</span>
-	                <input id="bingx-max-entry-deviation" type="number" min="0" max="50" step="0.1" value="5">
+	                <input id="bingx-max-entry-deviation" type="number" min="0" max="50" step="0.01" value="0.15">
+	              </label>
+	              <label for="bingx-max-stop-distance">
+	                <span>Distancia maxima SL %</span>
+	                <input id="bingx-max-stop-distance" type="number" min="0" max="50" step="0.1" value="5">
 	              </label>
 	            </div>
             <label class="check-option">
               <input id="bingx-cost-guard-enabled" type="checkbox" checked>
-              <span>Filtro de coste en modo aviso</span>
+              <span>Filtro de coste activo</span>
             </label>
             <div class="range-grid">
+              <label for="bingx-cost-guard-mode">
+                <span>Modo filtro coste</span>
+                <select id="bingx-cost-guard-mode">
+                  <option value="block">Bloquear señales caras</option>
+                  <option value="warn">Solo avisar</option>
+                </select>
+              </label>
               <label for="bingx-cost-guard-buffer">
                 <span>Colchon fees x</span>
                 <input id="bingx-cost-guard-buffer" type="number" min="1" max="10" step="0.25" value="2">
               </label>
+            </div>
+            <div class="range-grid">
               <label for="bingx-cost-guard-max-margin">
                 <span>Break-even max margen %</span>
                 <input id="bingx-cost-guard-max-margin" type="number" min="0" max="100" step="0.1" value="3">
               </label>
+              <label for="bingx-estimated-fee-rebate">
+                <span>Devolucion fees estimada %</span>
+                <input id="bingx-estimated-fee-rebate" type="number" min="0" max="100" step="0.1" value="22">
+              </label>
             </div>
-            <div class="field-hint">Modo aviso: marca señales caras por comisiones, pero no bloquea entradas automaticamente.</div>
+            <div class="field-hint">El coste alto genera aviso. Solo se bloquea cuando hay un TP explicito y ni siquiera cubre la ida y vuelta estimada.</div>
 	            <div class="range-grid">
 	              <label for="bingx-vst-base-capital">
 	                <span>Capital mes VST</span>
@@ -990,32 +1007,17 @@
 
             <div class="alignment-panel" id="sheet-vst-alignment">
               <div class="trade-section-header">
-                <h3>Alineacion Google Sheet vs VST</h3>
+                <h3>Alineación Google Sheet vs VST</h3>
                 <span id="alignment-status">Sin comparar</span>
               </div>
               <div class="alignment-summary" id="alignment-summary"></div>
-              <div class="replica-control" id="replica-control"></div>
-              <div class="alignment-controls" aria-label="Navegacion tabla de alineacion">
+              <div class="alignment-controls" aria-label="Navegación de la auditoría">
                 <button type="button" data-alignment-scroll="up">Subir</button>
                 <button type="button" data-alignment-scroll="down">Bajar</button>
                 <button type="button" data-alignment-scroll="left">Izquierda</button>
                 <button type="button" data-alignment-scroll="right">Derecha</button>
               </div>
-              <div class="pnl-table-wrap compact-table alignment-wrap">
-                <table class="pnl-table alignment-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Activo</th>
-                      <th>Google Sheet</th>
-                      <th>Futuros VST</th>
-                      <th>Lectura</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody id="alignment-table"></tbody>
-                </table>
-              </div>
+              <div class="replica-control" id="replica-control"></div>
             </div>
 
             <div class="pnl-table-wrap">
