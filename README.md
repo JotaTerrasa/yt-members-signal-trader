@@ -171,6 +171,7 @@ Los datos persistentes siguen fuera de Git:
 - `.data/`
 - `.yt-profile/`
 - `docs/strategy-reports/`
+- `docs/audits/`
 
 Guía completa: [docs/PACKAGING.md](docs/PACKAGING.md).
 

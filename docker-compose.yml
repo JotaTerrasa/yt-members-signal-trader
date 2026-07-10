@@ -17,6 +17,7 @@ services:
       - ./.data:/app/.data
       - ./.yt-profile:/app/.yt-profile
       - ./docs/strategy-reports:/app/docs/strategy-reports
+      - ./docs/audits:/app/docs/audits
     shm_size: "1gb"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:' + (process.env.PORT || 5178) + '/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]

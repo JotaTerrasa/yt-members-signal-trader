@@ -19,6 +19,7 @@ Estos directorios no se suben al repositorio, pero sí deben conservarse entre r
 | `.data/` | Configuración, posts, eventos, trades, backups redactados. | Sí |
 | `.yt-profile/` | Perfil persistente de Chromium para YouTube y Telegram Web. | Sí, si quieres evitar iniciar sesión de nuevo |
 | `docs/strategy-reports/` | Informes versionables del estudio estratégico. | Sí, si quieres historial en Git |
+| `docs/audits/` | Informes versionables de auditoría integral. | Sí, si quieres historial en Git |
 
 Nunca subas `.data/config.json`, tokens, claves API ni sesiones reales.
 

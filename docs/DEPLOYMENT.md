@@ -233,6 +233,7 @@ Docker Compose expone `http://localhost:5178` y monta:
 
 - `.data/` para configuración y eventos;
 - `.yt-profile/` para sesiones de Chromium;
-- `docs/strategy-reports/` para informes.
+- `docs/strategy-reports/` para informes estratégicos;
+- `docs/audits/` para informes de auditoría integral.
 
 Consulta la guía completa en [Paquetización y ejecución portátil](PACKAGING.md).
