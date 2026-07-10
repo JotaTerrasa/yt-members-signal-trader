@@ -70,6 +70,7 @@ const defaultConfig = {
     costGuardFeeBuffer: 2,
     costGuardMaxMarginBreakEvenPercent: 3,
     estimatedCommissionRebatePercent: 22,
+    improvementCohortStartedAt: null,
     vstBaseCapital: 300,
     vstCapitalPercent: 10,
     vstPnlResetAt: null,
@@ -240,6 +241,7 @@ export class ConfigStore {
       costGuardFeeBuffer: bingx.costGuardFeeBuffer,
       costGuardMaxMarginBreakEvenPercent: bingx.costGuardMaxMarginBreakEvenPercent,
       estimatedCommissionRebatePercent: bingx.estimatedCommissionRebatePercent,
+      improvementCohortStartedAt: bingx.improvementCohortStartedAt || null,
       vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
       vstPnlResetAt: bingx.vstPnlResetAt || null,
@@ -315,6 +317,10 @@ export class ConfigStore {
         100,
         defaultConfig.bingx.estimatedCommissionRebatePercent
       ),
+      improvementCohortStartedAt: isoDateOrCurrent(
+        input.improvementCohortStartedAt,
+        current.improvementCohortStartedAt || defaultConfig.bingx.improvementCohortStartedAt
+      ),
       vstBaseCapital: monthlyInitialCapitalVST,
       vstCapitalPercent: monthlyOrderPercent,
       vstPnlResetAt: input.clearVstPnlReset
@@ -340,6 +346,26 @@ export class ConfigStore {
     }
 
     this.data.bingx = next;
+    await this.save();
+    return this.getBingX();
+  }
+
+  async ensureImprovementCohort({ startedAt = new Date() } = {}) {
+    const current = normalizeBingXConfig(this.data.bingx);
+    if (current.improvementCohortStartedAt) {
+      return current.improvementCohortStartedAt;
+    }
+    const date = startedAt instanceof Date ? startedAt : new Date(startedAt);
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    this.data.bingx.improvementCohortStartedAt = safeDate.toISOString();
+    await this.save();
+    return this.data.bingx.improvementCohortStartedAt;
+  }
+
+  async resetImprovementCohort({ startedAt = new Date() } = {}) {
+    const date = startedAt instanceof Date ? startedAt : new Date(startedAt);
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    this.data.bingx.improvementCohortStartedAt = safeDate.toISOString();
     await this.save();
     return this.getBingX();
   }

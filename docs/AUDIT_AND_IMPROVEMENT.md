@@ -19,10 +19,11 @@ Ventana auditada: desde el reset mensual del 1 de julio hasta el 10 de julio.
 | Comisiones | -92,9171 VST |
 | Funding | -2,0737 VST |
 | Neto observado | -105,5564 VST |
+| Devolución de fees acreditada por BingX | 0,0000 VST |
 | Devolución de fees estimada al 22% | +20,4418 VST |
 | Neto con devolución estimada | -85,1146 VST |
 
-La devolución es un escenario. No se suma a la equity real hasta que BingX la registre como ingreso.
+La devolución del 22% es un escenario. No se suma a la equity real hasta que BingX la registre como ingreso. En la línea base no aparece ningún ingreso de devolución en el histórico de la cuenta; la tarifa observada es 0,05% taker y 0,02% maker.
 
 ## Lectura desde el frontend
 
@@ -77,6 +78,8 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - Los cierres explícitos se envían inmediatamente a mercado.
 - El slippage se guarda como advertencia auditable.
 - La aplicación no retiene una salida esperando que el precio vuelva a la cifra publicada.
+- Si BingX o la red rechazan temporalmente un cierre, la aplicación conserva el modo de ejecución y lo reintenta de forma idempotente durante tres minutos.
+- `CLOSE_ALL` vuelve a consultar las posiciones en cada intento para no cerrar dos veces una posición que ya haya desaparecido.
 
 ### Costes
 
@@ -98,6 +101,9 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - El histórico usa un diario incremental y compactación atómica.
 - Una caída durante una escritura no obliga a reescribir ni perder el archivo completo.
 - El parser, las guardas, el riesgo, los cierres, la auditoría y la persistencia tienen pruebas automáticas.
+- Cada publicación con aperturas forma un paquete auditable: símbolos esperados, ejecutados, pendientes y ausentes.
+- Una alerta informa cuando un paquete queda incompleto al terminar su ventana de reintento.
+- La cohorte posterior a las mejoras conserva el histórico anterior, pero calcula sus métricas desde una marca temporal independiente.
 
 ## Cómo ejecutar la auditoría
 
@@ -133,6 +139,8 @@ La cohorte posterior a estas mejoras debe evaluarse por separado. Los indicadore
 6. Stops antes de cierre frente a la hoja.
 7. Operaciones agregadas y reparto del PnL.
 8. Diferencias por activo y por tipo de salida.
+9. Paquetes completos y aperturas ausentes tras agotar reintentos.
+10. Devolución de comisiones acreditada, separada de la estimación.
 
 Con menos de 30 cierres posteriores al cambio, la lectura es exploratoria. Entre 30 y 99 puede orientar ajustes, pero sigue siendo frágil. A partir de 100 se pueden contrastar hipótesis, todavía con validación fuera de muestra y sin convertir correlaciones en reglas automáticas.
 

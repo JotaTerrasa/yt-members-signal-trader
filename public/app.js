@@ -350,7 +350,20 @@ function bindEvents() {
     renderMyLedger();
   });
   const alignmentPanel = document.querySelector('#sheet-vst-alignment');
-  alignmentPanel?.addEventListener('click', (event) => {
+  alignmentPanel?.addEventListener('click', async (event) => {
+    const cohortButton = event.target.closest('[data-start-improvement-cohort]');
+    if (cohortButton) {
+      const confirmed = window.confirm('¿Iniciar una cohorte nueva desde este momento? El histórico anterior se conserva.');
+      if (!confirmed) {
+        return;
+      }
+      await runAction(async () => {
+        await postJson('/api/replica-audit/cohort/start', { confirm: 'INICIAR_COHORTE' });
+        appState.replicaAudit = null;
+        await loadPnl();
+      });
+      return;
+    }
     const button = event.target.closest('[data-alignment-scroll]');
     if (!button) {
       return;
@@ -4149,21 +4162,28 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const warningRows = rows.filter((row) => row.severity === 'warn').length;
   const bingxFees = Number(summary.bingxFees || 0);
   const bingxFunding = Number(summary.bingxFunding || 0);
+  const actualRebate = Number(summary.actualCommissionRebate || 0);
 
   return `
     <div class="replica-audit">
       <div class="replica-box-title">
-        <strong>Auditoria operacion por operacion</strong>
-        <span>${escapeHtml(`${rows.length} filas - ${criticalRows} criticas - ${warningRows} revisar`)}</span>
+        <div>
+          <strong>Auditoría operación por operación</strong>
+          <span>${escapeHtml(`${rows.length} filas - ${criticalRows} críticas - ${warningRows} por revisar`)}</span>
+        </div>
+        <button class="button secondary replica-cohort-button" type="button" data-start-improvement-cohort>Nueva cohorte</button>
       </div>
       <div class="replica-audit-grid">
         ${renderReplicaMetric('Hoja externa', formatMoney(summary.sheetPnl, 'USDT'), `${summary.sheetRows || 0} filas`, amountClass(summary.sheetPnl))}
-        ${renderReplicaMetric('Replica teorica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
+        ${renderReplicaMetric('Réplica teórica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
         ${renderReplicaMetric('BingX bruto', formatMoney(summary.bingxGross, 'VST'), `${summary.vstCloses || 0} cierres`, amountClass(summary.bingxGross))}
         ${renderReplicaMetric('BingX neto', formatMoney(summary.bingxNet, 'VST'), `${formatMoney(bingxFees + bingxFunding, 'VST')} costes`, amountClass(summary.bingxNet))}
-        ${renderReplicaMetric('Neto con devolucion', formatMoney(summary.bingxNetAfterEstimatedRebate, 'VST'), `${formatPercent(summary.estimatedCommissionRebatePercent)} de fees, escenario`, amountClass(summary.bingxNetAfterEstimatedRebate))}
-        ${renderReplicaMetric('Gap neto', formatMoney(summary.netGap, 'VST'), 'BingX neto vs replica teorica', amountClass(summary.netGap))}
+        ${renderReplicaMetric('Neto con devolución', formatMoney(summary.bingxNetAfterEstimatedRebate, 'VST'), `${formatPercent(summary.estimatedCommissionRebatePercent)} de comisiones, escenario no acreditado`, amountClass(summary.bingxNetAfterEstimatedRebate))}
+        ${renderReplicaMetric('Devolución detectada', formatMoney(actualRebate, 'VST'), summary.commissionRebateDetected ? 'Ingreso acreditado por BingX' : 'Sin ingreso de devolución en BingX', amountClass(actualRebate))}
+        ${renderReplicaMetric('Tarifa real', formatCommissionRates(summary), 'Tarifa consultada en BingX', '')}
+        ${renderReplicaMetric('Diferencia neta', formatMoney(summary.netGap, 'VST'), 'BingX neto frente a réplica teórica', amountClass(summary.netGap))}
       </div>
+      ${renderImprovementCohort(audit.cohort)}
       <div class="replica-issue-strip">
         ${renderReplicaIssuePills(summary.issueCounts)}
       </div>
@@ -4187,6 +4207,63 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
       </div>
     </div>
   `;
+}
+
+function renderImprovementCohort(cohort) {
+  if (!cohort) {
+    return '<div class="replica-empty">La cohorte posterior a las mejoras todavía no está inicializada.</div>';
+  }
+  const summary = cohort.summary || {};
+  const sample = cohort.sampleStatus || {};
+  const coverage = appState.state?.signalCoverage || {};
+  const coverageSummary = coverage.summary || {};
+  const latestPackage = coverage.latestPackage || null;
+  return `
+    <section class="replica-cohort">
+      <div class="replica-box-title">
+        <div>
+          <strong>Cohorte posterior a las mejoras</strong>
+          <span>Desde ${escapeHtml(formatDateTime(cohort.startedAt))}</span>
+        </div>
+        <span class="ledger-status ${escapeAttribute(sample.key === 'contrastable' ? 'positive' : 'warn')}">${escapeHtml(sample.label || 'Sin muestra')}</span>
+      </div>
+      <div class="replica-audit-grid">
+        ${renderReplicaMetric('Aperturas', String(summary.vstOpenings || 0), `${summary.sheetRows || 0} filas en la hoja`, '')}
+        ${renderReplicaMetric('Cierres', String(summary.vstCloses || 0), sample.detail || 'Esperando operaciones', '')}
+        ${renderReplicaMetric('Bruto', formatMoney(summary.bingxGross, 'VST'), 'Antes de costes', amountClass(summary.bingxGross))}
+        ${renderReplicaMetric('Comisiones + funding', formatMoney(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0), 'VST'), 'Coste observado', amountClass(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0)))}
+        ${renderReplicaMetric('Neto', formatMoney(summary.bingxNet, 'VST'), 'Resultado observado', amountClass(summary.bingxNet))}
+        ${renderReplicaMetric('Cobertura', `${summary.vstOpenings || 0}/${summary.sheetRows || 0}`, 'Ejecuciones frente a hoja', summary.vstOpenings === summary.sheetRows && summary.sheetRows ? 'amount positive' : 'warn')}
+        ${renderReplicaMetric('Paquetes completos', String(coverageSummary.completePackages || 0), `${coverageSummary.incompletePackages || 0} incompletos`, coverageSummary.incompletePackages ? 'amount negative' : 'amount positive')}
+        ${renderReplicaMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : 'Esperando', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin señales nuevas', latestPackage?.status === 'complete' ? 'amount positive' : latestPackage?.status === 'incomplete' ? 'amount negative' : 'warn')}
+      </div>
+    </section>
+  `;
+}
+
+function formatCommissionRates(summary = {}) {
+  const taker = Number(summary.takerCommissionPercent);
+  const maker = Number(summary.makerCommissionPercent);
+  if (!Number.isFinite(taker) && !Number.isFinite(maker)) {
+    return 'Sin dato';
+  }
+  return `Taker ${formatRatePercent(taker)} / Maker ${formatRatePercent(maker)}`;
+}
+
+function formatRatePercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  return `${number.toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}%`;
+}
+
+function formatSignalPackageStatus(status) {
+  return {
+    complete: 'Completo',
+    incomplete: 'Incompleto',
+    pending: 'Pendiente'
+  }[status] || status || '-';
 }
 
 function renderReplicaIssuePills(issueCounts = {}) {

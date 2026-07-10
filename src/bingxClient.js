@@ -20,6 +20,10 @@ export class BingXClient {
     return this.request('GET', '/openApi/swap/v2/user/income', params);
   }
 
+  async getCommissionRate(symbol = 'BTC-USDT') {
+    return this.request('GET', '/openApi/swap/v2/user/commissionRate', { symbol });
+  }
+
   async getContracts(symbol) {
     return this.request('GET', '/openApi/swap/v2/quote/contracts', symbol ? { symbol } : {});
   }

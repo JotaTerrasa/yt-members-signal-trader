@@ -12,13 +12,14 @@ const generatedAt = new Date().toISOString();
 
 await Promise.all([mkdir(reportDir, { recursive: true }), mkdir(dataReportDir, { recursive: true })]);
 
-const [postsData, eventsData, replicaPayload, operationalPayload, riskPayload, telegramSourcePayload, eventFile] = await Promise.all([
+const [postsData, eventsData, replicaPayload, operationalPayload, riskPayload, telegramSourcePayload, signalCoveragePayload, eventFile] = await Promise.all([
   readJson(join(dataDir, 'posts.json'), { posts: [] }),
   readJson(join(dataDir, 'trade-events.json'), { events: [] }),
   fetchJson(`/api/replica-audit?month=${encodeURIComponent(month)}`),
   fetchJson('/api/operational-status'),
   fetchJson('/api/risk'),
   fetchJson('/api/telegram-source'),
+  fetchJson('/api/signal-coverage'),
   stat(join(dataDir, 'trade-events.json')).catch(() => null)
 ]);
 
@@ -43,7 +44,8 @@ const report = {
     exchangeSafety: pickExchangeSafety(operationalPayload?.exchangeSafety),
     incidents24h: operationalPayload?.incidents?.counts || null,
     risk: pickRisk(riskPayload?.risk),
-    configuration: pickConfig(riskPayload?.bingx, telegramSourcePayload?.telegramSource)
+    configuration: pickConfig(riskPayload?.bingx, telegramSourcePayload?.telegramSource),
+    signalCoverage: signalCoveragePayload?.signalCoverage || operationalPayload?.signalCoverage || null
   },
   data: {
     posts: posts.length,
@@ -69,9 +71,19 @@ const report = {
     estimatedCommissionRebatePercent: summary.estimatedCommissionRebatePercent || 0,
     estimatedCommissionRebate: summary.estimatedCommissionRebate || 0,
     netAfterEstimatedRebate: summary.bingxNetAfterEstimatedRebate || 0,
+    actualCommissionRebate: summary.actualCommissionRebate || 0,
+    commissionRebateDetected: Boolean(summary.commissionRebateDetected),
+    takerCommissionPercent: summary.takerCommissionPercent ?? null,
+    makerCommissionPercent: summary.makerCommissionPercent ?? null,
     aggregatedRows: summary.aggregatedRows || 0,
     aggregatedCycles: summary.aggregatedCycles || 0,
     issueCounts: summary.issueCounts || {}
+  } : null,
+  cohort: replica?.cohort ? {
+    startedAt: replica.cohort.startedAt,
+    generatedAt: replica.cohort.generatedAt,
+    sampleStatus: replica.cohort.sampleStatus || null,
+    summary: pickCohortSummary(replica.cohort.summary)
   } : null
 };
 report.findings = buildFindings(report);
@@ -253,6 +265,12 @@ function buildFindings(report) {
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
     findings.push({ severity: 'high', code: 'sheet_operations_missing', detail: `${report.replica.issueCounts['No ejecutada en VST']} operaciones de la hoja no tienen apertura VST emparejada.` });
   }
+  if (report.runtime.signalCoverage?.summary?.missingOpenings) {
+    findings.push({ severity: 'critical', code: 'incomplete_signal_packages', detail: `${report.runtime.signalCoverage.summary.missingOpenings} aperturas faltan en paquetes posteriores a las mejoras.` });
+  }
+  if (report.replica && Math.abs(report.replica.fees) > 0 && !report.replica.commissionRebateDetected) {
+    findings.push({ severity: 'info', code: 'rebate_not_detected', detail: 'BingX no acredita ninguna devolución de comisiones en el histórico consultado.' });
+  }
   if (report.runtime.health?.level !== 'ok') {
     findings.push({ severity: 'critical', code: 'monitor_unhealthy', detail: 'El monitor no está en estado operativo correcto.' });
   }
@@ -303,10 +321,17 @@ function renderMarkdown(report) {
     `- Comisiones: ${money(r.fees)} VST`,
     `- Funding: ${money(r.funding)} VST`,
     `- Neto observado: ${money(r.net)} VST`,
+    `- Devolución acreditada por BingX: ${money(r.actualCommissionRebate)} VST (${r.commissionRebateDetected ? 'detectada' : 'no detectada'})`,
+    `- Tarifa taker observada: ${percent(r.takerCommissionPercent)}`,
+    `- Tarifa maker observada: ${percent(r.makerCommissionPercent)}`,
     `- Devolución estimada (${r.estimatedCommissionRebatePercent ?? 0}%): ${money(r.estimatedCommissionRebate)} VST`,
-    `- Neto tras devolución estimada: ${money(r.netAfterEstimatedRebate)} VST`,
+    `- Neto hipotético tras devolución estimada: ${money(r.netAfterEstimatedRebate)} VST`,
     `- Ciclos con entradas agregadas: ${r.aggregatedCycles ?? 0} (${r.aggregatedRows ?? 0} filas)`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
+    '',
+    '## Cohorte posterior a las mejoras',
+    '',
+    ...renderCohortLines(report.cohort, report.runtime.signalCoverage),
     '',
     '## Estado operativo',
     '',
@@ -323,10 +348,47 @@ function renderMarkdown(report) {
     '',
     '## Interpretación',
     '',
-    'El informe separa resultados observados de escenarios estimados. La devolución de comisiones no modifica la equity real hasta que aparezca como ingreso en BingX. Una mejora de ejecución reduce divergencias, pero no garantiza rentabilidad futura.',
+    'El informe separa resultados observados de escenarios estimados. La devolución de comisiones no modifica la equity real hasta que aparezca como ingreso en BingX. La cohorte posterior a las mejoras mide el comportamiento nuevo sin reescribir el histórico. Una mejora de ejecución reduce divergencias, pero no garantiza rentabilidad futura.',
     ''
   ];
-  return `${lines.join('\n')}\n`;
+  return lines.join('\n');
+}
+
+function pickCohortSummary(summary = {}) {
+  return {
+    sheetRows: summary.sheetRows || 0,
+    openings: summary.vstOpenings || 0,
+    closes: summary.vstCloses || 0,
+    sheetPnl: summary.sheetPnl || 0,
+    theoreticalReplicaPnl: summary.replicaPnl || 0,
+    bingxGross: summary.bingxGross || 0,
+    fees: summary.bingxFees || 0,
+    funding: summary.bingxFunding || 0,
+    net: summary.bingxNet || 0,
+    actualCommissionRebate: summary.actualCommissionRebate || 0,
+    commissionRebateDetected: Boolean(summary.commissionRebateDetected),
+    issueCounts: summary.issueCounts || {}
+  };
+}
+
+function renderCohortLines(cohort, signalCoverage) {
+  if (!cohort) {
+    return ['- La cohorte todavía no está inicializada.'];
+  }
+  const sample = cohort.sampleStatus || {};
+  const summary = cohort.summary || {};
+  const packages = signalCoverage?.summary || {};
+  return [
+    `- Inicio: ${cohort.startedAt}`,
+    `- Muestra: ${sample.label || sample.status || 'sin clasificar'} (${summary.closes || 0} cierres)`,
+    `- Aperturas / cierres: ${summary.openings || 0} / ${summary.closes || 0}`,
+    `- Neto observado: ${money(summary.net)} VST`,
+    `- Comisiones: ${money(summary.fees)} VST`,
+    `- Paquetes completos: ${packages.completePackages || 0} de ${packages.packages || 0}`,
+    `- Aperturas esperadas / ejecutadas / faltantes: ${packages.expectedOpenings || 0} / ${packages.executedOpenings || 0} / ${packages.missingOpenings || 0}`,
+    `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,
+    `- Clasificación: ${JSON.stringify(summary.issueCounts || {})}`
+  ];
 }
 
 function sameSignal(event, signal) {

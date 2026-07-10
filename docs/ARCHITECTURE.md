@@ -90,7 +90,8 @@ flowchart LR
   journal[".data/trade-events.json.journal<br/>diario incremental"] --> server
   paper[".data/paper-trades.json<br/>paper/test"] --> server
   study[".data/strategy-study/*.json/md<br/>informe runtime"] --> server
-  backups[".data/backups/*.json<br/>backup redactado"] --> server
+  backups[".data/backups/<br/>redactado y cifrado"] --> server
+  key["~/.futures-magician/backup.key<br/>fuera del repositorio"] --> backups
   profile[".yt-profile/<br/>sesiones web"] --> scraper["youtubeScraper.js"]
 ```
 
@@ -112,6 +113,8 @@ Orquesta:
 - Cola serial de señales para evitar carreras entre YouTube y Telegram Web.
 - Reintentos cortos de entradas cuyo stop o precio aún no estén en zona válida.
 - Cierre inmediato a mercado con auditoría de slippage.
+- Reintentos idempotentes de cierres que fallen por red o error transitorio de BingX.
+- Cohorte posterior a mejoras y cobertura de paquetes de señales.
 - Portfolio dinámico.
 - PnL histórico.
 

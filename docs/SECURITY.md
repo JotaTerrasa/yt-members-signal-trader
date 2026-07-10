@@ -48,13 +48,13 @@ Live real requiere confirmación manual en la UI. Aun así:
 - usa allowlist si solo quieres pares concretos;
 - deja `dryRunRequired` activo salvo que sepas por qué lo desactivas.
 
-No ejecutes `REPLAY_LIVE` sin revisar si la orden ya se ejecuto.
+No ejecutes `REPLAY_LIVE` sin revisar si la orden ya se ejecutó.
 
 ## Telegram Web
 
 Telegram Web puede recibir mensajes urgentes antes que YouTube. También aumenta el riesgo operativo.
 
-Recomendacion:
+Recomendación:
 
 - permitir por defecto solo gestión de posiciones;
 - mantener aperturas desactivadas salvo confirmación explícita;
@@ -82,8 +82,26 @@ No incluyas:
 
 - `.data/`;
 - `.yt-profile/`;
-- capturas con informacion sensible;
+- capturas con información sensible;
 - logs con claves.
+
+## Backups cifrados
+
+Los backups restaurables usan AES-256-GCM y una clave derivada con scrypt. La clave predeterminada vive fuera del proyecto:
+
+```text
+~/.futures-magician/backup.key
+```
+
+Reglas:
+
+- no subas la clave ni archivos `.fmbak` a Git;
+- al inicializarla, el script limita sus permisos al usuario actual en Windows y a modo `0600` en Linux/macOS;
+- guarda una copia de la clave separada del backup;
+- verifica cada backup antes de considerarlo válido;
+- restaura primero en `.data/restore-tests/`;
+- para respaldar `.yt-profile/`, detén Chromium/PM2 mediante `scripts/profileBackup.ps1` para que Cookies no quede bloqueado;
+- no excluyas Cookies del backup del perfil: contiene la sesión que permite recuperar el acceso web.
 
 ## UI expuesta
 

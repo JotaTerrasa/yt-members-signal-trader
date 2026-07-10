@@ -157,7 +157,7 @@ Tipo de orden:
 - Si la línea de dirección trae precio, por ejemplo `LONG SUI 1.123`, envía `LIMIT` a ese precio.
 - Si no trae precio, usa `MARKET`.
 - Si `Entradas siempre a mercado` está activo, ignora el precio de entrada de la señal y envía `MARKET`.
-- Incluso en mercado, el stop debe seguir siendo valido: en LONG por debajo del mercado y en SHORT por encima.
+- Incluso en mercado, el stop debe seguir siendo válido: en LONG por debajo del mercado y en SHORT por encima.
 - Si el precio se ha alejado más de un 0,15% en contra, la entrada espera como máximo tres minutos a que vuelva a zona; después caduca.
 
 ## 8. Gestión de posiciones
@@ -179,6 +179,8 @@ Cierres:
 - Cierres parciales respetan el porcentaje detectado.
 - En cierres completos, la app intenta cancelar después los SL/TP protectores asociados a esa posición.
 - Un cierre explícito se ejecuta inmediatamente a mercado. Si el precio difiere del publicado, la app registra una advertencia de slippage, pero no especula esperando una recuperación.
+- Si un cierre falla por timeout, red o error transitorio del exchange, queda en una cola idempotente durante tres minutos, con un máximo de doce intentos.
+- Los errores definitivos de validación no se reintentan. El estado final queda en el historial y genera una alerta operativa.
 
 Notas:
 
@@ -299,3 +301,41 @@ No compartas esa URL: la UI permite operar.
 `No se puede cancelar una orden`
 
 - Revisa que el ID sea string. Los IDs de BingX superan la precisión segura de JavaScript.
+
+## 14. Copias y recuperación
+
+Backup diario de datos:
+
+```bash
+npm run backup:secure
+```
+
+Backup de datos y perfil Chromium, deteniendo PM2 durante la captura:
+
+```powershell
+npm run backup:secure:profile:maintenance
+```
+
+Verificación y restauración aislada:
+
+```bash
+node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
+node scripts/secureBackup.js restore --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+La restauración normal usa `.data/restore-tests/`. Restaurar sobre el proyecto exige la confirmación literal `RESTORE_LIVE_DATA` y debe hacerse con PM2 detenido.
+
+Registro reproducible de tareas en Windows:
+
+```powershell
+npm run windows:tasks
+```
+
+Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y PM2 al iniciar sesión.
+
+## 15. Cohorte y siguiente paquete
+
+- `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.
+- `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
+- `Nueva cohorte` conserva los datos históricos y mueve únicamente el punto de inicio comparativo.
+- No se interpreta rentabilidad con menos de 30 cierres; de 30 a 99 la lectura es orientativa y a partir de 100 se contrastan hipótesis.

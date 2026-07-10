@@ -16,7 +16,7 @@ Estos directorios no se suben al repositorio, pero sí deben conservarse entre r
 
 | Ruta | Contenido | Debe respaldarse |
 |---|---|---|
-| `.data/` | Configuración, posts, eventos, trades, backups redactados. | Sí |
+| `.data/` | Configuración, posts, eventos, trades y backups. | Sí, mediante backup cifrado |
 | `.yt-profile/` | Perfil persistente de Chromium para YouTube y Telegram Web. | Sí, si quieres evitar iniciar sesión de nuevo |
 | `docs/strategy-reports/` | Informes versionables del estudio estratégico. | Sí, si quieres historial en Git |
 | `docs/audits/` | Informes versionables de auditoría integral. | Sí, si quieres historial en Git |
@@ -63,6 +63,8 @@ npm run package:check
 pm2 start ecosystem.config.cjs
 pm2 save
 ```
+
+En Windows, `npm run windows:tasks` registra el arranque de PM2 y los backups periódicos. `scripts/startPm2.ps1` restaura el volcado de PM2 y arranca el ecosistema si fuese necesario.
 
 Comandos útiles:
 
@@ -169,6 +171,18 @@ La imagen expone `5178` y define healthcheck contra:
 ```text
 /api/health
 ```
+
+La persistencia depende de los volúmenes de `.data`, `.yt-profile`, `docs/strategy-reports` y `docs/audits`. Un `docker compose down` no debe borrar esos directorios. La validación recomendada consiste en crear datos, reiniciar el contenedor y comprobar que siguen disponibles.
+
+## Backup portable
+
+```bash
+npm run backup:secure:init
+npm run backup:secure
+node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+Para mover la instalación a otra máquina, conserva el `.fmbak` y la clave en canales separados, instala el proyecto y restaura primero en un directorio aislado. El backup del perfil requiere una ventana de mantenimiento con PM2 detenido.
 
 ## Actualización segura
 

@@ -23,10 +23,14 @@ La app es un servidor Node.js local con frontend estático:
 - `src/paperTradeStore.js`: trading local/paper.
 - `src/referenceLedger.js`: lectura de hoja de Google de referencia.
 - `src/replicaAuditMatcher.js`: emparejamiento fiable entre hoja, aperturas, cierres y costes.
+- `src/operationalAudit.js`: evidencia de comisiones, estados de muestra y clasificación de errores reintentables.
+- `src/signalCoverage.js`: cobertura de paquetes completos, pendientes o incompletos.
 - `src/tradeEventStore.js`: auditoría de eventos reales/demo/paper.
 - `public/app.js`, `public/index.html`, `public/styles.css`: UI local.
 - `scripts/strategyStudy.js`: informe estadístico de operativa.
 - `scripts/systemAudit.js`: auditoría integral reproducible y segura para Git.
+- `scripts/secureBackup.js`: backup cifrado verificable y restauración aislada.
+- `scripts/registerWindowsTasks.ps1`: registro reproducible de PM2 y backups en el Programador de tareas.
 - `docs/`: documentación operativa.
 
 ## Archivos que no se suben
@@ -113,7 +117,7 @@ pm2 save
 - No relajes el requisito de stop loss obligatorio.
 - No elimines protecciones anti-duplicado.
 - Mantén pruebas con mensajes mixtos, errores tipográficos conocidos, LONG, SHORT y cierre total.
-- Si cambias parseo, prueba manualmente con mensajes reales anonimizados usando `/api/bingx/parse-test` o una verificacion local equivalente.
+- Si cambias el parseo, prueba manualmente con mensajes reales anonimizados usando `/api/bingx/parse-test` o una verificación local equivalente.
 
 ### Motor BingX y riesgo
 
@@ -125,6 +129,7 @@ pm2 save
   - paper/test local.
 - Cualquier cambio en tamaños de orden, apalancamiento, SL/TP o modo live debe quedar visible en UI y documentado.
 - Los cierres explícitos deben ejecutarse inmediatamente; el precio publicado sirve para auditar slippage, no para retener la salida.
+- Los fallos transitorios de cierre deben conservar `executionMode`, ser idempotentes y tener una ventana acotada de reintentos.
 - Las aperturas a mercado no deben perseguir un precio desfavorable por encima de la tolerancia configurada.
 - Los límites de riesgo de demo/live deben consultar la cuenta BingX, no el almacén paper.
 
@@ -163,6 +168,9 @@ pm2 save
 ```text
 jotaterrasa <165782559+JotaTerrasa@users.noreply.github.com>
 ```
+
+9. Si tocaste persistencia, verificaste un backup y una restauración en ruta aislada.
+10. Si tocaste Docker, verificaste healthcheck y persistencia después de reiniciar el contenedor.
 
 ## Git y publicación
 

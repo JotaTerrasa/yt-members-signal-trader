@@ -123,6 +123,18 @@ export class FuturesTrader {
     return summary;
   }
 
+  async getCommissionRate({ mode = null, symbol = 'BTC-USDT' } = {}) {
+    const config = {
+      ...this.configStore.getBingX({ includeSecrets: true }),
+      ...(mode ? { mode } : {})
+    };
+    if (config.mode === 'test' || !config.apiKey || !config.apiSecret) {
+      return null;
+    }
+    const response = await this.client(config).getCommissionRate(normalizeSymbol(symbol));
+    return response?.data?.commission || response?.data || null;
+  }
+
   async getPaperOnlyPnl({ months = 3, warning = '' } = {}) {
     const ranges = buildMonthRanges(months);
     const summary = buildPnlSummary([], ranges);
@@ -421,7 +433,11 @@ export class FuturesTrader {
       return results;
     }
 
-    return this.executeCloseSignalWithConfig(signal, { post, phase }, config);
+    try {
+      return await this.executeCloseSignalWithConfig(signal, { post, phase }, config);
+    } catch (error) {
+      return this.executionError(signal, { post, phase }, config, error);
+    }
   }
 
   async executeCloseAllSignal(signal, { post, phase } = {}) {
@@ -438,7 +454,11 @@ export class FuturesTrader {
       return results;
     }
 
-    return this.executeCloseAllSignalWithConfig(signal, { post, phase }, config);
+    try {
+      return await this.executeCloseAllSignalWithConfig(signal, { post, phase }, config);
+    } catch (error) {
+      return this.executionError(signal, { post, phase }, config, error);
+    }
   }
 
   async executeCloseAllSignalWithConfig(signal, { post, phase } = {}, config) {

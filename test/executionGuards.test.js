@@ -146,6 +146,37 @@ test('un cierre explícito se ejecuta aunque el mercado ya esté peor', async ()
   assert.match(result.warnings[0].reason, /^close_price_slippage:/);
 });
 
+test('un error temporal de cierre conserva el modo para poder reintentarse', async () => {
+  const trader = new FuturesTrader({
+    configStore: {
+      getBingX: () => ({ enabled: true, mode: 'demo', liveConfirmed: false })
+    },
+    paperStore: null,
+    tradeEventStore: null
+  });
+  trader.client = () => ({
+    getPositions: async () => {
+      throw new Error('Please try again later.');
+    }
+  });
+  trader.marketClient = () => ({});
+
+  const result = await trader.executeCloseSignal({
+    isSignal: true,
+    action: 'CLOSE',
+    symbol: 'SOL-USDT',
+    closePrice: 79,
+    closePercent: 100
+  }, {
+    post: { id: 'close-post', url: 'https://www.youtube.com/post/close-post' },
+    phase: 'live'
+  });
+
+  assert.equal(result.status, 'error');
+  assert.equal(result.executionMode, 'demo');
+  assert.equal(result.reason, 'Please try again later.');
+});
+
 test('el límite de posiciones usa la cuenta de BingX y no el almacén paper', async () => {
   const trader = new FuturesTrader({
     configStore: { getBingX: () => ({ mode: 'demo' }) },

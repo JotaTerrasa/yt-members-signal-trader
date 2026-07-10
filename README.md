@@ -38,9 +38,10 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Muestra PnL real, hoja de Google de referencia, ROI mensual, historial auditable, línea de vida de señales e incidencias.
 - Destaca la equity frente al capital inicial y audita la desviación entre precios publicados y ejecutados.
 - Ejecuta los cierres explícitos inmediatamente a mercado; el slippage se registra como advertencia y nunca retiene la salida.
+- Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
-- Genera backups redactados sin credenciales.
+- Genera backups redactados para soporte y backups cifrados restaurables de los datos locales.
 
 ## Arquitectura
 
@@ -76,7 +77,8 @@ flowchart LR
   study --> reports["docs/strategy-reports/"]
   api --> audit["Auditoría integral<br/>scripts/systemAudit.js"]
   audit --> auditReports["docs/audits/"]
-  api --> backup["Backup redactado<br/>.data/backups/"]
+  api --> backup["Backups redactados y cifrados<br/>scripts/secureBackup.js"]
+  backup --> key["Clave externa al repositorio<br/>~/.futures-magician/backup.key"]
 ```
 
 Flujo principal:
@@ -198,6 +200,14 @@ pm2 start src/server.js --name yt-members-signal-trader --cwd "C:\ruta\yt-member
 pm2 save
 ```
 
+En Windows se incluye `scripts/startPm2.ps1` para restaurar el ecosistema guardado. Puede registrarse como tarea al iniciar sesión sin depender de `pm2 startup`:
+
+```powershell
+npm run windows:tasks
+```
+
+Ese comando registra el arranque de PM2, el backup cifrado diario a las 03:15 y el backup semanal del perfil los domingos a las 04:00.
+
 Ver logs:
 
 ```bash
@@ -210,7 +220,7 @@ Reiniciar:
 pm2 restart yt-members-signal-trader --update-env
 ```
 
-El monitor puede auto-resumir tras reinicio si se guardo con `autoResume` activo desde la UI.
+El monitor puede reanudarse automáticamente tras un reinicio si se guardó con `autoResume` activo desde la UI.
 
 ## Configuración inicial
 
@@ -371,7 +381,7 @@ Endpoint manual:
 /api/backup/redacted
 ```
 
-Backups automaticos:
+Copias de seguridad automáticas:
 
 ```text
 .data/backups/latest-redacted.json
@@ -385,6 +395,37 @@ El backup redactado omite:
 - Bot token.
 - Chat ID.
 - Previews de secretos.
+
+Sirve para diagnóstico, pero no permite recuperar credenciales ni sesiones. Para una restauración completa se usa el backup cifrado.
+
+### Backup cifrado restaurable
+
+Inicializa una clave fuera del repositorio una sola vez:
+
+```bash
+npm run backup:secure:init
+```
+
+Crea y verifica un backup de `.data/`:
+
+```bash
+npm run backup:secure
+node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+La restauración, por defecto, se extrae en `.data/restore-tests/` y nunca pisa los datos activos:
+
+```bash
+node scripts/secureBackup.js restore --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+El perfil Chromium se respalda durante una ventana de mantenimiento para evitar archivos bloqueados:
+
+```powershell
+npm run backup:secure:profile:maintenance
+```
+
+La clave predeterminada está en `~/.futures-magician/backup.key`. El archivo `.fmbak` y su clave deben guardarse en ubicaciones distintas. Ninguno se versiona en Git.
 
 ### Auditoría
 
@@ -402,13 +443,16 @@ docs/audits/latest.md
 docs/audits/system-audit-*.md
 ```
 
-La devolución de comisiones se muestra como escenario estimado y no modifica la equity observada.
+La devolución de comisiones estimada se muestra como escenario y no modifica la equity observada. El panel separa esa hipótesis de cualquier devolución realmente acreditada por BingX.
+
+La auditoría incluye una cohorte posterior a las mejoras, la tarifa maker/taker observada y la cobertura de cada paquete de señales. La lectura es exploratoria con menos de 30 cierres, orientativa entre 30 y 99 y contrastable a partir de 100.
 
 Endpoints:
 
 ```text
 /api/audit
 /api/replica-audit
+/api/signal-coverage
 /api/risk
 /api/trade-events
 /api/trades.csv
@@ -426,6 +470,8 @@ Endpoints:
 | `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
 | `GET /api/bingx/positions` | Reconciliación de posiciones. |
 | `GET /api/bingx/pnl-sources` | Fuentes de rendimiento. |
+| `GET /api/replica-audit` | Réplica hoja/BingX, costes y cohorte posterior a mejoras. |
+| `GET /api/signal-coverage` | Cobertura de los paquetes de aperturas desde el inicio de la cohorte. |
 | `GET /api/historical-pnl` | Histórico local/Google Sheet. |
 | `GET /api/strategy-study/latest` | Último estudio estratégico. |
 | `GET /api/backup/redacted` | Backup seguro descargable. |

@@ -142,19 +142,27 @@ pm2 restart yt-members-signal-trader
 pm2 save
 ```
 
-Para supervivencia real tras reinicio de Windows, ejecuta el comando que PM2 recomienda:
+En Linux, para supervivencia tras reinicio usa el comando que PM2 recomienda:
 
 ```bash
 pm2 startup
 ```
 
-PM2 imprimira un comando especifico para tu sistema. Ejecutalo una vez y después:
+PM2 imprimirá un comando específico para tu sistema. Ejecútalo una vez y después:
 
 ```bash
 pm2 save
 ```
 
-## 7. Verificacion
+En Windows usa el script incluido y regístralo como tarea al iniciar sesión:
+
+```powershell
+npm run windows:tasks
+```
+
+El registro crea tres tareas: restauración de PM2 al iniciar sesión, backup cifrado diario a las 03:15 y backup semanal del perfil Chromium los domingos a las 04:00. El arranque ejecuta `pm2 resurrect`, inicia `ecosystem.config.cjs` si el proceso no existe y guarda de nuevo el estado.
+
+## 7. Verificación
 
 Health:
 
@@ -185,6 +193,13 @@ Auditoría general:
 
 ```bash
 curl http://localhost:5178/api/audit
+```
+
+Cobertura de paquetes y cohorte:
+
+```bash
+curl http://localhost:5178/api/signal-coverage
+curl http://localhost:5178/api/replica-audit
 ```
 
 ## 8. Cloudflare Tunnel opcional
