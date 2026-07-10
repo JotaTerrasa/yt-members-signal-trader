@@ -36,9 +36,12 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Mantiene anti-duplicados para evitar repetir señales ya procesadas.
 - Reconcilia lo que la app cree que existe con lo que BingX devuelve.
 - Muestra PnL real, hoja de Google de referencia, ROI mensual, historial auditable, línea de vida de señales e incidencias.
-- Destaca equity frente al capital inicial y muestra la cola de cierres protegidos cuando un cierre espera una zona válida o el fallback final a mercado.
+- Destaca la equity frente al capital inicial y audita la desviación entre precios publicados y ejecutados.
+- Ejecuta los cierres explícitos inmediatamente a mercado; el slippage se registra como advertencia y nunca retiene la salida.
+- Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
+- Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
-- Genera backups redactados sin credenciales.
+- Genera backups redactados para soporte y backups cifrados restaurables de los datos locales.
 
 ## Arquitectura
 
@@ -57,7 +60,7 @@ flowchart LR
 
   scraper --> parser["Parser de señales<br/>src/futuresSignalParser.js"]
   parser --> trader["Motor de futuros<br/>src/futuresTrader.js"]
-  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>límites, antigüedad y modo real"]
+  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>riesgo BingX, antigüedad y desvío"]
   risk --> bingxClient["Cliente BingX REST<br/>src/bingxClient.js"]
   bingxClient <--> bingx["BingX Futures"]
 
@@ -72,7 +75,10 @@ flowchart LR
   api --> sheet["Google Sheet / referencia<br/>src/referenceLedger.js"]
   api --> study["Estudio estratégico<br/>scripts/strategyStudy.js"]
   study --> reports["docs/strategy-reports/"]
-  api --> backup["Backup redactado<br/>.data/backups/"]
+  api --> audit["Auditoría integral<br/>scripts/systemAudit.js"]
+  audit --> auditReports["docs/audits/"]
+  api --> backup["Backups redactados y cifrados<br/>scripts/secureBackup.js"]
+  backup --> key["Clave externa al repositorio<br/>~/.futures-magician/backup.key"]
 ```
 
 Flujo principal:
@@ -80,7 +86,7 @@ Flujo principal:
 1. La UI configura fuentes, Telegram, BingX, límites y modo de ejecución a través de la API local.
 2. Playwright mantiene sesiones persistentes en `.yt-profile/` y lee YouTube/Telegram Web.
 3. El parser convierte texto libre en eventos operables: apertura, cierre, TP, SL, break even o cierre total.
-4. El motor de futuros valida cada señal antes de enviarla: stop loss, duplicados, límites, antigüedad, modo y bloqueo local.
+4. El motor de futuros procesa las señales en una cola única y valida stop loss, distancia del stop, duplicados, riesgo de la cuenta, antigüedad, desvío adverso y modo.
 5. BingX ejecuta o reconcilia según el modo activo; la app compara periódicamente estado local contra estado real.
 6. El bot de Telegram avisa de señales, ejecuciones, errores, descuadres, salud del monitor y acciones críticas.
 7. Los almacenes locales, backups redactados e informes permiten auditar lo ocurrido sin subir secretos al repo.
@@ -167,6 +173,7 @@ Los datos persistentes siguen fuera de Git:
 - `.data/`
 - `.yt-profile/`
 - `docs/strategy-reports/`
+- `docs/audits/`
 
 Guía completa: [docs/PACKAGING.md](docs/PACKAGING.md).
 
@@ -193,6 +200,14 @@ pm2 start src/server.js --name yt-members-signal-trader --cwd "C:\ruta\yt-member
 pm2 save
 ```
 
+En Windows se incluye `scripts/startPm2.ps1` para restaurar el ecosistema guardado. Puede registrarse como tarea al iniciar sesión sin depender de `pm2 startup`:
+
+```powershell
+npm run windows:tasks
+```
+
+Ese comando registra el arranque de PM2, el backup cifrado diario a las 03:15 y el backup semanal del perfil los domingos a las 04:00.
+
 Ver logs:
 
 ```bash
@@ -205,7 +220,7 @@ Reiniciar:
 pm2 restart yt-members-signal-trader --update-env
 ```
 
-El monitor puede auto-resumir tras reinicio si se guardo con `autoResume` activo desde la UI.
+El monitor puede reanudarse automáticamente tras un reinicio si se guardó con `autoResume` activo desde la UI.
 
 ## Configuración inicial
 
@@ -244,7 +259,7 @@ No escribas tokens en README, issues, commits ni capturas.
 2. Elige modo: `test`, `demo`, `live` o `dual`.
 3. Pega API key y API secret.
 4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
-5. Deja `Filtro de coste activo` en `Bloquear señales caras` si quieres impedir entradas cuyo break-even estimado por fees supere el margen configurado; usa `Solo avisar` solo si aceptas revisar manualmente esas señales.
+5. El filtro de coste avisa cuando las fees exigen demasiado margen. En modo bloqueo solo rechaza una entrada cuando existe un TP explícito y ese objetivo no cubre la ida y vuelta estimada; una señal sin TP no se descarta solo por usar x25.
 6. Activa `Exigir stop loss`.
 7. Si vas a live, revisa el checklist `Preparado para live`.
 8. Arma live solo desde la UI y con confirmación consciente.
@@ -258,7 +273,7 @@ Antes de dejar la app funcionando:
 - En la UI, `Monitor live activo` debe estar verde.
 - `API BingX validada` debe estar verde si usas BingX.
 - `Stop loss obligatorio` debe estar verde.
-- `Filtro de coste` debe estar en el modo esperado: bloqueo para operación conservadora o aviso para revisión manual.
+- La antigüedad máxima, el desvío adverso y la distancia máxima del stop deben coincidir con la política operativa.
 - `Seguro real BingX` debe indicar que no faltan SL/TP críticos.
 - `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestión.
 - `Guardia nocturna` debe estar estable.
@@ -270,8 +285,7 @@ Durante la sesión:
 - Revisa `Línea de vida real` para ver cada señal: recibida, parseada, validada, enviada, aceptada y cerrada.
 - Revisa `Historial de señales` para auditar la señal original, orden enviada, respuesta de BingX, PnL y motivo.
 - Revisa `Rendimiento` para comparar futuros reales y Google Sheet.
-- Revisa `Cierres protegidos` si un cierre queda retenido por slippage o neto negativo; no abras nuevas posiciones para probarlo.
-- Si un cierre protegido caduca, la app intenta un cierre final a mercado omitiendo la guarda solo si el modo sigue vigente y `live` sigue confirmado.
+- Los cierres explícitos se envían inmediatamente a mercado. Revisa la advertencia de slippage para medir calidad, no para esperar una recuperación del precio.
 - Revisa `Estudio estratégico` para conclusiones estadísticas, no para ejecutar decisiones autónomas todavía.
 
 ## Seguridad y límites
@@ -319,7 +333,7 @@ Incluye:
 - ROI mensual.
 - Equity frente al capital inicial en Demo VST y live real.
 - Simulador de capital inicial para Google Sheet.
-- Cierres protegidos pendientes, con precio de señal, mercado, slippage, límite, próximo intento, caducidad y fallback final a mercado.
+- Desviación de entrada y salida, operaciones agregadas y causas de desalineación con la hoja.
 - Guardia nocturna.
 - Incidencias 24h.
 - Preparado para live.
@@ -367,7 +381,7 @@ Endpoint manual:
 /api/backup/redacted
 ```
 
-Backups automaticos:
+Copias de seguridad automáticas:
 
 ```text
 .data/backups/latest-redacted.json
@@ -382,12 +396,64 @@ El backup redactado omite:
 - Chat ID.
 - Previews de secretos.
 
+Sirve para diagnóstico, pero no permite recuperar credenciales ni sesiones. Para una restauración completa se usa el backup cifrado.
+
+### Backup cifrado restaurable
+
+Inicializa una clave fuera del repositorio una sola vez:
+
+```bash
+npm run backup:secure:init
+```
+
+Crea y verifica un backup de `.data/`:
+
+```bash
+npm run backup:secure
+node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+La restauración, por defecto, se extrae en `.data/restore-tests/` y nunca pisa los datos activos:
+
+```bash
+node scripts/secureBackup.js restore --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+El perfil Chromium se respalda durante una ventana de mantenimiento para evitar archivos bloqueados:
+
+```powershell
+npm run backup:secure:profile:maintenance
+```
+
+La clave predeterminada está en `~/.futures-magician/backup.key`. El archivo `.fmbak` y su clave deben guardarse en ubicaciones distintas. Ninguno se versiona en Git.
+
 ### Auditoría
+
+Auditoría integral reproducible:
+
+```bash
+npm run audit:system
+```
+
+Genera un JSON local y una copia segura para Git:
+
+```text
+.data/audits/system-audit.json
+docs/audits/latest.md
+docs/audits/system-audit-*.md
+```
+
+La devolución de comisiones estimada se muestra como escenario y no modifica la equity observada. El panel separa esa hipótesis de cualquier devolución realmente acreditada por BingX.
+
+La auditoría incluye una cohorte posterior a las mejoras, la tarifa maker/taker observada y la cobertura de cada paquete de señales. La lectura es exploratoria con menos de 30 cierres, orientativa entre 30 y 99 y contrastable a partir de 100.
 
 Endpoints:
 
 ```text
 /api/audit
+/api/replica-audit
+/api/signal-coverage
+/api/risk
 /api/trade-events
 /api/trades.csv
 /api/export.json
@@ -404,6 +470,8 @@ Endpoints:
 | `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
 | `GET /api/bingx/positions` | Reconciliación de posiciones. |
 | `GET /api/bingx/pnl-sources` | Fuentes de rendimiento. |
+| `GET /api/replica-audit` | Réplica hoja/BingX, costes y cohorte posterior a mejoras. |
+| `GET /api/signal-coverage` | Cobertura de los paquetes de aperturas desde el inicio de la cohorte. |
 | `GET /api/historical-pnl` | Histórico local/Google Sheet. |
 | `GET /api/strategy-study/latest` | Último estudio estratégico. |
 | `GET /api/backup/redacted` | Backup seguro descargable. |
@@ -424,11 +492,15 @@ src/
   bingxClient.js         Cliente REST BingX
   bingxPriceWebSocket.js WebSocket de precios
   referenceLedger.js     hoja de Google de referencia
+  replicaAuditMatcher.js Emparejamiento hoja/apertura/cierre/fees
   portfolioDetector.js   Detección de portfolio
   *Store.js              Persistencia local
 
 scripts/
   strategyStudy.js       Informe estratégico
+  systemAudit.js         Auditoría integral reproducible
+
+test/                    Pruebas de parser, riesgo, ejecución y persistencia
 
 docs/
   ARCHITECTURE.md
@@ -459,6 +531,7 @@ Contenido importante:
 .data/config.json             Configuración local con secretos
 .data/posts.json              Posts/mensajes guardados
 .data/trade-events.json       Eventos de trading
+.data/trade-events.json.journal Diario incremental pendiente de compactación
 .data/paper-trades.json       Simulación local
 .data/backups/                Backups redacted
 .yt-profile/                  Sesiones Chromium
@@ -553,6 +626,8 @@ curl http://localhost:5178/api/health
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Seguridad](docs/SECURITY.md)
 - [Estudio estratégico](docs/STRATEGY_STUDY.md)
+- [Auditoría y mejora](docs/AUDIT_AND_IMPROVEMENT.md)
+- [Última auditoría integral](docs/audits/latest.md)
 - [Guía para agentes Codex](AGENTS.md)
 
 ## Aviso

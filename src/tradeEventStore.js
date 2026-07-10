@@ -1,9 +1,14 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+
+const COMPACT_EVERY_EVENTS = 100;
 
 export class TradeEventStore {
   constructor(filePath) {
     this.filePath = filePath;
+    this.journalPath = `${filePath}.journal`;
+    this.writeQueue = Promise.resolve();
+    this.pendingJournalEntries = 0;
     this.data = {
       version: 1,
       updatedAt: null,
@@ -26,11 +31,19 @@ export class TradeEventStore {
       }
       await this.save();
     }
+
+    const recovered = await this.recoverJournal();
+    if (recovered) {
+      await this.save();
+    }
   }
 
   async save() {
-    this.data.updatedAt = new Date().toISOString();
-    await writeFile(this.filePath, `${JSON.stringify(this.data, null, 2)}\n`);
+    return this.enqueueWrite(() => this.compactNow());
+  }
+
+  async flush() {
+    await this.writeQueue;
   }
 
   list(limit = null) {
@@ -50,7 +63,13 @@ export class TradeEventStore {
     }
 
     this.data.events.push(stored);
-    await this.save();
+    await this.enqueueWrite(async () => {
+      await appendFile(this.journalPath, `${JSON.stringify(stored)}\n`, 'utf8');
+      this.pendingJournalEntries += 1;
+      if (this.pendingJournalEntries >= COMPACT_EVERY_EVENTS) {
+        await this.compactNow();
+      }
+    });
     return stored;
   }
 
@@ -85,6 +104,55 @@ export class TradeEventStore {
         && (!Number.isFinite(cutoff) || timestamp >= cutoff)
         && (!mode || eventExecutionMode(event) === mode);
     }).length;
+  }
+
+  enqueueWrite(operation) {
+    const queued = this.writeQueue
+      .catch(() => null)
+      .then(operation);
+    this.writeQueue = queued;
+    return queued;
+  }
+
+  async compactNow() {
+    this.data.updatedAt = new Date().toISOString();
+    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify(this.data, null, 2)}\n`, 'utf8');
+    await rename(temporaryPath, this.filePath);
+    await writeFile(this.journalPath, '', 'utf8');
+    this.pendingJournalEntries = 0;
+  }
+
+  async recoverJournal() {
+    let raw;
+    try {
+      raw = await readFile(this.journalPath, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return 0;
+      }
+      throw error;
+    }
+
+    const known = new Set(this.data.events.map((event) => event.eventId || tradeEventId(event)));
+    let recovered = 0;
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.trim()) {
+        continue;
+      }
+      try {
+        const event = JSON.parse(line);
+        const eventId = event.eventId || tradeEventId(event);
+        if (!known.has(eventId)) {
+          this.data.events.push({ ...event, eventId });
+          known.add(eventId);
+          recovered += 1;
+        }
+      } catch {
+        // Una última línea parcial se ignora; los eventos compactados siguen intactos.
+      }
+    }
+    return recovered;
   }
 }
 

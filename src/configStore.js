@@ -23,7 +23,7 @@ const defaultConfig = {
     enabled: false,
     url: '',
     maxMessages: 40,
-    refreshSeconds: 300,
+    refreshSeconds: 30,
     executeSignals: false,
     executeOpenSignals: false,
     liveConfirmed: false
@@ -62,12 +62,15 @@ const defaultConfig = {
     maxDailyLossUSDT: 0,
     maxMonthlyLossUSDT: 0,
     maxSignalLeverage: 125,
-    maxSignalAgeMinutes: 180,
-    maxEntryDeviationPercent: 5,
+    maxSignalAgeMinutes: 5,
+    maxEntryDeviationPercent: 0.15,
+    maxStopDistancePercent: 5,
     costGuardEnabled: true,
-    costGuardMode: 'warn',
+    costGuardMode: 'block',
     costGuardFeeBuffer: 2,
     costGuardMaxMarginBreakEvenPercent: 3,
+    estimatedCommissionRebatePercent: 22,
+    improvementCohortStartedAt: null,
     vstBaseCapital: 300,
     vstCapitalPercent: 10,
     vstPnlResetAt: null,
@@ -232,10 +235,13 @@ export class ConfigStore {
       maxSignalLeverage: bingx.maxSignalLeverage,
       maxSignalAgeMinutes: bingx.maxSignalAgeMinutes,
       maxEntryDeviationPercent: bingx.maxEntryDeviationPercent,
+      maxStopDistancePercent: bingx.maxStopDistancePercent,
       costGuardEnabled: Boolean(bingx.costGuardEnabled),
       costGuardMode: bingx.costGuardMode,
       costGuardFeeBuffer: bingx.costGuardFeeBuffer,
       costGuardMaxMarginBreakEvenPercent: bingx.costGuardMaxMarginBreakEvenPercent,
+      estimatedCommissionRebatePercent: bingx.estimatedCommissionRebatePercent,
+      improvementCohortStartedAt: bingx.improvementCohortStartedAt || null,
       vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
       vstPnlResetAt: bingx.vstPnlResetAt || null,
@@ -295,6 +301,7 @@ export class ConfigStore {
       maxSignalLeverage: clampInteger(input.maxSignalLeverage, 1, 125, defaultConfig.bingx.maxSignalLeverage),
       maxSignalAgeMinutes: clampInteger(input.maxSignalAgeMinutes, 0, 1440, defaultConfig.bingx.maxSignalAgeMinutes),
       maxEntryDeviationPercent: clampNumber(input.maxEntryDeviationPercent, 0, 50, defaultConfig.bingx.maxEntryDeviationPercent),
+      maxStopDistancePercent: clampNumber(input.maxStopDistancePercent, 0, 50, defaultConfig.bingx.maxStopDistancePercent),
       costGuardEnabled: input.costGuardEnabled !== false,
       costGuardMode: normalizeCostGuardMode(input.costGuardMode),
       costGuardFeeBuffer: clampNumber(input.costGuardFeeBuffer, 1, 10, defaultConfig.bingx.costGuardFeeBuffer),
@@ -303,6 +310,16 @@ export class ConfigStore {
         0,
         100,
         defaultConfig.bingx.costGuardMaxMarginBreakEvenPercent
+      ),
+      estimatedCommissionRebatePercent: clampNumber(
+        input.estimatedCommissionRebatePercent,
+        0,
+        100,
+        defaultConfig.bingx.estimatedCommissionRebatePercent
+      ),
+      improvementCohortStartedAt: isoDateOrCurrent(
+        input.improvementCohortStartedAt,
+        current.improvementCohortStartedAt || defaultConfig.bingx.improvementCohortStartedAt
       ),
       vstBaseCapital: monthlyInitialCapitalVST,
       vstCapitalPercent: monthlyOrderPercent,
@@ -329,6 +346,26 @@ export class ConfigStore {
     }
 
     this.data.bingx = next;
+    await this.save();
+    return this.getBingX();
+  }
+
+  async ensureImprovementCohort({ startedAt = new Date() } = {}) {
+    const current = normalizeBingXConfig(this.data.bingx);
+    if (current.improvementCohortStartedAt) {
+      return current.improvementCohortStartedAt;
+    }
+    const date = startedAt instanceof Date ? startedAt : new Date(startedAt);
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    this.data.bingx.improvementCohortStartedAt = safeDate.toISOString();
+    await this.save();
+    return this.data.bingx.improvementCohortStartedAt;
+  }
+
+  async resetImprovementCohort({ startedAt = new Date() } = {}) {
+    const date = startedAt instanceof Date ? startedAt : new Date(startedAt);
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    this.data.bingx.improvementCohortStartedAt = safeDate.toISOString();
     await this.save();
     return this.getBingX();
   }
@@ -446,6 +483,9 @@ function normalizeBingXConfig(input = {}) {
     monthlyOrderPercent,
     monthlyOrderNotionalUSDT,
     monthlyOrderNotionalVST,
+    maxSignalAgeMinutes: clampInteger(input.maxSignalAgeMinutes, 0, 1440, defaultConfig.bingx.maxSignalAgeMinutes),
+    maxEntryDeviationPercent: clampNumber(input.maxEntryDeviationPercent, 0, 50, defaultConfig.bingx.maxEntryDeviationPercent),
+    maxStopDistancePercent: clampNumber(input.maxStopDistancePercent, 0, 50, defaultConfig.bingx.maxStopDistancePercent),
     costGuardEnabled: input.costGuardEnabled !== false,
     costGuardMode: normalizeCostGuardMode(input.costGuardMode),
     costGuardFeeBuffer: clampNumber(input.costGuardFeeBuffer, 1, 10, defaultConfig.bingx.costGuardFeeBuffer),
@@ -454,6 +494,12 @@ function normalizeBingXConfig(input = {}) {
       0,
       100,
       defaultConfig.bingx.costGuardMaxMarginBreakEvenPercent
+    ),
+    estimatedCommissionRebatePercent: clampNumber(
+      input.estimatedCommissionRebatePercent,
+      0,
+      100,
+      defaultConfig.bingx.estimatedCommissionRebatePercent
     ),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent

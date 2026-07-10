@@ -16,7 +16,7 @@ COPY scripts ./scripts
 COPY docs ./docs
 COPY README.md AGENTS.md ./
 
-RUN mkdir -p /app/.data /app/.yt-profile /app/docs/strategy-reports \
+RUN mkdir -p /app/.data /app/.yt-profile /app/docs/strategy-reports /app/docs/audits \
   && chown -R pwuser:pwuser /app
 
 USER pwuser

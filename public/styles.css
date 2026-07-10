@@ -2733,6 +2733,34 @@ summary.dashboard-section-title {
   background: #fff;
 }
 
+.replica-audit > .replica-box-title,
+.replica-cohort > .replica-box-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.replica-audit > .replica-box-title > div,
+.replica-cohort > .replica-box-title > div {
+  display: grid;
+  gap: 3px;
+}
+
+.replica-cohort {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.replica-cohort-button {
+  width: auto;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
 .replica-audit-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));

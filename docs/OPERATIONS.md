@@ -128,20 +128,24 @@ Configuración importante:
 - `API key` y `API secret`: se guardan localmente en `.data/config.json`.
 - `Allowlist`: si está vacía permite cualquier ticker soportado por BingX.
 - `Stop obligatorio`: bloquea aperturas sin SL.
-- `Max posiciones`: bloquea nuevas aperturas si se alcanza el límite.
+- `Max posiciones`: consulta la cuenta BingX activa y bloquea nuevas aperturas si se alcanza el límite.
 - `Max leverage señal`: bloquea señales con demasiado apalancamiento.
-- `Filtro de coste`: en modo `block` bloquea entradas cuyo break-even estimado por fees supere el margen máximo configurado; en modo `warn` solo marca el aviso.
+- `Edad máxima`: bloquea aperturas publicadas hace más de cinco minutos; no impide gestionar cierres, TP o SL.
+- `Desvío entrada`: en mercado, bloquea únicamente el desplazamiento desfavorable superior al 0,15%; un precio mejor sí se acepta.
+- `Distancia máxima SL`: bloquea stops anormalmente alejados, incluidos posibles errores tipográficos.
+- `Filtro de coste`: siempre avisa si el coste es alto. En modo `block` solo rechaza cuando hay un TP explícito que no cubre la ida y vuelta estimada.
+- `Devolución fees estimada`: crea un escenario comparativo; no modifica la equity real ni da por abonado el reembolso.
 - `Capital mes USDT`: capital inicial mensual para futuros reales.
 - `Capital mes VST`: capital inicial mensual para Demo VST.
 - `% fijo por señal`: porcentaje fijo aplicado a ambos capitales.
-- Criterio actual: 300 USDT/VST de capital mensual y 10% por señal, es decir 30 USDT en real y 30 VST en demo por ticker.
+- Criterio actual: 300 USDT/VST de capital mensual y 15% por señal, es decir 45 USDT en real y 45 VST en demo por ticker.
 
 ## 7. Aperturas
 
 Cuando detecta una apertura:
 
 1. Valida que BingX esté activado.
-2. Valida allowlist, stop loss, riesgo y filtro de coste.
+2. Valida allowlist, stop loss, distancia del stop, riesgo real de la cuenta, antigüedad, desvío y filtro de coste.
 3. Consulta contrato y ticker en BingX.
 4. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
 5. Calcula cantidad según modo.
@@ -153,7 +157,8 @@ Tipo de orden:
 - Si la línea de dirección trae precio, por ejemplo `LONG SUI 1.123`, envía `LIMIT` a ese precio.
 - Si no trae precio, usa `MARKET`.
 - Si `Entradas siempre a mercado` está activo, ignora el precio de entrada de la señal y envía `MARKET`.
-- Incluso en mercado, el stop debe seguir siendo valido: en LONG por debajo del mercado y en SHORT por encima.
+- Incluso en mercado, el stop debe seguir siendo válido: en LONG por debajo del mercado y en SHORT por encima.
+- Si el precio se ha alejado más de un 0,15% en contra, la entrada espera como máximo tres minutos a que vuelva a zona; después caduca.
 
 ## 8. Gestión de posiciones
 
@@ -173,16 +178,16 @@ Cierres:
 - `CLOSE_ALL` cierra todas las posiciones abiertas.
 - Cierres parciales respetan el porcentaje detectado.
 - En cierres completos, la app intenta cancelar después los SL/TP protectores asociados a esa posición.
-- Si un cierre queda fuera de la zona válida por slippage o neto negativo, entra en `Cierres protegidos` y se reintenta hasta ejecutarse o caducar.
-- Al caducar, intenta un cierre final a mercado omitiendo la guarda de slippage/neto negativo, siempre que BingX siga activo, el modo no haya cambiado y `live` siga confirmado.
-- El panel `Cierres protegidos` muestra símbolo, modo, porcentaje, precio de señal, mercado, slippage, límite, próximo intento, caducidad y enlace al post si existe.
+- Un cierre explícito se ejecuta inmediatamente a mercado. Si el precio difiere del publicado, la app registra una advertencia de slippage, pero no especula esperando una recuperación.
+- Si un cierre falla por timeout, red o error transitorio del exchange, queda en una cola idempotente durante tres minutos, con un máximo de doce intentos.
+- Los errores definitivos de validación no se reintentan. El estado final queda en el historial y genera una alerta operativa.
 
 Notas:
 
 - BingX usa IDs de orden largos; el cliente los conserva como string para evitar redondeo.
 - El replay de una señal live requiere confirmación explícita.
 - Las alertas de SL/órdenes huérfanas tienen una pequeña ventana de gracia tras aperturas y cierres para evitar falsos positivos mientras BingX confirma la posición y sus protectoras.
-- Las alertas Telegram de cierres protegidos se agrupan por evento pendiente para evitar avisos repetidos en cada reintento.
+- YouTube y Telegram se procesan en una cola única para impedir carreras entre dos fuentes que detecten la misma gestión casi a la vez.
 
 ## 9. Reejecutar una señal fallida
 
@@ -296,3 +301,41 @@ No compartas esa URL: la UI permite operar.
 `No se puede cancelar una orden`
 
 - Revisa que el ID sea string. Los IDs de BingX superan la precisión segura de JavaScript.
+
+## 14. Copias y recuperación
+
+Backup diario de datos:
+
+```bash
+npm run backup:secure
+```
+
+Backup de datos y perfil Chromium, deteniendo PM2 durante la captura:
+
+```powershell
+npm run backup:secure:profile:maintenance
+```
+
+Verificación y restauración aislada:
+
+```bash
+node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
+node scripts/secureBackup.js restore --input ".data/backups/secure/ARCHIVO.fmbak"
+```
+
+La restauración normal usa `.data/restore-tests/`. Restaurar sobre el proyecto exige la confirmación literal `RESTORE_LIVE_DATA` y debe hacerse con PM2 detenido.
+
+Registro reproducible de tareas en Windows:
+
+```powershell
+npm run windows:tasks
+```
+
+Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y PM2 al iniciar sesión.
+
+## 15. Cohorte y siguiente paquete
+
+- `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.
+- `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
+- `Nueva cohorte` conserva los datos históricos y mueve únicamente el punto de inicio comparativo.
+- No se interpreta rentabilidad con menos de 30 cierres; de 30 a 99 la lectura es orientativa y a partir de 100 se contrastan hipótesis.

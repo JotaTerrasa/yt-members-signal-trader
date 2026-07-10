@@ -25,6 +25,7 @@ flowchart TB
   subgraph trading["Trading y riesgo"]
     server --> trader["FuturesTrader<br/>src/futuresTrader.js"]
     trader --> parser["futuresSignalParser<br/>texto -> señal"]
+    server --> matcher["ReplicaAuditMatcher<br/>hoja ↔ apertura ↔ cierre ↔ fees"]
     trader --> bingxClient["BingXClient<br/>REST firmado"]
     trader --> paper["PaperTradeStore<br/>test/paper local"]
     server --> priceWs["BingXPriceWebSocket<br/>precios"]
@@ -38,6 +39,8 @@ flowchart TB
     ledger <--> sheet["Google Sheets gviz"]
     server --> study["strategyStudy<br/>scripts/strategyStudy.js"]
     study --> reports["docs/strategy-reports"]
+    server --> audit["systemAudit<br/>scripts/systemAudit.js"]
+    audit --> auditReports["docs/audits"]
   end
 
   server --> telegramBot["TelegramNotifier<br/>alertas bot"]
@@ -63,8 +66,9 @@ sequenceDiagram
   Scraper->>Server: evento posts
   Server->>Parser: parsear texto
   Parser-->>Server: señales normalizadas
+  Server->>Server: encolar por orden de llegada
   Server->>Trader: processPosts
-  Trader->>Trader: validar modo, SL, duplicado, riesgo y antigüedad
+  Trader->>Trader: validar modo, SL, distancia, duplicado, riesgo, antigüedad y desvío
   alt modo test
     Trader->>Store: paper/local event
   else demo/live/dual
@@ -82,10 +86,12 @@ sequenceDiagram
 flowchart LR
   config[".data/config.json<br/>configuración y secretos"] --> server["server.js"]
   posts[".data/posts.json<br/>posts/mensajes"] --> server
-  events[".data/trade-events.json<br/>eventos auditables"] --> server
+  events[".data/trade-events.json<br/>eventos compactados"] --> server
+  journal[".data/trade-events.json.journal<br/>diario incremental"] --> server
   paper[".data/paper-trades.json<br/>paper/test"] --> server
   study[".data/strategy-study/*.json/md<br/>informe runtime"] --> server
-  backups[".data/backups/*.json<br/>backup redactado"] --> server
+  backups[".data/backups/<br/>redactado y cifrado"] --> server
+  key["~/.futures-magician/backup.key<br/>fuera del repositorio"] --> backups
   profile[".yt-profile/<br/>sesiones web"] --> scraper["youtubeScraper.js"]
 ```
 
@@ -104,7 +110,11 @@ Orquesta:
 - bot de Telegram de alertas.
 - Telegram Web como fuente de mensajes.
 - BingX.
-- Cola de reintentos de cierres protegidos por slippage o neto negativo.
+- Cola serial de señales para evitar carreras entre YouTube y Telegram Web.
+- Reintentos cortos de entradas cuyo stop o precio aún no estén en zona válida.
+- Cierre inmediato a mercado con auditoría de slippage.
+- Reintentos idempotentes de cierres que fallen por red o error transitorio de BingX.
+- Cohorte posterior a mejoras y cobertura de paquetes de señales.
 - Portfolio dinámico.
 - PnL histórico.
 
@@ -163,6 +173,18 @@ Gestiona ejecución:
 - abre/cierra paper local;
 - cierra posiciones demo/live;
 - soporta modo `dual`.
+- consulta posiciones e ingresos de la cuenta activa para aplicar límites de riesgo reales;
+- impide perseguir entradas y rechaza stops anormalmente lejanos;
+- ejecuta cierres explícitos inmediatamente y conserva la desviación como telemetría.
+
+### `src/replicaAuditMatcher.js`
+
+Reconstruye el ciclo operativo completo:
+
+- empareja cada fila de la hoja con la apertura más probable del mismo activo;
+- enlaza PnL, comisión de apertura, comisión de cierre y funding;
+- tolera operaciones ausentes sin desplazar todas las posteriores;
+- reparte un cierre de BingX entre varias entradas cuando el exchange las agregó en una posición.
 
 ### `src/bingxClient.js`
 
@@ -231,6 +253,8 @@ Detecta posts de portfolio con enlaces nuevos y actualiza la fuente activa.
 .data/config.json        Config local y claves
 .data/posts.json         Posts/mensajes scrapeados
 .data/paper-trades.json  Operaciones paper
+.data/trade-events.json  Eventos compactados
+.data/trade-events.json.journal Eventos nuevos pendientes de compactación
 .yt-profile/             Sesiones Chromium/YouTube/Telegram Web
 ```
 
@@ -300,6 +324,7 @@ PUT /api/portfolio
 GET /api/reference-ledger
 GET /api/historical-pnl
 GET /api/risk
+GET /api/replica-audit
 GET /api/price-feed
 ```
 
@@ -330,7 +355,7 @@ Los eventos `state` se envían como snapshot completo de `currentState()`. La UI
 7. UI recibe eventos por SSE.
 8. PnL se recalcula al actualizar.
 
-Si un cierre queda protegido por slippage o neto negativo, `server.js` lo mantiene en la cola de reintentos y lo expone en `state.closeGuardRetryQueue`. Mientras no caduque, reintenta con la guarda activa. Al caducar, valida que BingX siga activo, que el modo no haya cambiado y que `live` siga confirmado; si esas condiciones se cumplen, ordena a `futuresTrader.js` un cierre final a mercado con `skipCloseGuard`.
+Los cierres explícitos no se retienen por slippage ni por un beneficio estimado pequeño. `futuresTrader.js` envía el cierre a mercado y adjunta una advertencia auditable cuando el precio ejecutable ya difiere del publicado.
 
 Para Telegram Web, el servidor filtra mensajes sin señales para reducir ruido.
 
@@ -338,6 +363,8 @@ Para Telegram Web, el servidor filtra mensajes sin señales para reducir ruido.
 
 ```bash
 npm run lint
+npm test
+npm run audit:system
 ```
 
-El comando hace `node --check` sobre archivos principales. No ejecuta pruebas end-to-end ni órdenes contra BingX.
+`npm test` cubre parser, guardas de entrada, cierres, riesgo, emparejamiento y persistencia. Ninguno de estos comandos envía órdenes reales a BingX.
