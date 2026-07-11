@@ -499,6 +499,12 @@ src/
 scripts/
   strategyStudy.js       Informe estratégico
   systemAudit.js         Auditoría integral reproducible
+  secureBackup.js        Backup cifrado, verificación y restauración aislada
+  portableCheck.js       Comprobación portable del entorno
+  registerWindowsTasks.ps1 Tareas Windows para PM2 y backups
+  startPm2.ps1           Restauración PM2 en Windows
+  profileBackup.ps1      Backup de perfil Chromium en mantenimiento
+  start.ps1 / start.sh   Arranque local asistido
 
 test/                    Pruebas de parser, riesgo, ejecución y persistencia
 
@@ -509,6 +515,8 @@ docs/
   SECURITY.md
   SIGNALS.md
   STRATEGY_STUDY.md
+  AUDIT_AND_IMPROVEMENT.md
+  audits/
   strategy-reports/
 ```
 
