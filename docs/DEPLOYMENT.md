@@ -82,6 +82,7 @@ Capital mensual VST: 300 VST
 Capital mensual real: 300 USDT
 Por señal: 10% fijo del capital mensual
 Resultado: 30 VST en demo y 30 USDT en real por ticker
+Reserva técnica Demo VST: 500 VST de margen libre objetivo
 Apalancamiento: usar el de la señal
 Stop loss obligatorio: activado
 Filtro de coste: activo en modo bloqueo
@@ -98,6 +99,8 @@ Campos sensibles:
 - BingX API secret.
 
 Estos valores viven en `.data/config.json` y no deben subirse a Git.
+
+La reserva técnica de Demo VST también vive en `.data/config.json`. Si se activa, sus aportaciones son colateral virtual externo: ayudan a evitar falta de margen en paquetes demo, pero la app las descuenta de la equity estratégica y del ROI.
 
 ## 6. Dejarlo corriendo con PM2
 

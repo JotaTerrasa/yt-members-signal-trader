@@ -140,17 +140,38 @@ Configuración importante:
 - `% fijo por señal`: porcentaje fijo aplicado a ambos capitales.
 - Criterio actual: 300 USDT/VST de capital mensual y 15% por señal, es decir 45 USDT en real y 45 VST en demo por ticker.
 
+### Reserva técnica de Demo VST
+
+La reserva técnica evita que un paquete quede a medias por falta de margen virtual. Antes de la primera apertura de cada publicación, la app calcula el margen necesario para todas sus señales y comprueba el saldo libre una sola vez.
+
+- Objetivo operativo actual: 500 VST de margen libre.
+- Si falta margen, la app solicita únicamente la diferencia mediante la API de Demo VST.
+- La recarga se comparte entre todos los tickers del paquete; no se hace una recarga independiente por ticker.
+- El capital estadístico continúa siendo 300 VST y el tamaño de cada orden continúa siendo 45 VST.
+- Toda recarga se registra como aportación externa. La equity estratégica, el PnL y el ROI descuentan esas aportaciones para que el rendimiento no se infle.
+- La UI muestra por separado la equity estratégica, el colateral bruto y la reserva técnica acumulada.
+- Esta automatización solo existe en `demo`. Nunca aporta fondos ni modifica el saldo de la cuenta real.
+
+Activación explícita:
+
+```bash
+curl -X POST http://localhost:5178/api/bingx/vst-reserve \
+  -H "content-type: application/json" \
+  --data '{"confirm":"ACTIVAR_RESERVA_VST","targetVST":500}'
+```
+
 ## 7. Aperturas
 
 Cuando detecta una apertura:
 
 1. Valida que BingX esté activado.
 2. Valida allowlist, stop loss, distancia del stop, riesgo real de la cuenta, antigüedad, desvío y filtro de coste.
-3. Consulta contrato y ticker en BingX.
-4. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
-5. Calcula cantidad según modo.
-6. Envía orden.
-7. Adjunta SL y TP si existen.
+3. En Demo VST, hace un único preflight de margen para el paquete completo y repone la reserva técnica si es necesario.
+4. Consulta contrato y ticker en BingX.
+5. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
+6. Calcula cantidad según modo.
+7. Envía orden.
+8. Adjunta SL y TP si existen.
 
 Tipo de orden:
 
@@ -246,7 +267,8 @@ Fuentes:
 
 Lectura rápida:
 
-- En Demo VST y live real, el resumen compara la equity actual contra el capital inicial configurado del mes.
+- En live real, el resumen compara la equity de la cuenta contra el capital inicial configurado del mes.
+- En Demo VST, el resumen utiliza la equity estratégica: equity bruta menos todas las aportaciones técnicas registradas.
 - El ROI mensual sigue usando la base mensual; la línea `Equity vs inicial` ayuda a distinguir balance/equity de PnL realizado.
 
 Endpoint:

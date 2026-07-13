@@ -69,6 +69,10 @@ sequenceDiagram
   Server->>Server: encolar por orden de llegada
   Server->>Trader: processPosts
   Trader->>Trader: validar modo, SL, distancia, duplicado, riesgo, antigüedad y desvío
+  opt demo VST con reserva técnica
+    Trader->>BingX: balance demo y, si falta margen libre, getVst
+    BingX-->>Trader: margen VST actualizado
+  end
   alt modo test
     Trader->>Store: paper/local event
   else demo/live/dual
@@ -115,6 +119,7 @@ Orquesta:
 - Cierre inmediato a mercado con auditoría de slippage.
 - Reintentos idempotentes de cierres que fallen por red o error transitorio de BingX.
 - Cohorte posterior a mejoras y cobertura de paquetes de señales.
+- Reserva técnica Demo VST activada solo con confirmación explícita y endpoint dedicado.
 - Portfolio dinámico.
 - PnL histórico.
 
@@ -165,6 +170,7 @@ Convierte texto libre en señales normalizadas:
 Gestiona ejecución:
 
 - valida configuración y riesgo;
+- en Demo VST, puede hacer un preflight único de margen por paquete y pedir solo la diferencia necesaria de reserva técnica;
 - consulta contrato y ticker en BingX;
 - calcula cantidad;
 - envía órdenes `MARKET` o `LIMIT`;
@@ -176,6 +182,7 @@ Gestiona ejecución:
 - consulta posiciones e ingresos de la cuenta activa para aplicar límites de riesgo reales;
 - impide perseguir entradas y rechaza stops anormalmente lejanos;
 - ejecuta cierres explícitos inmediatamente y conserva la desviación como telemetría.
+- descuenta aportaciones técnicas VST de la equity estratégica y del ROI demo.
 
 ### `src/replicaAuditMatcher.js`
 

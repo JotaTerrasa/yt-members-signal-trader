@@ -50,6 +50,15 @@ Live real requiere confirmación manual en la UI. Aun así:
 
 No ejecutes `REPLAY_LIVE` sin revisar si la orden ya se ejecutó.
 
+## Demo VST
+
+La reserva técnica de Demo VST usa una llamada firmada a BingX para añadir saldo virtual al entorno demo. Trátala como acción de escritura aunque no mueva USDT reales:
+
+- actívala solo con la confirmación explícita `ACTIVAR_RESERVA_VST`;
+- revisa el objetivo de margen libre antes de habilitarla;
+- verifica en la UI que las aportaciones técnicas aparecen separadas del rendimiento;
+- no uses esta reserva como referencia de rentabilidad live.
+
 ## Telegram Web
 
 Telegram Web puede recibir mensajes urgentes antes que YouTube. También aumenta el riesgo operativo.

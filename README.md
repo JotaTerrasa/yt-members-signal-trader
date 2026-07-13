@@ -39,6 +39,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Destaca la equity frente al capital inicial y audita la desviación entre precios publicados y ejecutados.
 - Ejecuta los cierres explícitos inmediatamente a mercado; el slippage se registra como advertencia y nunca retiene la salida.
 - Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
+- Mantiene en Demo VST una reserva técnica de margen antes de cada paquete y descuenta esas aportaciones de la equity estratégica y del ROI.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
 - Genera backups redactados para soporte y backups cifrados restaurables de los datos locales.
@@ -260,9 +261,10 @@ No escribas tokens en README, issues, commits ni capturas.
 3. Pega API key y API secret.
 4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
 5. El filtro de coste avisa cuando las fees exigen demasiado margen. En modo bloqueo solo rechaza una entrada cuando existe un TP explícito y ese objetivo no cubre la ida y vuelta estimada; una señal sin TP no se descarta solo por usar x25.
-6. Activa `Exigir stop loss`.
-7. Si vas a live, revisa el checklist `Preparado para live`.
-8. Arma live solo desde la UI y con confirmación consciente.
+6. En Demo VST, activa la reserva técnica para asegurar margen libre antes de cada paquete. La base estadística sigue siendo 300 VST y cada ticker sigue usando 45 VST; las recargas son colateral virtual externo y no cuentan como beneficio.
+7. Activa `Exigir stop loss`.
+8. Si vas a live, revisa el checklist `Preparado para live`.
+9. Arma live solo desde la UI y con confirmación consciente.
 
 ## Operación diaria
 
@@ -470,6 +472,7 @@ Endpoints:
 | `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
 | `GET /api/bingx/positions` | Reconciliación de posiciones. |
 | `GET /api/bingx/pnl-sources` | Fuentes de rendimiento. |
+| `POST /api/bingx/vst-reserve` | Activa y completa la reserva técnica de Demo VST; exige confirmación explícita. |
 | `GET /api/replica-audit` | Réplica hoja/BingX, costes y cohorte posterior a mejoras. |
 | `GET /api/signal-coverage` | Cobertura de los paquetes de aperturas desde el inicio de la cohorte. |
 | `GET /api/historical-pnl` | Histórico local/Google Sheet. |
