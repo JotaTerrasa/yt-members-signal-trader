@@ -1,9 +1,11 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { QueuedJsonWriter } from './queuedJsonWriter.js';
 
 export class PostStore {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writer = new QueuedJsonWriter(filePath);
     this.data = {
       version: 1,
       updatedAt: null,
@@ -30,7 +32,11 @@ export class PostStore {
 
   async save() {
     this.data.updatedAt = new Date().toISOString();
-    await writeFile(this.filePath, `${JSON.stringify(this.data, null, 2)}\n`);
+    await this.writer.write(this.data);
+  }
+
+  async flush() {
+    await this.writer.flush();
   }
 
   list() {

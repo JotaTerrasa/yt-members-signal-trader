@@ -1,7 +1,9 @@
 import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore } from './configStore.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
@@ -19,6 +21,7 @@ import { TradeEventStore } from './tradeEventStore.js';
 import { YouTubePostsScraper, normalizePostsUrl, normalizeTelegramWebUrl } from './youtubeScraper.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const execFileAsync = promisify(execFile);
 const rootDir = resolve(__dirname, '..');
 const publicDir = join(rootDir, 'public');
 const dataDir = join(rootDir, '.data');
@@ -119,6 +122,7 @@ let exchangeSyncInFlight = false;
 let lastExchangeSyncAt = 0;
 let lastExchangeSyncReason = '';
 let backendRestartScheduled = false;
+let shutdownPromise = null;
 const pendingExchangeClosures = new Map();
 const exchangeSafetyAlerts = new Map();
 const liveProtectionGraceUntil = new Map();
@@ -1402,6 +1406,30 @@ const server = createServer(async (request, response) => {
       return sendJson(response, { ok: true, result });
     }
 
+    if (requestUrl.pathname === '/api/bingx/vst-reserve' && request.method === 'POST') {
+      const body = await readJson(request);
+      if (body.confirm !== 'ACTIVAR_RESERVA_VST') {
+        return sendJson(response, { error: 'Confirma ACTIVAR_RESERVA_VST para activar la reserva técnica demo.' }, 400);
+      }
+      await configStore.updateVstTechnicalReserve({
+        enabled: true,
+        targetVST: body.targetVST || 500
+      });
+      const reserve = await futuresTrader.ensureVstTechnicalReserve({
+        force: true,
+        phase: 'manual_vst_reserve_activation'
+      });
+      pnlCache = null;
+      pnlSourcesCache = null;
+      pnlLastGood = null;
+      pnlSourcesLastGood = null;
+      clearPnlBackoff();
+      await syncExchangePositions({ reason: 'vst_reserve_activation' }).catch(() => exchangePositionsCache);
+      const updated = configStore.getBingX();
+      broadcast('bingx', { bingx: updated });
+      return sendJson(response, { ok: true, bingx: updated, reserve });
+    }
+
     if (requestUrl.pathname === '/api/bingx/probe' && request.method === 'POST') {
       const body = await readJson(request);
       const bingx = configStore.getBingX();
@@ -1772,6 +1800,16 @@ const server = createServer(async (request, response) => {
   }
 });
 
+server.once('error', async (error) => {
+  if (error.code === 'EADDRINUSE') {
+    const owner = await portOwnerSummary(port);
+    console.error(`No se puede iniciar: el puerto ${port} ya lo usa ${owner}. No se cambiara de puerto automaticamente.`);
+  } else {
+    console.error(`Servidor HTTP: ${error.message}`);
+  }
+  process.exit(1);
+});
+
 server.listen(port, () => {
   console.log(`YouTube Posts Scraper disponible en http://localhost:${port}`);
   hydrateStopLossRetryQueueFromEvents();
@@ -1941,6 +1979,11 @@ function currentState() {
     exchangeSafety: buildExchangeSafety(),
     stats: store.stats()
   };
+}
+
+function currentRealtimeState() {
+  const { logs, trades, ...realtime } = currentState();
+  return realtime;
 }
 
 async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
@@ -3116,6 +3159,9 @@ function notifyTradeCriticalEvent(event = {}) {
   const details = [
     event.signal?.symbol ? `${event.signal.symbol} ${event.signal.direction || event.signal.action || ''}`.trim() : '',
     event.status ? `Estado: ${event.status}` : '',
+    event.vstReserve?.actualAmount ? `Recarga técnica: +${formatSigned(event.vstReserve.actualAmount).replace('+', '')} VST` : '',
+    event.vstReserve?.after?.available ? `Margen VST disponible: ${formatSigned(event.vstReserve.after.available).replace('+', '')} VST` : '',
+    event.vstReserve?.externalFundingTotal ? `Aportaciones técnicas acumuladas: ${formatSigned(event.vstReserve.externalFundingTotal).replace('+', '')} VST` : '',
     event.sizing?.notional ? `Orden: ${formatSigned(event.sizing.notional).replace('+', '')} ${event.sizing.asset || 'USDT'}` : '',
     event.costGuard?.enabled ? costGuardAlertLine(event.costGuard) : '',
     event.takeProfit ? `TP: ${event.takeProfit}` : '',
@@ -3205,6 +3251,9 @@ function telegramTradeTitle(event = {}) {
   }
   if (status === 'demo_order_sent') {
     return 'Orden VST demo enviada';
+  }
+  if (status === 'demo_vst_technical_reserve_funded') {
+    return 'Reserva técnica VST recargada';
   }
   if (status === 'live_tp_sent') {
     return 'TP real colocado';
@@ -3462,6 +3511,7 @@ function buildHealth() {
     staleAfterSeconds: Math.round(staleMs / 1000),
     noVisiblePosts,
     visiblePosts: Number(state.visiblePosts || 0),
+    scraper: scraper.diagnostics,
     lastError,
     checkedAt: new Date().toISOString()
   };
@@ -3565,10 +3615,19 @@ function handleEvents(response) {
 }
 
 function broadcast(event, payload) {
-  const data = event === 'state' ? currentState() : payload;
+  const data = event === 'state' ? currentRealtimeState() : payload;
   const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of clients) {
-    client.write(message);
+    if (client.destroyed || client.writableEnded) {
+      clients.delete(client);
+      continue;
+    }
+    try {
+      client.write(message);
+    } catch {
+      clients.delete(client);
+      client.destroy();
+    }
   }
 }
 
@@ -3576,7 +3635,6 @@ function pushLog(entry) {
   state.logs.unshift(entry);
   state.logs = state.logs.slice(0, 200);
   broadcast('log', entry);
-  broadcast('state', state);
 }
 
 async function readJson(request) {
@@ -3679,6 +3737,7 @@ function summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, p
     incomeRows: Object.entries(income.byType || {}).map(([incomeType, value]) => ({ incomeType, income: value })),
     commissionRate
   });
+  const technicalReserve = mode === 'demo' ? demoTechnicalReserveAccounting() : null;
 
   return {
     key,
@@ -3703,8 +3762,9 @@ function summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, p
     closedTrades: Number(income.closedTrades || 0),
     records: Number(income.records || 0),
     winRate: realizedTrades.length ? (winners / realizedTrades.length) * 100 : null,
-    balance: balanceSummary(balance),
-    baseline: mode === 'demo' ? demoBaseline() : null
+    balance: balanceSummary(balance, technicalReserve),
+    baseline: mode === 'demo' ? demoBaseline() : null,
+    technicalReserve
   };
 }
 
@@ -3714,9 +3774,13 @@ function fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, bala
   }
 
   const baseline = mode === 'demo' ? demoBaseline() : null;
+  const technicalReserve = mode === 'demo' ? demoTechnicalReserveAccounting() : null;
+  const effectiveEquity = mode === 'demo'
+    ? Number(balance.equity || 0) - Number(technicalReserve.externalFunding || 0)
+    : Number(balance.equity || 0);
   const floating = roundMoney(Number(balance.unrealizedProfit || 0));
   const total = Number.isFinite(baseline)
-    ? roundMoney(Number(balance.equity || 0) - baseline)
+    ? roundMoney(effectiveEquity - baseline)
     : floating;
   const realized = roundMoney(total - floating);
 
@@ -3742,8 +3806,9 @@ function fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, bala
     closedTrades: 0,
     records: 0,
     winRate: null,
-    balance: balanceSummary(balance),
-    baseline
+    balance: balanceSummary(balance, technicalReserve),
+    baseline,
+    technicalReserve
   };
 }
 
@@ -3753,10 +3818,24 @@ function demoBaseline() {
   return Number.isFinite(value) && value > 0 ? value : 300;
 }
 
-function balanceSummary(balance) {
+function demoTechnicalReserveAccounting() {
+  const config = configStore.getBingX();
+  return {
+    enabled: Boolean(config.vstTechnicalReserveEnabled),
+    target: roundMoney(config.vstTechnicalReserveTargetVST || 500),
+    externalFunding: roundMoney(config.vstTechnicalExternalFundingVST || 0),
+    lastTopUpAt: config.vstTechnicalLastTopUpAt || null
+  };
+}
+
+function balanceSummary(balance, technicalReserve = null) {
   if (!balance) {
     return null;
   }
+
+  const externalFunding = roundMoney(technicalReserve?.externalFunding || 0);
+  const strategyBalance = roundMoney(Number(balance.balance || 0) - externalFunding);
+  const strategyEquity = roundMoney(Number(balance.equity || 0) - externalFunding);
 
   return {
     asset: balance.asset,
@@ -3764,7 +3843,10 @@ function balanceSummary(balance) {
     equity: roundMoney(balance.equity),
     availableMargin: roundMoney(balance.availableMargin),
     usedMargin: roundMoney(balance.usedMargin),
-    unrealizedProfit: roundMoney(balance.unrealizedProfit)
+    unrealizedProfit: roundMoney(balance.unrealizedProfit),
+    externalFunding,
+    strategyBalance,
+    strategyEquity
   };
 }
 
@@ -4372,6 +4454,24 @@ function scheduleBackendRestart(reason = 'manual') {
 }
 
 async function shutdown() {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+  shutdownPromise = performShutdown();
+  return shutdownPromise;
+}
+
+async function performShutdown() {
+  const forceExit = setTimeout(() => process.exit(1), 10_000);
+  forceExit.unref();
+  const serverClosed = new Promise((resolveClose) => {
+    if (!server.listening) {
+      resolveClose();
+      return;
+    }
+    server.close(() => resolveClose());
+  });
+
   for (const client of clients) {
     client.end();
   }
@@ -4379,6 +4479,9 @@ async function shutdown() {
   priceFeed.destroy();
   if (backupTimer) {
     clearInterval(backupTimer);
+  }
+  if (signalCoverageTimer) {
+    clearInterval(signalCoverageTimer);
   }
   for (const item of pendingStopLossRetries.values()) {
     if (item.timer) {
@@ -4392,10 +4495,21 @@ async function shutdown() {
     }
   }
   pendingCloseGuardRetries.clear();
-  await scraper.close();
-  await tradeEventStore.flush();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 1000).unref();
+  const results = await Promise.allSettled([
+    scraper.close(),
+    configStore.flush(),
+    store.flush(),
+    paperStore.flush(),
+    tradeEventStore.flush(),
+    serverClosed
+  ]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error(`Cierre ordenado incompleto: ${result.reason?.message || result.reason}`);
+    }
+  }
+  clearTimeout(forceExit);
+  process.exit(0);
 }
 
 function formatSigned(value) {
@@ -4411,6 +4525,28 @@ function formatPercentNumber(value) {
 
 function currentMonthKey() {
   return currentMonthKeyForDate(new Date());
+}
+
+async function portOwnerSummary(targetPort) {
+  if (process.platform !== 'win32') {
+    return 'otro proceso';
+  }
+  try {
+    const { stdout } = await execFileAsync('netstat', ['-ano', '-p', 'tcp'], { windowsHide: true });
+    const line = String(stdout || '')
+      .split(/\r?\n/)
+      .find((item) => new RegExp(`:${targetPort}\\s+.*LISTENING\\s+\\d+\\s*$`, 'i').test(item));
+    const pid = line?.trim().split(/\s+/).at(-1);
+    if (!pid) {
+      return 'otro proceso (PID no disponible)';
+    }
+    const task = await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true })
+      .catch(() => ({ stdout: '' }));
+    const processName = String(task.stdout || '').match(/^"([^"]+)"/)?.[1];
+    return processName ? `${processName} (PID ${pid})` : `el PID ${pid}`;
+  } catch {
+    return 'otro proceso (propietario no disponible)';
+  }
 }
 
 function currentMonthKeyForDate(date = new Date()) {

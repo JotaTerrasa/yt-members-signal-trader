@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { QueuedJsonWriter } from './queuedJsonWriter.js';
 
 const defaultConfig = {
   version: 1,
@@ -70,6 +71,10 @@ const defaultConfig = {
     costGuardFeeBuffer: 2,
     costGuardMaxMarginBreakEvenPercent: 3,
     estimatedCommissionRebatePercent: 22,
+    vstTechnicalReserveEnabled: false,
+    vstTechnicalReserveTargetVST: 500,
+    vstTechnicalExternalFundingVST: 0,
+    vstTechnicalLastTopUpAt: null,
     improvementCohortStartedAt: null,
     vstBaseCapital: 300,
     vstCapitalPercent: 10,
@@ -83,6 +88,7 @@ const defaultConfig = {
 export class ConfigStore {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writer = new QueuedJsonWriter(filePath);
     this.data = structuredClone(defaultConfig);
   }
 
@@ -102,7 +108,11 @@ export class ConfigStore {
   }
 
   async save() {
-    await writeFile(this.filePath, `${JSON.stringify(this.data, null, 2)}\n`);
+    await this.writer.write(this.data);
+  }
+
+  async flush() {
+    await this.writer.flush();
   }
 
   getTelegram({ includeToken = false } = {}) {
@@ -241,6 +251,10 @@ export class ConfigStore {
       costGuardFeeBuffer: bingx.costGuardFeeBuffer,
       costGuardMaxMarginBreakEvenPercent: bingx.costGuardMaxMarginBreakEvenPercent,
       estimatedCommissionRebatePercent: bingx.estimatedCommissionRebatePercent,
+      vstTechnicalReserveEnabled: Boolean(bingx.vstTechnicalReserveEnabled),
+      vstTechnicalReserveTargetVST: bingx.vstTechnicalReserveTargetVST,
+      vstTechnicalExternalFundingVST: bingx.vstTechnicalExternalFundingVST,
+      vstTechnicalLastTopUpAt: bingx.vstTechnicalLastTopUpAt || null,
       improvementCohortStartedAt: bingx.improvementCohortStartedAt || null,
       vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
@@ -317,6 +331,20 @@ export class ConfigStore {
         100,
         defaultConfig.bingx.estimatedCommissionRebatePercent
       ),
+      vstTechnicalReserveEnabled: input.vstTechnicalReserveEnabled === undefined
+        ? Boolean(currentNormalized.vstTechnicalReserveEnabled)
+        : Boolean(input.vstTechnicalReserveEnabled),
+      vstTechnicalReserveTargetVST: clampNumber(
+        input.vstTechnicalReserveTargetVST,
+        100,
+        100000,
+        currentNormalized.vstTechnicalReserveTargetVST || defaultConfig.bingx.vstTechnicalReserveTargetVST
+      ),
+      vstTechnicalExternalFundingVST: nonNegativeNumber(
+        currentNormalized.vstTechnicalExternalFundingVST,
+        defaultConfig.bingx.vstTechnicalExternalFundingVST
+      ),
+      vstTechnicalLastTopUpAt: currentNormalized.vstTechnicalLastTopUpAt || null,
       improvementCohortStartedAt: isoDateOrCurrent(
         input.improvementCohortStartedAt,
         current.improvementCohortStartedAt || defaultConfig.bingx.improvementCohortStartedAt
@@ -348,6 +376,40 @@ export class ConfigStore {
     this.data.bingx = next;
     await this.save();
     return this.getBingX();
+  }
+
+  async updateVstTechnicalReserve({ enabled, targetVST } = {}) {
+    const current = normalizeBingXConfig(this.data.bingx);
+    this.data.bingx.vstTechnicalReserveEnabled = enabled === undefined
+      ? Boolean(current.vstTechnicalReserveEnabled)
+      : Boolean(enabled);
+    this.data.bingx.vstTechnicalReserveTargetVST = clampNumber(
+      targetVST,
+      100,
+      100000,
+      current.vstTechnicalReserveTargetVST || defaultConfig.bingx.vstTechnicalReserveTargetVST
+    );
+    await this.save();
+    return this.getBingX();
+  }
+
+  async recordVstTechnicalFunding({ amount, at = new Date() } = {}) {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`invalid_vst_technical_funding:${amount}`);
+    }
+    const current = normalizeBingXConfig(this.data.bingx);
+    const date = at instanceof Date ? at : new Date(at);
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    const total = roundMoney(Number(current.vstTechnicalExternalFundingVST || 0) + value);
+    this.data.bingx.vstTechnicalExternalFundingVST = total;
+    this.data.bingx.vstTechnicalLastTopUpAt = safeDate.toISOString();
+    await this.save();
+    return {
+      amount: roundMoney(value),
+      total,
+      at: this.data.bingx.vstTechnicalLastTopUpAt
+    };
   }
 
   async ensureImprovementCohort({ startedAt = new Date() } = {}) {
@@ -501,6 +563,18 @@ function normalizeBingXConfig(input = {}) {
       100,
       defaultConfig.bingx.estimatedCommissionRebatePercent
     ),
+    vstTechnicalReserveEnabled: Boolean(input.vstTechnicalReserveEnabled),
+    vstTechnicalReserveTargetVST: clampNumber(
+      input.vstTechnicalReserveTargetVST,
+      100,
+      100000,
+      defaultConfig.bingx.vstTechnicalReserveTargetVST
+    ),
+    vstTechnicalExternalFundingVST: nonNegativeNumber(
+      input.vstTechnicalExternalFundingVST,
+      defaultConfig.bingx.vstTechnicalExternalFundingVST
+    ),
+    vstTechnicalLastTopUpAt: isoDateOrCurrent(input.vstTechnicalLastTopUpAt, null),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent
   };

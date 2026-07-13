@@ -21,7 +21,13 @@ const elements = {
   pnlView: document.querySelector('#pnl-view'),
   postsList: document.querySelector('#posts-list'),
   emptyPosts: document.querySelector('#empty-posts'),
+  postsPagination: document.querySelector('#posts-pagination'),
+  postsPaginationStatus: document.querySelector('#posts-pagination-status'),
+  postsLoadMore: document.querySelector('#posts-load-more'),
   logsList: document.querySelector('#logs-list'),
+  logsPagination: document.querySelector('#logs-pagination'),
+  logsPaginationStatus: document.querySelector('#logs-pagination-status'),
+  logsLoadMore: document.querySelector('#logs-load-more'),
   refreshPnl: document.querySelector('#refresh-pnl'),
   monthReset: document.querySelector('#month-reset'),
   monthResetStatus: document.querySelector('#month-reset-status'),
@@ -223,12 +229,18 @@ const PLOTLY_CDN_SOURCES = [
   'https://unpkg.com/plotly.js-dist-min@2.35.2/plotly.min.js'
 ];
 let plotlyLoadPromise = null;
+const POSTS_PAGE_SIZE = 40;
+const LOGS_PAGE_SIZE = 60;
 
 const appState = {
   state: null,
   posts: [],
   postsUpdatedAt: null,
   postsLoading: false,
+  postsDirty: false,
+  postsVisibleLimit: POSTS_PAGE_SIZE,
+  logsVisibleLimit: LOGS_PAGE_SIZE,
+  eventsConnected: null,
   telegram: null,
   telegramSource: null,
   bingx: null,
@@ -263,7 +275,13 @@ init();
 
 async function init() {
   bindEvents();
-  await Promise.all([loadState(), loadPosts(), loadTelegram(), loadTelegramSource(), loadStrategyStudy(), loadOperationalStatus(), loadBingx()]);
+  const initialLoads = [loadState(), loadTelegram(), loadTelegramSource(), loadStrategyStudy(), loadOperationalStatus(), loadBingx()];
+  if (pnlHashTarget()) {
+    appState.postsDirty = true;
+  } else {
+    initialLoads.push(loadPosts());
+  }
+  await Promise.all(initialLoads);
   connectEvents();
   window.addEventListener('hashchange', () => {
     applyHashNavigation();
@@ -336,7 +354,18 @@ function bindEvents() {
     });
   });
 
-  elements.search.addEventListener('input', renderPosts);
+  elements.search.addEventListener('input', () => {
+    appState.postsVisibleLimit = POSTS_PAGE_SIZE;
+    renderPosts();
+  });
+  elements.postsLoadMore?.addEventListener('click', () => {
+    appState.postsVisibleLimit += POSTS_PAGE_SIZE;
+    renderPosts();
+  });
+  elements.logsLoadMore?.addEventListener('click', () => {
+    appState.logsVisibleLimit += LOGS_PAGE_SIZE;
+    renderLogs();
+  });
   elements.myLedgerTabs?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-ledger-filter]');
     if (!button) {
@@ -683,6 +712,7 @@ async function loadPosts() {
     const response = await fetchJson('/api/posts');
     appState.posts = response.posts || [];
     appState.postsUpdatedAt = response.stats?.updatedAt || null;
+    appState.postsDirty = false;
     renderPosts();
   } finally {
     appState.postsLoading = false;
@@ -828,6 +858,16 @@ async function loadPnl() {
 function connectEvents() {
   const source = new EventSource('/api/events');
 
+  source.addEventListener('open', () => {
+    appState.eventsConnected = true;
+    renderState();
+  });
+
+  source.onerror = () => {
+    appState.eventsConnected = false;
+    renderState();
+  };
+
   source.addEventListener('state', (event) => {
     appState.state = JSON.parse(event.data);
     appState.logs = appState.state.logs || appState.logs;
@@ -835,22 +875,33 @@ function connectEvents() {
     appState.exchangeSafety = appState.state.exchangeSafety || appState.exchangeSafety;
     appState.portfolio = appState.state.portfolio || appState.portfolio;
     renderState();
-    renderLogs();
-    renderPnl();
+    if (viewIsVisible(elements.logsView)) {
+      renderLogs();
+    }
+    if (viewIsVisible(elements.pnlView)) {
+      renderPnl();
+    }
     syncPostsIfNeeded(appState.state);
   });
 
   source.addEventListener('posts', async () => {
-    await loadPosts();
+    appState.postsDirty = true;
+    if (viewIsVisible(elements.postsView)) {
+      await loadPosts();
+    }
   });
 
   source.addEventListener('log', (event) => {
     appState.logs.unshift(JSON.parse(event.data));
     appState.logs = appState.logs.slice(0, 200);
-    renderLogs();
-    renderTelegramWatchPanel();
-    renderRealModeBanner();
-    loadOperationalStatus().catch(() => renderGuardDashboard());
+    if (viewIsVisible(elements.logsView)) {
+      renderLogs();
+    }
+    if (viewIsVisible(elements.pnlView)) {
+      renderTelegramWatchPanel();
+      renderRealModeBanner();
+      loadOperationalStatus().catch(() => renderGuardDashboard());
+    }
   });
 
   source.addEventListener('telegram', (event) => {
@@ -896,8 +947,10 @@ function connectEvents() {
       renderBingx(payload.bingx);
     }
     renderBingx(appState.bingx, `Trade: ${payload.status}`);
-    renderPnl();
-    if (String(payload.status || '').endsWith('_order_sent')) {
+    if (viewIsVisible(elements.pnlView)) {
+      renderPnl();
+    }
+    if (viewIsVisible(elements.pnlView) && String(payload.status || '').endsWith('_order_sent')) {
       loadPnl().catch((error) => {
         appState.pnlError = error.message;
         renderPnl();
@@ -909,8 +962,10 @@ function connectEvents() {
     const payload = JSON.parse(event.data);
     appState.exchangePositions = payload.positions || [];
     appState.exchangeSafety = payload.exchangeSafety || appState.exchangeSafety;
-    renderPnl();
-    loadOperationalStatus().catch(() => renderGuardDashboard());
+    if (viewIsVisible(elements.pnlView)) {
+      renderPnl();
+      loadOperationalStatus().catch(() => renderGuardDashboard());
+    }
   });
 
   source.addEventListener('price', (event) => {
@@ -922,7 +977,7 @@ function connectEvents() {
     for (const position of payload.closedPaperPositions || []) {
       upsertPaperTrade(position);
     }
-    if (exchangePriceChanged || payload.updatedPaperPositions?.length || payload.closedPaperPositions?.length) {
+    if (viewIsVisible(elements.pnlView) && (exchangePriceChanged || payload.updatedPaperPositions?.length || payload.closedPaperPositions?.length)) {
       renderPnl();
     }
   });
@@ -934,7 +989,10 @@ function renderState() {
   const phase = state.phase || 'idle';
 
   elements.statusPill.classList.toggle('running', running);
-  elements.statusText.textContent = running ? phaseLabel(phase) : 'Inactivo';
+  elements.statusPill.classList.toggle('reconnecting', running && appState.eventsConnected === false);
+  elements.statusText.textContent = running && appState.eventsConnected === false
+    ? 'Reconectando panel'
+    : running ? phaseLabel(phase) : 'Inactivo';
   elements.start.disabled = running;
   elements.stop.disabled = !running;
   elements.openBrowser.disabled = running;
@@ -957,10 +1015,19 @@ function renderPosts() {
       return normalize(`${post.text} ${post.author} ${post.channelName} ${post.publishedText}`).includes(query);
     })
     .sort(comparePostsNewestFirst);
+  const visiblePosts = posts.slice(0, appState.postsVisibleLimit);
 
   elements.emptyPosts.classList.toggle('hidden', posts.length > 0);
   elements.emptyPosts.textContent = emptyPostsText(query);
-  elements.postsList.innerHTML = posts.map(renderPost).join('');
+  elements.postsList.innerHTML = visiblePosts.map(renderPost).join('');
+  renderListPagination({
+    container: elements.postsPagination,
+    status: elements.postsPaginationStatus,
+    button: elements.postsLoadMore,
+    visible: visiblePosts.length,
+    total: posts.length,
+    noun: 'publicaciones'
+  });
 }
 
 function syncPostsIfNeeded(state) {
@@ -968,6 +1035,10 @@ function syncPostsIfNeeded(state) {
   const updatedAt = state?.stats?.updatedAt || null;
   const listIsStale = total !== appState.posts.length || (updatedAt && updatedAt !== appState.postsUpdatedAt);
 
+  if (!viewIsVisible(elements.postsView)) {
+    appState.postsDirty ||= listIsStale;
+    return;
+  }
   if (listIsStale) {
     loadPosts().catch((error) => showClientError(error.message));
   }
@@ -1018,13 +1089,34 @@ function renderPost(post) {
 
 function renderLogs() {
   const logs = appState.logs || [];
-  elements.logsList.innerHTML = logs.map((log) => `
+  const visibleLogs = logs.slice(0, appState.logsVisibleLimit);
+  elements.logsList.innerHTML = visibleLogs.map((log) => `
     <div class="log-row ${escapeAttribute(log.level || 'info')}">
       <span class="log-level">${escapeHtml(log.level || 'info')}</span>
       <span class="log-message">${escapeHtml(log.message || '')}</span>
       <span class="log-time">${escapeHtml(formatDateTime(log.at))}</span>
     </div>
   `).join('') || '<div class="empty-state">Sin eventos todavia.</div>';
+  renderListPagination({
+    container: elements.logsPagination,
+    status: elements.logsPaginationStatus,
+    button: elements.logsLoadMore,
+    visible: visibleLogs.length,
+    total: logs.length,
+    noun: 'eventos'
+  });
+}
+
+function renderListPagination({ container, status, button, visible, total, noun }) {
+  if (!container || !status || !button) {
+    return;
+  }
+  const hasItems = total > 0;
+  const hasMore = visible < total;
+  container.classList.toggle('hidden', !hasItems);
+  status.textContent = hasItems ? `Mostrando ${visible} de ${total} ${noun}` : `0 ${noun}`;
+  button.classList.toggle('hidden', !hasMore);
+  button.disabled = !hasMore;
 }
 
 function renderPnl() {
@@ -1921,11 +2013,19 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       detail: `Fees ${formatOptionalMoney(fees, asset)} / funding ${formatOptionalMoney(funding, asset)}`
     },
     {
-      label: 'Equity cuenta',
-      value: formatOptionalMoney(balance.equity, asset),
+      label: source.key === 'vst' ? 'Equity estrategia' : 'Equity cuenta',
+      value: formatOptionalMoney(source.key === 'vst' ? balance.strategyEquity ?? balance.equity : balance.equity, asset),
       className: 'amount',
-      detail: `Balance ${formatOptionalMoney(balance.balance, asset)}`
+      detail: source.key === 'vst' && Number(balance.externalFunding || 0) > 0
+        ? `Colateral ${formatOptionalMoney(balance.equity, asset)}`
+        : `Balance ${formatOptionalMoney(balance.balance, asset)}`
     },
+    ...(source.key === 'vst' && Number(balance.externalFunding || 0) > 0 ? [{
+      label: 'Reserva técnica',
+      value: formatOptionalMoney(balance.externalFunding, asset),
+      className: 'amount',
+      detail: `Objetivo libre ${formatOptionalMoney(source.technicalReserve?.target, asset)}`
+    }] : []),
     {
       label: 'Margen libre',
       value: formatOptionalMoney(balance.availableMargin, asset),
@@ -2201,7 +2301,7 @@ function sourceMonthlyRoiBaseline(source = {}) {
   }
 
   const total = Number(source.total || 0);
-  const equity = positiveFiniteNumber(source.equity ?? source.balance?.equity);
+  const equity = positiveFiniteNumber(source.equity ?? source.balance?.strategyEquity ?? source.balance?.equity);
   if (equity && Number.isFinite(total)) {
     const baseline = equity - total;
     if (baseline > 0) {
@@ -2234,7 +2334,7 @@ function sourceEquityBaselineSnapshot(source = {}) {
     return null;
   }
   const baseline = positiveFiniteNumber(source.roiBaseline ?? source.baseline);
-  const equity = finiteNumber(source.balance?.equity ?? source.equity, null);
+  const equity = finiteNumber(source.balance?.strategyEquity ?? source.balance?.equity ?? source.equity, null);
   if (!baseline || equity == null) {
     return null;
   }
@@ -2337,15 +2437,15 @@ function liquidationClass(value) {
 }
 
 function sourcePrimaryValue(source) {
-  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
-    return Number(source.balance.equity);
+  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.strategyEquity ?? source.balance?.equity))) {
+    return Number(source.balance.strategyEquity ?? source.balance.equity);
   }
   return Number(source.total || 0);
 }
 
 function sourcePrimaryLabel(source) {
-  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.equity))) {
-    return 'Equity demo VST';
+  if (source.key === 'vst' && Number.isFinite(Number(source.balance?.strategyEquity ?? source.balance?.equity))) {
+    return 'Equity estrategia VST';
   }
   return source.key === 'live' ? 'Resultado real mes' : 'Resultado mes';
 }
@@ -2375,8 +2475,11 @@ function sourceSecondaryLines(source) {
   if (source.key === 'vst' && source.balance) {
     return [
       `${formatSourceMoney(source.total, source)} resultado demo mes`,
-      `${formatOptionalMoney(source.balance.availableMargin, source.asset || 'VST')} margen libre`
-    ];
+      `${formatOptionalMoney(source.balance.availableMargin, source.asset || 'VST')} margen libre`,
+      Number(source.balance.externalFunding || 0) > 0
+        ? `${formatOptionalMoney(source.balance.equity, source.asset || 'VST')} colateral · ${formatOptionalMoney(source.balance.externalFunding, source.asset || 'VST')} técnico`
+        : ''
+    ].filter(Boolean);
   }
   return [
     `${formatSourceMoney(source.realized, source)} realizado`,
@@ -2778,7 +2881,7 @@ function renderAccountWaterfall(source) {
   const floating = finiteNumber(source.floating, 0);
   const total = finiteNumber(source.total, realized + floating);
   const equity = accountEquityValue(source, total);
-  const previousEquity = finiteNumber(source.balance?.balance, equity - total);
+  const previousEquity = finiteNumber(source.balance?.strategyBalance ?? source.balance?.balance, equity - total);
   const selectedRange = selectedAssetRange();
   const accountLine = accountAssetCurve(source, equity, total, selectedRange);
   const hasGross = grossRealized != null && Math.abs(grossRealized) > 0;
@@ -2868,7 +2971,7 @@ function renderAccountWaterfall(source) {
 }
 
 function accountEquityValue(source, total = 0) {
-  const equity = finiteNumber(source.balance?.equity, null);
+  const equity = finiteNumber(source.balance?.strategyEquity ?? source.balance?.equity, null);
   if (equity != null) {
     return equity;
   }
@@ -3099,6 +3202,7 @@ function renderLiveReadiness(readiness = liveReadiness()) {
 
 function renderHealthPanel() {
   const health = appState.state?.health || {};
+  const scraper = health.scraper || {};
   const feed = appState.state?.priceFeed || {};
   const level = health.level || 'idle';
   elements.healthStatus.textContent = healthStatusLabel(level);
@@ -3109,6 +3213,8 @@ function renderHealthPanel() {
   elements.healthMetrics.innerHTML = [
     ['Ultima lectura', health.ageSeconds === null || health.ageSeconds === undefined ? '-' : `${health.ageSeconds}s`, health.stale ? 'negative' : ''],
     ['Posts visibles', String(health.visiblePosts ?? appState.state?.visiblePosts ?? 0), health.noVisiblePosts ? 'negative' : ''],
+    ['Lecturas vacias', String(scraper.consecutiveEmptyReads || 0), scraper.consecutiveEmptyReads ? 'warn' : 'positive'],
+    ['Autorecuperaciones', String(scraper.recoveryCount || 0), scraper.recoveryCount ? 'warn' : ''],
     ['WS precios', feedLabel, feed.connected ? 'positive' : feed.enabled ? 'negative' : ''],
     ['Mercado', feed.marketType ? 'Futuros USDⓈ' : '-', '']
   ].map(renderOpsMetric).join('');
@@ -7190,16 +7296,32 @@ function switchView(view) {
   elements.postsView.classList.toggle('hidden', !posts);
   elements.logsView.classList.toggle('hidden', !logs);
   elements.pnlView.classList.toggle('hidden', !pnl);
+  if (posts) {
+    if (appState.postsDirty || !appState.posts.length) {
+      loadPosts().catch((error) => showClientError(error.message));
+    } else {
+      renderPosts();
+    }
+  } else if (logs) {
+    renderLogs();
+  } else if (pnl) {
+    renderPnl();
+  }
+}
+
+function viewIsVisible(element) {
+  return Boolean(element && !element.classList.contains('hidden'));
 }
 
 function applyHashNavigation() {
-  if (window.location.hash !== '#sheet-vst-alignment') {
+  const target = pnlHashTarget();
+  if (!target) {
     return;
   }
 
   switchView('pnl');
   const finish = () => requestAnimationFrame(() => {
-    document.querySelector('#sheet-vst-alignment')?.scrollIntoView({ block: 'start' });
+    target.scrollIntoView({ block: 'start' });
   });
 
   if (appState.pnl) {
@@ -7213,6 +7335,21 @@ function applyHashNavigation() {
       renderPnl();
     })
     .finally(finish);
+}
+
+function pnlHashTarget() {
+  const rawId = String(window.location.hash || '').replace(/^#/, '');
+  let id = rawId;
+  try {
+    id = decodeURIComponent(rawId);
+  } catch {
+    // Conserva el ancla literal si la URL contiene una secuencia incompleta.
+  }
+  if (!id) {
+    return null;
+  }
+  const target = document.getElementById(id);
+  return target && elements.pnlView?.contains(target) ? target : null;
 }
 
 async function postJson(url, payload) {

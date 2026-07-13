@@ -6,7 +6,9 @@ const OPEN_ORDERS_ERROR_LOG_MS = 60_000;
 const OPEN_ORDERS_DEFAULT_BACKOFF_MS = 60_000;
 const CLOSE_GUARD_TAKER_FEE_RATE = 0.0005;
 const COST_GUARD_TAKER_FEE_RATE = CLOSE_GUARD_TAKER_FEE_RATE;
+const CLOSE_GUARD_MIN_NET_PNL = 0;
 const CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT = 0.15;
+const VST_TECHNICAL_RESERVE_BUFFER_PERCENT = 5;
 
 export class FuturesTrader {
   constructor({ configStore, paperStore, tradeEventStore, onLog, onTrade }) {
@@ -18,6 +20,7 @@ export class FuturesTrader {
     this.contractCache = new Map();
     this.openOrdersCache = new Map();
     this.riskSnapshots = new Map();
+    this.vstReserveOperation = null;
   }
 
   parse(text) {
@@ -36,8 +39,128 @@ export class FuturesTrader {
 
   async applyVst({ amount = 10000 } = {}) {
     const config = this.configStore.getBingX({ includeSecrets: true });
-    const client = this.client({ ...config, mode: 'demo' });
-    return client.getVst({ amount, adjustType: 0 });
+    const demoConfig = { ...config, mode: 'demo' };
+    const funding = await this.increaseVstBalance({
+      client: this.client(demoConfig),
+      config: demoConfig,
+      amount,
+      phase: 'manual_vst_apply',
+      reason: 'manual'
+    });
+    return {
+      ...funding.response,
+      technicalFunding: funding
+    };
+  }
+
+  async ensureVstTechnicalReserve({ signals = [], post = null, phase = 'vst_reserve_preflight', force = false, config = null } = {}) {
+    const baseConfig = config || this.configStore.getBingX({ includeSecrets: true });
+    const demoConfig = { ...baseConfig, mode: 'demo' };
+    if (!force && !demoConfig.vstTechnicalReserveEnabled) {
+      return { enabled: false, funded: false };
+    }
+    if (!demoConfig.enabled || !demoConfig.apiKey || !demoConfig.apiSecret) {
+      throw new Error('vst_technical_reserve_unavailable:demo_not_configured');
+    }
+
+    while (this.vstReserveOperation) {
+      await this.vstReserveOperation;
+    }
+
+    const operation = this.ensureVstTechnicalReserveUnlocked({
+      signals,
+      post,
+      phase,
+      config: demoConfig
+    });
+    this.vstReserveOperation = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.vstReserveOperation === operation) {
+        this.vstReserveOperation = null;
+      }
+    }
+  }
+
+  async ensureVstTechnicalReserveUnlocked({ signals, post, phase, config }) {
+    const client = this.client(config);
+    const before = await this.fetchAccountCapital(client);
+    const requirement = demoPackageReserveRequirement(signals, config);
+    const configuredTarget = positiveNumber(config.vstTechnicalReserveTargetVST, 500);
+    const targetAvailable = roundMoney(Math.max(configuredTarget, requirement.bufferedRequired));
+    if (before.available >= targetAvailable) {
+      return {
+        enabled: true,
+        funded: false,
+        targetAvailable,
+        packageRequirement: requirement,
+        before
+      };
+    }
+
+    const amount = Math.ceil(targetAvailable - before.available);
+    return this.increaseVstBalance({
+      client,
+      config,
+      amount,
+      before,
+      targetAvailable,
+      packageRequirement: requirement,
+      post,
+      phase,
+      reason: 'automatic_package_preflight'
+    });
+  }
+
+  async increaseVstBalance({
+    client,
+    config,
+    amount,
+    before = null,
+    targetAvailable = null,
+    packageRequirement = null,
+    post = null,
+    phase = 'vst_funding',
+    reason = 'manual'
+  }) {
+    const requestedAmount = Math.max(1, Math.ceil(Number(amount) || 0));
+    const balanceBefore = before || await this.fetchAccountCapital(client);
+    const response = await client.getVst({ amount: requestedAmount, adjustType: 0 });
+    const balanceAfter = await this.fetchAccountCapital(client);
+    const reportedBalance = Number(response?.data?.balance);
+    const observedBalance = Number.isFinite(reportedBalance) ? reportedBalance : balanceAfter.balance;
+    const actualAmount = roundMoney(observedBalance - balanceBefore.balance);
+    if (!Number.isFinite(actualAmount) || actualAmount <= 0) {
+      throw new Error(`vst_technical_reserve_not_applied:requested=${requestedAmount}`);
+    }
+
+    const accounting = await this.configStore.recordVstTechnicalFunding({ amount: actualAmount });
+    const reserve = {
+      enabled: true,
+      funded: true,
+      reason,
+      requestedAmount,
+      actualAmount,
+      targetAvailable,
+      packageRequirement,
+      before: balanceBefore,
+      after: balanceAfter,
+      externalFundingTotal: accounting.total,
+      response
+    };
+    this.emitTrade({
+      at: accounting.at,
+      status: 'demo_vst_technical_reserve_funded',
+      executionMode: 'demo',
+      phase,
+      postId: post?.id || null,
+      postUrl: post?.url || null,
+      externalFunding: true,
+      vstReserve: reserve
+    });
+    this.log(`Reserva tecnica VST recargada +${actualAmount} VST; disponible ${roundMoney(balanceAfter.available)} VST.`, 'warn');
+    return reserve;
   }
 
   async executeProbe(input = {}) {
@@ -359,6 +482,10 @@ export class FuturesTrader {
     const filteredReason = options.filteredReason || 'signal_filtered';
     for (const post of posts) {
       const signals = parseFuturesSignals(post.text || '').filter((signal) => signal.isSignal);
+      const packageContext = {
+        openingSignals: signals.filter(isOpeningSignal),
+        vstReservePromise: null
+      };
       for (const signal of signals) {
         const baseEvent = {
           at: new Date().toISOString(),
@@ -399,7 +526,7 @@ export class FuturesTrader {
                   ? await this.executeStopLossSignal(signal, { post, phase: payload.phase })
                   : signal.action === 'SET_TAKE_PROFIT'
                     ? await this.executeTakeProfitSignal(signal, { post, phase: payload.phase })
-                    : await this.executeSignal(signal, { post, phase: payload.phase });
+                    : await this.executeSignal(signal, { post, phase: payload.phase, packageContext });
           results.push(...asArray(result));
         } catch (error) {
           const failed = this.emitTrade({
@@ -754,13 +881,13 @@ export class FuturesTrader {
     return event;
   }
 
-  async executeSignal(signal, { post, phase } = {}) {
+  async executeSignal(signal, { post, phase, packageContext = null } = {}) {
     const config = this.configStore.getBingX({ includeSecrets: true });
     if (config.mode === 'dual') {
       const results = [];
       for (const targetConfig of executionConfigs(config)) {
         try {
-          results.push(await this.executeSignalWithConfig(signal, { post, phase }, targetConfig));
+          results.push(await this.executeSignalWithConfig(signal, { post, phase, packageContext }, targetConfig));
         } catch (error) {
           results.push(this.executionError(signal, { post, phase }, targetConfig, error));
         }
@@ -768,10 +895,14 @@ export class FuturesTrader {
       return results;
     }
 
-    return this.executeSignalWithConfig(signal, { post, phase }, config);
+    try {
+      return await this.executeSignalWithConfig(signal, { post, phase, packageContext }, config);
+    } catch (error) {
+      return this.executionError(signal, { post, phase }, config, error);
+    }
   }
 
-  async executeSignalWithConfig(signal, { post, phase } = {}, config) {
+  async executeSignalWithConfig(signal, { post, phase, packageContext = null } = {}, config) {
     const baseEvent = {
       at: new Date().toISOString(),
       signal,
@@ -870,6 +1001,22 @@ export class FuturesTrader {
         referenceEntryPrice,
         stopDistancePercent: stopDistanceValidation.distancePercent
       });
+    }
+
+    let vstReserve = null;
+    if (config.mode === 'demo' && config.vstTechnicalReserveEnabled) {
+      const reserveFactory = () => this.ensureVstTechnicalReserve({
+        signals: packageContext?.openingSignals?.length ? packageContext.openingSignals : [signal],
+        post,
+        phase,
+        config
+      });
+      if (packageContext) {
+        packageContext.vstReservePromise ||= reserveFactory();
+        vstReserve = await packageContext.vstReservePromise;
+      } else {
+        vstReserve = await reserveFactory();
+      }
     }
 
     const sizing = await this.resolveOrderSizing({ client, signal, config });
@@ -975,6 +1122,7 @@ export class FuturesTrader {
       referenceEntryPrice,
       executionEntryType: order.type,
       costGuard,
+      vstReserve,
       paperPosition,
       bingx
     });
@@ -1065,6 +1213,8 @@ export class FuturesTrader {
     const response = await client.getBalance();
     const rows = Array.isArray(response.data) ? response.data : [response.data].filter(Boolean);
     const preferred = rows.find((row) => ['VST', 'USDT'].includes(String(row.asset || '').toUpperCase())) || rows[0] || {};
+    const balance = Number(preferred.balance);
+    const equity = Number(preferred.equity ?? preferred.balance);
     const available = [
       preferred.availableMargin,
       preferred.equity,
@@ -1077,7 +1227,11 @@ export class FuturesTrader {
 
     return {
       asset: preferred.asset || 'VST',
-      available
+      available,
+      balance: Number.isFinite(balance) ? balance : available,
+      equity: Number.isFinite(equity) ? equity : available,
+      usedMargin: Number(preferred.usedMargin || 0),
+      frozenMargin: Number(preferred.frozenMargin || 0)
     };
   }
 
@@ -1115,15 +1269,22 @@ export class FuturesTrader {
 
     for (const position of positions) {
       if (!skipCloseGuard) {
-        const guard = await closeGuardForPosition({
-          position,
-          signal,
-          percent,
-          marketClient,
-          fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
-        });
-        if (!guard.ok) {
-          warnings.push({ position, reason: guard.reason, guard });
+        try {
+          const guard = await closeGuardForPosition({
+            position,
+            signal,
+            percent,
+            marketClient,
+            fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
+          });
+          if (!guard.ok) {
+            warnings.push({ position, reason: guard.reason, guard });
+          }
+        } catch (error) {
+          warnings.push({
+            position,
+            reason: `close_guard_error:${String(error?.message || error || 'unknown_error')}`
+          });
         }
       }
 
@@ -2237,6 +2398,27 @@ function monthlySizingForMode(config, mode, asset) {
     baseCapital,
     capitalPercent,
     notional
+  };
+}
+
+function isOpeningSignal(signal = {}) {
+  return Boolean(signal.isSignal && !signal.action && signal.symbol && signal.direction);
+}
+
+function demoPackageReserveRequirement(signals = [], config = {}) {
+  const openings = signals.filter(isOpeningSignal);
+  const sizing = monthlySizingForMode(config, 'demo', 'VST');
+  const required = openings.reduce((sum, signal) => {
+    const leverage = positiveNumber(signal.leverage, config.maxLeverage || 1);
+    const openingFee = sizing.notional * leverage * CLOSE_GUARD_TAKER_FEE_RATE;
+    return sum + sizing.notional + openingFee;
+  }, 0);
+  return {
+    openingCount: openings.length,
+    orderNotional: sizing.notional,
+    required: roundMoney(required),
+    bufferPercent: VST_TECHNICAL_RESERVE_BUFFER_PERCENT,
+    bufferedRequired: roundMoney(required * (1 + VST_TECHNICAL_RESERVE_BUFFER_PERCENT / 100))
   };
 }
 

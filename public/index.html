@@ -472,10 +472,24 @@
               Pega la URL del canal, abre sesion y lanza el scrapeo.
             </div>
             <div id="posts-list" class="posts-list"></div>
+            <div id="posts-pagination" class="list-pagination hidden">
+              <span id="posts-pagination-status">0 publicaciones</span>
+              <button id="posts-load-more" class="button secondary" type="button">
+                <i data-lucide="chevrons-down"></i>
+                <span>Mostrar más</span>
+              </button>
+            </div>
           </div>
 
           <div id="logs-view" class="view hidden">
             <div id="logs-list" class="logs-list"></div>
+            <div id="logs-pagination" class="list-pagination hidden">
+              <span id="logs-pagination-status">0 eventos</span>
+              <button id="logs-load-more" class="button secondary" type="button">
+                <i data-lucide="chevrons-down"></i>
+                <span>Mostrar anteriores</span>
+              </button>
+            </div>
           </div>
 
 	          <div id="pnl-view" class="view hidden">

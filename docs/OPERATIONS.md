@@ -13,9 +13,11 @@ npm run dev
 PM2:
 
 ```bash
-pm2 start npm --name yt-members-signal-trader -- run dev
+pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 ```
+
+La configuración del ecosistema limita las tormentas de reinicio, introduce espera creciente y concede tiempo al servidor para vaciar sus escrituras pendientes durante el apagado.
 
 Alternativa directa en Windows si PM2 no pasa bien `npm run dev`:
 
@@ -66,6 +68,14 @@ Opciones:
 - `Recargar pestaña`: cada cuántos segundos refresca Telegram Web.
 
 El modo live es polling. YouTube y Telegram Web no se leen como stream.
+
+Autorecuperación de YouTube:
+
+- una lectura vacía aislada solo genera un aviso agrupado;
+- los avisos vacíos se limitan a uno cada 30 minutos mientras dure el incidente;
+- tras tres lecturas vacías consecutivas, la app recrea la pestaña de YouTube;
+- el perfil persistente y la pestaña de Telegram Web se conservan;
+- Salud del monitor expone `Lecturas vacías` y `Autorrecuperaciones`.
 
 Persistencia:
 
@@ -295,9 +305,16 @@ No compartas esa URL: la UI permite operar.
 
 `YouTube no muestra posts visibles`
 
-- Abre sesión otra vez.
+- Espera tres pasadas para permitir la recuperación automática de la pestaña.
+- Revisa `Lecturas vacías`, `Autorrecuperaciones` y la hora de la última lectura correcta.
 - Comprueba que la cuenta tenga acceso al canal.
-- Espera una pasada: a veces una lectura devuelve 0 y la siguiente recupera.
+- Abre sesión otra vez solo si la recuperación automática sigue sin devolver publicaciones.
+
+`El puerto 5178 ya está ocupado`
+
+- El servidor no salta a otro puerto automáticamente.
+- En Windows, el error de arranque muestra el PID y el nombre del proceso propietario.
+- Si es una instancia anterior de la app, usa `pm2 status` y reinicia esa instancia en vez de arrancar una segunda.
 
 `No llega Telegram`
 

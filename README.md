@@ -41,6 +41,9 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
 - Mantiene en Demo VST una reserva técnica de margen antes de cada paquete y descuenta esas aportaciones de la equity estratégica y del ROI.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
+- Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
+- Limita el trabajo visual de Posts y Eventos mediante paginación progresiva, y mantiene el canal SSE compacto durante el monitor continuo.
+- Guarda los JSON locales mediante escrituras en cola y reemplazo atómico para no dejar archivos parciales ante reinicios.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
 - Genera backups redactados para soporte y backups cifrados restaurables de los datos locales.
 
@@ -51,7 +54,7 @@ flowchart LR
   operator["Operador local"] --> ui["UI local<br/>public/index.html<br/>public/app.js"]
   ui <--> api["Node HTTP API + SSE<br/>src/server.js"]
   api --> config[".data/config.json<br/>configuración y secretos locales"]
-  api --> stores[".data/*.json<br/>posts, eventos, trades, backups"]
+  api --> stores[".data/*.json<br/>cola de escritura y reemplazo atómico"]
   api --> pm2["PM2 / npm run dev<br/>proceso en segundo plano"]
 
   subgraph sources["Fuentes de señales"]
@@ -186,13 +189,15 @@ Instala PM2 si no lo tienes:
 npm install -g pm2
 ```
 
-Arranca la app:
+Arranca la app con la configuración de producción del repositorio:
 
 ```bash
-pm2 start npm --name yt-members-signal-trader -- run dev
+pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 pm2 status yt-members-signal-trader
 ```
+
+El ecosistema aplica espera creciente entre reinicios, límite de reintentos, tiempo de apagado limpio y persistencia del proceso. El servidor vacía las colas de datos antes de terminar.
 
 En Windows, si PM2 interpreta mal los argumentos de `npm`, arranca el servidor directamente:
 
@@ -320,11 +325,11 @@ Los botones destructivos piden confirmación textual.
 
 ### Posts
 
-Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado.
+Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado. La lista carga 40 filas y permite ampliar el bloque sin renderizar todo el histórico de golpe.
 
 ### Eventos
 
-Muestra logs internos: scraping, Telegram, BingX, health, backups e incidencias.
+Muestra logs internos: scraping, Telegram, BingX, health, backups e incidencias. La lista carga 60 eventos y permite mostrar los anteriores progresivamente.
 
 ### PnL
 
@@ -550,6 +555,8 @@ Contenido importante:
 
 No borres `.yt-profile/` salvo que quieras reiniciar sesiones web.
 
+Los almacenes principales serializan las escrituras, generan primero un archivo temporal y lo sustituyen de forma atómica. Durante un apagado normal, el servidor espera a que esas colas terminen.
+
 ## Guía para Codex
 
 El repositorio incluye [AGENTS.md](AGENTS.md), que es la guía operativa para Codex y otros agentes de código.
@@ -588,6 +595,12 @@ Revisa:
 - Si YouTube devuelve posts visibles.
 - Si el monitor está activo.
 - Si el puerto `5178` está libre.
+
+Si el puerto ya está ocupado, el arranque se detiene y muestra el PID y el proceso propietario en Windows. La aplicación no cambia de puerto por su cuenta.
+
+### YouTube devuelve lecturas vacías
+
+Una lectura aislada no implica que el monitor esté parado. La app agrupa el aviso durante 30 minutos y, tras tres lecturas vacías consecutivas, recrea únicamente la pestaña de YouTube conservando el perfil y la sesión de Telegram Web. Revisa `Lecturas vacías` y `Autorrecuperaciones` en Salud del monitor; vuelve a iniciar sesión solo si la recuperación automática no devuelve publicaciones visibles.
 
 ### Telegram Web no lee mensajes
 

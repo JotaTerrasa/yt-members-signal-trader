@@ -583,6 +583,24 @@ textarea {
   gap: 8px;
 }
 
+.list-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.list-pagination .button {
+  flex: 0 0 auto;
+}
+
 .log-row {
   display: grid;
   grid-template-columns: 86px minmax(0, 1fr) 150px;
@@ -4064,6 +4082,15 @@ summary.dashboard-section-title {
     justify-content: center;
   }
 
+  .list-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .list-pagination .button {
+    width: 100%;
+  }
+
   .button-row,
   .options-grid,
   .range-grid,
@@ -4289,6 +4316,12 @@ h1 {
 .status-pill.running {
   background: #eefdf9;
   border-color: rgba(15, 118, 110, 0.42);
+}
+
+.status-pill.reconnecting {
+  background: #fff7e6;
+  border-color: rgba(180, 119, 18, 0.38);
+  color: #80520b;
 }
 
 .status-pill.running .dot {

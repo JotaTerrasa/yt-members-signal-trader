@@ -7,6 +7,9 @@ const POST_SELECTORS = [
   'ytd-backstage-post-renderer',
   'ytd-post-renderer'
 ].join(',');
+const YOUTUBE_EMPTY_LOG_COOLDOWN_MS = 30 * 60 * 1000;
+const YOUTUBE_RECOVERY_AFTER_EMPTY_READS = 3;
+const YOUTUBE_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
 
 export class YouTubePostsScraper extends EventEmitter {
   constructor({ profileDir }) {
@@ -19,10 +22,26 @@ export class YouTubePostsScraper extends EventEmitter {
     this.telegramLastRefreshAt = 0;
     this.running = false;
     this.stopRequested = false;
+    this.youtubeConsecutiveEmptyReads = 0;
+    this.youtubeLastNonEmptyAt = null;
+    this.youtubeLastEmptyAt = null;
+    this.youtubeLastEmptyLogAt = 0;
+    this.youtubeLastRecoveryAt = 0;
+    this.youtubeRecoveryCount = 0;
   }
 
   get isBrowserOpen() {
     return Boolean(this.context);
+  }
+
+  get diagnostics() {
+    return {
+      consecutiveEmptyReads: this.youtubeConsecutiveEmptyReads,
+      lastNonEmptyAt: this.youtubeLastNonEmptyAt,
+      lastEmptyAt: this.youtubeLastEmptyAt,
+      lastRecoveryAt: this.youtubeLastRecoveryAt ? new Date(this.youtubeLastRecoveryAt).toISOString() : null,
+      recoveryCount: this.youtubeRecoveryCount
+    };
   }
 
   async openYouTube() {
@@ -48,6 +67,7 @@ export class YouTubePostsScraper extends EventEmitter {
     }
     this.running = true;
     this.stopRequested = false;
+    this.youtubeConsecutiveEmptyReads = 0;
 
     const normalizedUrl = normalizePostsUrl(channelUrl);
     const intervalMs = Math.max(10, Number(pollIntervalSeconds) || 30) * 1000;
@@ -183,13 +203,15 @@ export class YouTubePostsScraper extends EventEmitter {
   async liveLoop(page, url, { intervalMs }) {
     this.log(`Monitor en tiempo casi real activo cada ${Math.round(intervalMs / 1000)} segundos.`);
     this.emit('status', { running: true, phase: 'live', channelUrl: url });
+    let activePage = page;
 
     while (!this.stopRequested) {
       try {
-        await this.gotoPosts(page, url);
-        await this.expandVisiblePosts(page);
+        await this.gotoPosts(activePage, url);
+        await this.expandVisiblePosts(activePage);
 
-        const topPosts = await this.extractVisiblePosts(page, { phase: 'live', channelUrl: url });
+        const topPosts = await this.extractVisiblePosts(activePage, { phase: 'live', channelUrl: url });
+        this.recordYouTubeRead(topPosts.length);
         this.emitPosts(topPosts, 'live', url);
         this.emit('progress', {
           phase: 'live',
@@ -197,6 +219,9 @@ export class YouTubePostsScraper extends EventEmitter {
           maxScrolls: 0,
           visiblePosts: topPosts.length
         });
+        if (!topPosts.length && this.shouldRecoverYouTubePage()) {
+          activePage = await this.recoverYouTubePage(activePage, url);
+        }
       } catch (error) {
         this.log(`Lectura YouTube fallida, se reintentara: ${conciseError(error)}`, 'warn');
       }
@@ -225,8 +250,56 @@ export class YouTubePostsScraper extends EventEmitter {
       postCount = await page.locator(POST_SELECTORS).count().catch(() => 0);
     }
 
-    if (postCount === 0) {
-      this.log('No se detectaron posts aun. Si ves una pantalla de login, inicia sesion en Chromium y vuelve a iniciar el scrapeo.', 'warn');
+    return postCount;
+  }
+
+  recordYouTubeRead(visiblePosts, { now = Date.now() } = {}) {
+    const count = Math.max(0, Number(visiblePosts) || 0);
+    if (count > 0) {
+      const previousEmptyReads = this.youtubeConsecutiveEmptyReads;
+      this.youtubeConsecutiveEmptyReads = 0;
+      this.youtubeLastNonEmptyAt = new Date(now).toISOString();
+      if (previousEmptyReads > 0) {
+        this.log(`YouTube recuperado tras ${previousEmptyReads} lecturas vacias; ${count} posts visibles.`, 'info');
+      }
+      return this.diagnostics;
+    }
+
+    this.youtubeConsecutiveEmptyReads += 1;
+    this.youtubeLastEmptyAt = new Date(now).toISOString();
+    const shouldLog = this.youtubeConsecutiveEmptyReads === 1
+      || now - this.youtubeLastEmptyLogAt >= YOUTUBE_EMPTY_LOG_COOLDOWN_MS;
+    if (shouldLog) {
+      this.youtubeLastEmptyLogAt = now;
+      this.log(`No se detectaron posts visibles en YouTube (lectura ${this.youtubeConsecutiveEmptyReads}); se reintentara automaticamente.`, 'warn');
+    }
+    return this.diagnostics;
+  }
+
+  shouldRecoverYouTubePage({ now = Date.now() } = {}) {
+    return this.youtubeConsecutiveEmptyReads >= YOUTUBE_RECOVERY_AFTER_EMPTY_READS
+      && now - this.youtubeLastRecoveryAt >= YOUTUBE_RECOVERY_COOLDOWN_MS;
+  }
+
+  async recoverYouTubePage(page, url) {
+    const now = Date.now();
+    this.youtubeLastRecoveryAt = now;
+    this.youtubeRecoveryCount += 1;
+    this.log(`Autorrecuperacion YouTube ${this.youtubeRecoveryCount}: recreando la pestana tras ${this.youtubeConsecutiveEmptyReads} lecturas vacias.`, 'warn');
+
+    const replacement = await this.context.newPage();
+    replacement.setDefaultTimeout(15000);
+    try {
+      await this.gotoPosts(replacement, url);
+      this.page = replacement;
+      if (page && page !== this.telegramPage && !page.isClosed()) {
+        await page.close().catch(() => {});
+      }
+      return replacement;
+    } catch (error) {
+      await replacement.close().catch(() => {});
+      this.page = page && !page.isClosed() ? page : null;
+      throw error;
     }
   }
 
