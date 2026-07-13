@@ -1,4 +1,9 @@
 const elements = {
+  toolPanel: document.querySelector('#tool-panel'),
+  toggleControls: document.querySelector('#toggle-controls'),
+  headerSourceStatus: document.querySelector('#header-source-status'),
+  headerModeStatus: document.querySelector('#header-mode-status'),
+  headerModeChip: document.querySelector('#header-mode-chip'),
   channelUrl: document.querySelector('#channel-url'),
   openBrowser: document.querySelector('#open-browser'),
   start: document.querySelector('#start-scrape'),
@@ -16,6 +21,7 @@ const elements = {
   postsTab: document.querySelector('#posts-tab'),
   logsTab: document.querySelector('#logs-tab'),
   pnlTab: document.querySelector('#pnl-tab'),
+  postsActions: document.querySelector('#posts-actions'),
   postsView: document.querySelector('#posts-view'),
   logsView: document.querySelector('#logs-view'),
   pnlView: document.querySelector('#pnl-view'),
@@ -33,6 +39,10 @@ const elements = {
   monthResetStatus: document.querySelector('#month-reset-status'),
   pnlStatus: document.querySelector('#pnl-status'),
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
+  reliabilityPanel: document.querySelector('#reliability-panel'),
+  reliabilityStatus: document.querySelector('#reliability-status'),
+  reliabilitySummary: document.querySelector('#reliability-summary'),
+  reliabilityCriteria: document.querySelector('#reliability-criteria'),
   costControlPanel: document.querySelector('#cost-control-panel'),
   costControlStatus: document.querySelector('#cost-control-status'),
   costControlSummary: document.querySelector('#cost-control-summary'),
@@ -275,6 +285,7 @@ init();
 
 async function init() {
   bindEvents();
+  initializeResponsiveControls();
   const initialLoads = [loadState(), loadTelegram(), loadTelegramSource(), loadStrategyStudy(), loadOperationalStatus(), loadBingx()];
   if (pnlHashTarget()) {
     appState.postsDirty = true;
@@ -291,6 +302,10 @@ async function init() {
 }
 
 function bindEvents() {
+  elements.toggleControls?.addEventListener('click', () => {
+    setControlsCollapsed(!elements.toolPanel.classList.contains('mobile-collapsed'));
+  });
+
   elements.openBrowser.addEventListener('click', async () => {
     await runAction(async () => {
       await postJson('/api/browser/open', {});
@@ -1003,6 +1018,7 @@ function renderState() {
   if (state.channelUrl && !elements.channelUrl.value) {
     elements.channelUrl.value = state.channelUrl;
   }
+  renderHeaderContext();
 }
 
 function renderPosts() {
@@ -1143,6 +1159,7 @@ function renderPnl() {
   elements.monthReset.disabled = appState.pnlLoading;
   elements.monthResetStatus.textContent = monthResetStatusText(appState.bingx);
   renderPnlSourceGrid(sources, selectedSource.key);
+  renderReliabilityPanel();
   renderCostControl(selectedSource, reference);
   renderProtectedClosePanel();
   const performanceSource = selectedPerformanceSource(sources);
@@ -1386,6 +1403,51 @@ function renderPnlSourceGrid(sources, selectedKey) {
       </button>
     `;
   }).join('');
+}
+
+function renderReliabilityPanel() {
+  if (!elements.reliabilityPanel || !elements.reliabilityStatus || !elements.reliabilitySummary || !elements.reliabilityCriteria) {
+    return;
+  }
+
+  const gate = appState.state?.promotionGate || appState.operationalStatus?.promotionGate || {};
+  const metrics = gate.metrics || {};
+  const latestPackage = appState.state?.signalCoverage?.latestPackage || null;
+  const openingRetries = appState.state?.openingRetryQueue || appState.state?.stopLossRetryQueue || [];
+  const closeRetries = appState.state?.closeRetryQueue || appState.state?.closeGuardRetryQueue || [];
+  const tone = gate.status === 'eligible_for_review'
+    ? 'positive'
+    : gate.status === 'blocked' ? 'negative' : 'warn';
+
+  elements.reliabilityPanel.dataset.tone = tone;
+  elements.reliabilityStatus.className = `amount ${tone}`;
+  elements.reliabilityStatus.textContent = gate.label || 'Recogiendo muestra';
+  elements.reliabilitySummary.innerHTML = [
+    renderReliabilityMetric('Paquetes', `${metrics.packages || 0}/${gate.thresholds?.minPackages || 50}`, 'Muestra observada'),
+    renderReliabilityMetric('Cobertura', formatPercent(metrics.coveragePercent || 0), `${metrics.executedOpenings || 0}/${metrics.expectedOpenings || 0} aperturas`),
+    renderReliabilityMetric('Completos', formatPercent(metrics.completePercent || 0), `${metrics.completePackages || 0} paquetes completos`),
+    renderReliabilityMetric('Pendientes', String(openingRetries.length + closeRetries.length), `${openingRetries.length} aperturas · ${closeRetries.length} cierres`),
+    renderReliabilityMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : '-', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin paquete reciente')
+  ].join('');
+  elements.reliabilityCriteria.innerHTML = (gate.criteria || []).map((item) => `
+    <div class="reliability-check ${item.ok ? 'ok' : 'missing'} ${escapeAttribute(item.group || '')}">
+      <i data-lucide="${item.ok ? 'check' : item.group === 'sample' || item.group === 'transient' || (item.group === 'economics' && item.available === false) ? 'clock-3' : 'triangle-alert'}"></i>
+      <span>
+        <strong>${escapeHtml(item.label || item.key)}</strong>
+        <small>${escapeHtml(item.detail || '-')}</small>
+      </span>
+    </div>
+  `).join('');
+}
+
+function renderReliabilityMetric(label, value, detail) {
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
 }
 
 function renderCostControl(source = selectedPnlSource(), reference = currentReferenceLedger()) {
@@ -3127,6 +3189,7 @@ function liveReadiness() {
   const bingx = appState.bingx || {};
   const telegram = appState.telegram || {};
   const health = appState.state?.health || {};
+  const promotionGate = appState.state?.promotionGate || appState.operationalStatus?.promotionGate || {};
   const risk = localRiskSnapshot();
   const maxOpen = Number(bingx.maxOpenPositions || 0);
   const monthlyLimit = Number(bingx.maxMonthlyLossUSDT || 0);
@@ -3166,6 +3229,13 @@ function liveReadiness() {
       key: 'dry-run',
       label: 'Dry-run/test ya ejecutado',
       ok: dryRunOk
+    },
+    {
+      key: 'promotion-gate',
+      label: promotionGate.label
+        ? `Cohorte: ${promotionGate.label}`
+        : 'Cohorte apta para revision humana',
+      ok: promotionGate.eligibleForReview === true
     },
     {
       key: 'capacity',
@@ -6611,6 +6681,7 @@ function renderTelegramSource(telegramSource = appState.telegramSource, message 
   elements.telegramSourceStatus.textContent = message || (active ? `Fuente activa · ${trading}${refreshLabel}` : 'Fuente desactivada');
   elements.telegramSourceStatus.classList.toggle('ok', Boolean(message) || Boolean(active));
   elements.telegramSourceStatus.classList.toggle('warn', Boolean(telegramSource.executeSignals && !telegramSource.liveConfirmed && usesLiveMode(appState.bingx?.mode)));
+  renderHeaderContext();
 }
 
 function updateTelegramSourceLiveConfirmVisibility() {
@@ -6691,6 +6762,29 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxStatus.textContent = message || (ready ? `${modeLabel} activo` : `${modeLabel} desactivado`);
   elements.bingxStatus.classList.toggle('ok', Boolean(message) || Boolean(ready && !usesLiveMode(bingx.mode)));
   elements.bingxStatus.classList.toggle('warn', usesLiveMode(bingx.mode) && (ready || bingx.enabled));
+  renderHeaderContext();
+}
+
+function renderHeaderContext() {
+  const telegramEnabled = Boolean(appState.telegramSource?.enabled && appState.telegramSource?.url);
+  elements.headerSourceStatus.textContent = telegramEnabled ? 'YouTube + Telegram' : 'YouTube';
+
+  const bingx = appState.bingx;
+  const mode = bingx?.mode || 'test';
+  elements.headerModeStatus.textContent = bingxModeLabel(mode);
+  elements.headerModeChip.dataset.tone = usesLiveMode(mode)
+    ? 'live'
+    : mode === 'demo' ? 'demo' : 'test';
+}
+
+function initializeResponsiveControls() {
+  setControlsCollapsed(window.matchMedia('(max-width: 820px)').matches);
+}
+
+function setControlsCollapsed(collapsed) {
+  elements.toolPanel?.classList.toggle('mobile-collapsed', Boolean(collapsed));
+  elements.toggleControls?.setAttribute('aria-expanded', String(!collapsed));
+  elements.toggleControls?.classList.toggle('active', !collapsed);
 }
 
 function monthlyOrderNotional(bingx = {}, asset = 'USDT') {
@@ -7293,6 +7387,13 @@ function switchView(view) {
   elements.postsTab.classList.toggle('active', posts);
   elements.logsTab.classList.toggle('active', logs);
   elements.pnlTab.classList.toggle('active', pnl);
+  elements.postsTab.setAttribute('aria-selected', String(posts));
+  elements.logsTab.setAttribute('aria-selected', String(logs));
+  elements.pnlTab.setAttribute('aria-selected', String(pnl));
+  elements.postsTab.tabIndex = posts ? 0 : -1;
+  elements.logsTab.tabIndex = logs ? 0 : -1;
+  elements.pnlTab.tabIndex = pnl ? 0 : -1;
+  elements.postsActions?.classList.toggle('hidden', !posts);
   elements.postsView.classList.toggle('hidden', !posts);
   elements.logsView.classList.toggle('hidden', !logs);
   elements.pnlView.classList.toggle('hidden', !pnl);

@@ -180,8 +180,9 @@ Cuando detecta una apertura:
 4. Consulta contrato y ticker en BingX.
 5. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
 6. Calcula cantidad según modo.
-7. Envía orden.
-8. Adjunta SL y TP si existen.
+7. Genera un `clientOrderId` determinista para esa publicación, modo, ticker, dirección, entrada y stop.
+8. Envía orden.
+9. Adjunta SL y TP si existen.
 
 Tipo de orden:
 
@@ -190,6 +191,10 @@ Tipo de orden:
 - Si `Entradas siempre a mercado` está activo, ignora el precio de entrada de la señal y envía `MARKET`.
 - Incluso en mercado, el stop debe seguir siendo válido: en LONG por debajo del mercado y en SHORT por encima.
 - Si el precio se ha alejado más de un 0,15% en contra, la entrada espera como máximo tres minutos a que vuelva a zona; después caduca.
+- Los fallos transitorios de red, rate limit y precio inválido se guardan en `.data/execution-retries.json`.
+- Antes de reenviar una apertura, la app reconcilia las posiciones de BingX. Si la primera petición fue aceptada aunque su respuesta se perdiera, el reintento se cancela.
+- La cola se recupera después de reiniciar PM2, Node o el contenedor. Conserva su caducidad original y no convierte una señal antigua en una nueva.
+- La falta de saldo real no se reintenta ni se corrige automáticamente. La reserva automática solo puede actuar en Demo VST cuando ya está habilitada.
 
 ## 8. Gestión de posiciones
 
@@ -375,6 +380,21 @@ Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y 
 ## 15. Cohorte y siguiente paquete
 
 - `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.
+- `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
+- `GET /api/promotion-gate` devuelve cada criterio de forma auditable.
 - `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
 - `Nueva cohorte` conserva los datos históricos y mueve únicamente el punto de inicio comparativo.
 - No se interpreta rentabilidad con menos de 30 cierres; de 30 a 99 la lectura es orientativa y a partir de 100 se contrastan hipótesis.
+
+La puerta de promoción no activa live. Solo puede quedar como `Apta para revisión humana` cuando se cumplen simultáneamente, como mínimo:
+
+- 50 paquetes observados;
+- al menos un 99% de cobertura de aperturas;
+- al menos un 99% de paquetes completos;
+- cero fallos de parser y cero aperturas perdidas;
+- cero reintentos pendientes;
+- reconciliación de BingX vigente;
+- cero posiciones sin stop y cero órdenes protectoras huérfanas;
+- resultado neto positivo después de comisiones y funding.
+
+Incluso con todos los criterios en verde, live exige una confirmación explícita independiente.

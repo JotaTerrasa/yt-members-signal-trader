@@ -1,4 +1,5 @@
 import { BingXClient } from './bingxClient.js';
+import { openingClientOrderId, openingExecutionKey } from './executionReliability.js';
 import { parseFuturesSignal, parseFuturesSignals } from './futuresSignalParser.js';
 
 const OPEN_ORDERS_CACHE_MS = 60_000;
@@ -903,13 +904,19 @@ export class FuturesTrader {
   }
 
   async executeSignalWithConfig(signal, { post, phase, packageContext = null } = {}, config) {
+    const executionKey = openingExecutionKey({
+      executionMode: config.mode,
+      postId: post?.id || signal.rawText,
+      signal
+    });
     const baseEvent = {
       at: new Date().toISOString(),
       signal,
       postId: post?.id || null,
       postUrl: post?.url || null,
       phase: phase || null,
-      executionMode: config.mode
+      executionMode: config.mode,
+      executionKey
     };
 
     if (!config.enabled) {
@@ -1080,7 +1087,11 @@ export class FuturesTrader {
       signal: executionSignal,
       quantity,
       leverage,
-      clientOrderId: clientOrderId(post?.id || signal.rawText)
+      clientOrderId: openingClientOrderId({
+        executionMode: config.mode,
+        postId: post?.id || signal.rawText,
+        signal
+      })
     });
     const test = config.mode === 'test';
     let response;
@@ -1793,6 +1804,11 @@ export class FuturesTrader {
       postUrl: post?.url || null,
       phase: phase || null,
       executionMode: config.mode,
+      executionKey: openingExecutionKey({
+        executionMode: config.mode,
+        postId: post?.id || signal.rawText,
+        signal
+      }),
       status: 'error',
       reason: error.message
     });

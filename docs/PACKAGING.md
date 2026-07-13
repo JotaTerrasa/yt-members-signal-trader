@@ -134,13 +134,17 @@ Si YouTube o Telegram piden login otra vez, vuelve temporalmente al arranque vis
 | Variable | Valor por defecto | Uso |
 |---|---:|---|
 | `PORT` | `5178` | Puerto HTTP local. |
+| `HOST` | `127.0.0.1` local; `0.0.0.0` dentro de Docker | Interfaz de escucha. No uses `0.0.0.0` directamente en el host sin protección. |
+| `PUBLISH_ADDRESS` | `127.0.0.1` | Dirección del host en la que Docker Compose publica el puerto. |
+| `APP_BASIC_USER` | vacío | Usuario opcional para proteger UI y API. |
+| `APP_BASIC_PASSWORD` | vacío | Contraseña opcional; debe configurarse junto al usuario. |
 | `NODE_ENV` | `production` en Docker/PM2 | Modo de ejecución Node. |
 | `TZ` | `Europe/Madrid` | Zona horaria de logs y contenedor. |
 | `PLAYWRIGHT_HEADLESS` | `false` local, `true` Docker | Ejecutar Chromium sin ventana. |
 | `PLAYWRIGHT_NO_SANDBOX` | `false` | Solo para entornos Linux que lo exijan. |
 | `STRATEGY_STUDY_OFFLINE` | `0` | Si es `1`, el informe estratégico no consulta BingX. |
 
-Las credenciales de Telegram y BingX no deben ir en `.env`. Se configuran desde la UI y se guardan localmente en `.data/config.json`.
+Las credenciales de Telegram y BingX no deben ir en `.env`. Se configuran desde la UI y se guardan localmente en `.data/config.json`. Las credenciales HTTP sí pueden ir en el `.env` local, que está excluido de Git.
 
 ## Comprobación portátil
 

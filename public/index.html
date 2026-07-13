@@ -3,37 +3,54 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=42">
+    <link rel="stylesheet" href="/polish.css?v=2">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-    <script src="/app.js?v=76" defer></script>
+    <script src="/app.js?v=77" defer></script>
   </head>
   <body>
+    <a class="skip-link" href="#workspace">Saltar al contenido</a>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-block">
           <span class="brand-mark" aria-hidden="true">
-            <i data-lucide="radar"></i>
+            <span class="brand-monogram">FM</span>
           </span>
-          <div>
-            <p class="eyebrow">Monitor local / canal de miembros</p>
+          <div class="brand-copy">
+            <p class="eyebrow">Consola operativa</p>
             <h1>Futures Magician</h1>
           </div>
         </div>
+        <div class="header-context" aria-label="Contexto operativo">
+          <div class="context-chip">
+            <span>Fuentes</span>
+            <strong id="header-source-status">YouTube</strong>
+          </div>
+          <div class="context-chip" id="header-mode-chip" data-tone="test">
+            <span>Cuenta</span>
+            <strong id="header-mode-status">Test</strong>
+          </div>
+        </div>
         <div class="topbar-actions">
+          <button id="toggle-controls" class="button secondary mobile-controls-toggle" type="button" aria-label="Mostrar u ocultar controles" aria-controls="tool-panel" aria-expanded="true">
+            <i data-lucide="sliders-horizontal"></i>
+            <span>Controles</span>
+          </button>
           <button id="restart-backend" class="icon-button restart-backend-button" type="button" title="Reiniciar backend">
             <i data-lucide="rotate-cw"></i>
           </button>
-          <div class="status-pill" id="status-pill">
+          <div class="status-pill" id="status-pill" role="status" aria-live="polite">
             <span class="dot"></span>
             <span id="status-text">Inactivo</span>
           </div>
         </div>
       </header>
 
-      <main class="layout">
-        <section class="tool-panel" aria-label="Configuracion de scrapeo">
+      <main class="layout" id="workspace">
+        <section class="tool-panel" id="tool-panel" aria-label="Configuracion de scrapeo">
           <div class="field">
             <label for="channel-url">Canal o pestana de publicaciones</label>
             <input id="channel-url" type="url" placeholder="https://www.youtube.com/@canal/posts">
@@ -422,21 +439,21 @@
 
         <section class="content-panel" aria-label="Resultados">
           <div class="metrics">
-            <div class="metric-card">
+            <div class="metric-card metric-card-total">
               <span class="metric-icon" aria-hidden="true"><i data-lucide="database"></i></span>
               <div>
                 <span class="metric-label">Guardados</span>
                 <strong id="metric-total">0</strong>
               </div>
             </div>
-            <div class="metric-card">
+            <div class="metric-card metric-card-visible">
               <span class="metric-icon" aria-hidden="true"><i data-lucide="eye"></i></span>
               <div>
                 <span class="metric-label">Visibles</span>
                 <strong id="metric-visible">0</strong>
               </div>
             </div>
-            <div class="metric-card">
+            <div class="metric-card metric-card-freshness">
               <span class="metric-icon" aria-hidden="true"><i data-lucide="activity"></i></span>
               <div>
                 <span class="metric-label">Ultima lectura</span>
@@ -447,12 +464,24 @@
 
           <div class="content-toolbar">
             <div class="tabs" role="tablist" aria-label="Vistas">
-              <button class="tab active" id="posts-tab" type="button">Posts</button>
-              <button class="tab" id="logs-tab" type="button">Eventos</button>
-              <button class="tab" id="pnl-tab" type="button">PnL</button>
+              <button class="tab active" id="posts-tab" type="button" role="tab" aria-selected="true" aria-controls="posts-view">
+                <i data-lucide="messages-square"></i>
+                <span>Posts</span>
+              </button>
+              <button class="tab" id="logs-tab" type="button" role="tab" aria-selected="false" aria-controls="logs-view">
+                <i data-lucide="list-checks"></i>
+                <span>Eventos</span>
+              </button>
+              <button class="tab" id="pnl-tab" type="button" role="tab" aria-selected="false" aria-controls="pnl-view">
+                <i data-lucide="chart-no-axes-combined"></i>
+                <span>PnL</span>
+              </button>
             </div>
-            <div class="actions">
-              <input id="search" type="search" placeholder="Filtrar posts">
+            <div class="actions" id="posts-actions">
+              <label class="search-control" for="search">
+                <i data-lucide="search" aria-hidden="true"></i>
+                <input id="search" type="search" placeholder="Filtrar posts">
+              </label>
               <a class="icon-link" href="/api/export.json" title="Exportar JSON">
                 <i data-lucide="braces"></i>
                 <span>JSON</span>
@@ -512,6 +541,17 @@
             </div>
 
             <div id="pnl-source-grid" class="pnl-source-grid" aria-label="Fuentes de PnL"></div>
+            <section class="reliability-panel" id="reliability-panel" aria-label="Fiabilidad de ejecución">
+              <div class="trade-section-header">
+                <div>
+                  <h3>Fiabilidad de ejecución</h3>
+                  <p>Paquetes, reintentos y criterio de promoción</p>
+                </div>
+                <span id="reliability-status">Recogiendo muestra</span>
+              </div>
+              <div class="reliability-summary" id="reliability-summary"></div>
+              <div class="reliability-criteria" id="reliability-criteria"></div>
+            </section>
             <div class="cost-control-panel" id="cost-control-panel">
               <div class="trade-section-header">
                 <h3>Coste operativo</h3>

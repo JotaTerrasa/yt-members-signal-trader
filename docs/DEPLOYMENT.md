@@ -202,6 +202,8 @@ Cobertura de paquetes y cohorte:
 
 ```bash
 curl http://localhost:5178/api/signal-coverage
+curl http://localhost:5178/api/execution-packages
+curl http://localhost:5178/api/promotion-gate
 curl http://localhost:5178/api/replica-audit
 ```
 
@@ -209,13 +211,17 @@ curl http://localhost:5178/api/replica-audit
 
 Solo si necesitas ver la app desde móvil fuera de la red local:
 
+1. Define `APP_BASIC_USER` y `APP_BASIC_PASSWORD` en el entorno de PM2 o en `.env` para Docker.
+2. Reinicia la app y comprueba que el navegador solicita credenciales.
+3. Abre el túnel:
+
 ```bash
 cloudflared tunnel --url http://localhost:5178
 ```
 
 Precauciones:
 
-- No publiques la URL sin autenticación.
+- No publiques la URL sin autenticación básica o Cloudflare Access.
 - Cierra el túnel cuando termines.
 - La UI permite operar y cambiar configuración.
 

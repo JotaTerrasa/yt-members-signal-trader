@@ -15,6 +15,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: '5178',
+        HOST: '127.0.0.1',
         PLAYWRIGHT_HEADLESS: 'false'
       }
     }

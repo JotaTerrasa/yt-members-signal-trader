@@ -114,12 +114,22 @@ Reglas:
 
 ## UI expuesta
 
-No expongas `http://localhost:5178` a internet sin autenticación.
+El servidor escucha en `127.0.0.1` de forma predeterminada. Docker escucha dentro del contenedor en `0.0.0.0`, pero Compose publica el puerto únicamente en `127.0.0.1` del host.
+
+No expongas `http://localhost:5178` a internet sin autenticación. Para activar la autenticación básica, configura las dos variables juntas:
+
+```dotenv
+APP_BASIC_USER=operador
+APP_BASIC_PASSWORD=una-clave-larga-y-unica
+```
+
+No versionees el archivo `.env`. La app también aplica cabeceras de seguridad, rechaza mutaciones con un origen web distinto y limita la frecuencia de peticiones que modifican estado. `/api/health` permanece accesible para healthchecks, pero no permite ninguna acción.
 
 Si usas Cloudflare Tunnel:
 
 - que sea temporal;
 - no compartas la URL;
+- activa `APP_BASIC_USER` y `APP_BASIC_PASSWORD` antes de abrirlo;
 - ciérralo al terminar;
 - recuerda que la UI permite operar y cambiar claves.
 

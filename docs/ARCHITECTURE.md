@@ -57,6 +57,7 @@ sequenceDiagram
   participant Server as server.js
   participant Parser as futuresSignalParser.js
   participant Trader as futuresTrader.js
+  participant Retry as executionRetryStore.js
   participant BingX as BingX REST
   participant UI as Frontend/SSE
   participant Bot as bot de Telegram
@@ -69,6 +70,7 @@ sequenceDiagram
   Server->>Server: encolar por orden de llegada
   Server->>Trader: processPosts
   Trader->>Trader: validar modo, SL, distancia, duplicado, riesgo, antigüedad y desvío
+  Trader->>Trader: generar clientOrderId determinista por señal
   opt demo VST con reserva técnica
     Trader->>BingX: balance demo y, si falta margen libre, getVst
     BingX-->>Trader: margen VST actualizado
@@ -78,6 +80,11 @@ sequenceDiagram
   else demo/live/dual
     Trader->>BingX: order / close / TP / SL
     BingX-->>Trader: respuesta exchange
+  end
+  opt fallo transitorio o zona temporalmente inválida
+    Trader->>Retry: persistir reintento con caducidad
+    Retry-->>Trader: recuperar tras reinicio
+    Trader->>BingX: reconciliar antes de reintentar
   end
   Trader-->>Server: trade event
   Server->>UI: SSE state/trade/log
@@ -92,6 +99,7 @@ flowchart LR
   posts[".data/posts.json<br/>posts/mensajes"] --> server
   events[".data/trade-events.json<br/>eventos compactados"] --> server
   journal[".data/trade-events.json.journal<br/>diario incremental"] --> server
+  retries[".data/execution-retries.json<br/>cola persistente"] --> server
   paper[".data/paper-trades.json<br/>paper/test"] --> server
   study[".data/strategy-study/*.json/md<br/>informe runtime"] --> server
   backups[".data/backups/<br/>redactado y cifrado"] --> server
@@ -116,12 +124,32 @@ Orquesta:
 - BingX.
 - Cola serial de señales para evitar carreras entre YouTube y Telegram Web.
 - Reintentos cortos de entradas cuyo stop o precio aún no estén en zona válida.
+- Recuperación de reintentos pendientes después de reiniciar el proceso.
+- Reconciliación de posiciones antes de reenviar una apertura.
 - Cierre inmediato a mercado con auditoría de slippage.
 - Reintentos idempotentes de cierres que fallen por red o error transitorio de BingX.
 - Cohorte posterior a mejoras y cobertura de paquetes de señales.
 - Reserva técnica Demo VST activada solo con confirmación explícita y endpoint dedicado.
 - Portfolio dinámico.
 - PnL histórico.
+
+### `src/executionReliability.js`
+
+Genera una identidad estable para cada apertura a partir de modo, publicación, símbolo, dirección, entrada y stop. El `clientOrderId` enviado a BingX es determinista, por lo que un timeout ambiguo no puede generar una segunda orden distinta al reintentarse.
+
+También clasifica qué errores son transitorios. No reintenta errores de credenciales, límites de riesgo ni configuraciones inválidas.
+
+### `src/executionRetryStore.js`
+
+Mantiene la cola local de aperturas y cierres pendientes mediante reemplazo atómico. La cola no contiene secretos y conserva modo, señal, caducidad, intentos y último motivo. Al arrancar, `server.js` la recupera y reconcilia BingX antes de cualquier reenvío.
+
+### `src/promotionGate.js`
+
+Calcula una puerta informativa basada en muestra, cobertura, paquetes completos, fallos de parser, reintentos, reconciliación, SL, órdenes huérfanas y resultado neto tras costes. Nunca cambia el modo ni arma live automáticamente.
+
+### `src/httpSecurity.js`
+
+Centraliza cabeceras de seguridad, validación de origen, limitación de mutaciones y autenticación básica opcional. El servidor escucha en `127.0.0.1` de forma predeterminada.
 
 ### `src/youtubeScraper.js`
 
@@ -262,6 +290,7 @@ Detecta posts de portfolio con enlaces nuevos y actualiza la fuente activa.
 .data/paper-trades.json  Operaciones paper
 .data/trade-events.json  Eventos compactados
 .data/trade-events.json.journal Eventos nuevos pendientes de compactación
+.data/execution-retries.json Cola de reintentos recuperable
 .yt-profile/             Sesiones Chromium/YouTube/Telegram Web
 ```
 
@@ -276,6 +305,9 @@ GET /api/state
 GET /api/health
 GET /api/events
 GET /api/audit
+GET /api/operational-status
+GET /api/execution-packages
+GET /api/promotion-gate
 ```
 
 Posts:

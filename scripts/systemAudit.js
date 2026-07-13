@@ -12,7 +12,7 @@ const generatedAt = new Date().toISOString();
 
 await Promise.all([mkdir(reportDir, { recursive: true }), mkdir(dataReportDir, { recursive: true })]);
 
-const [postsData, eventsData, replicaPayload, operationalPayload, riskPayload, telegramSourcePayload, signalCoveragePayload, eventFile] = await Promise.all([
+const [postsData, eventsData, replicaPayload, operationalPayload, riskPayload, telegramSourcePayload, signalCoveragePayload, promotionGatePayload, eventFile] = await Promise.all([
   readJson(join(dataDir, 'posts.json'), { posts: [] }),
   readJson(join(dataDir, 'trade-events.json'), { events: [] }),
   fetchJson(`/api/replica-audit?month=${encodeURIComponent(month)}`),
@@ -20,6 +20,7 @@ const [postsData, eventsData, replicaPayload, operationalPayload, riskPayload, t
   fetchJson('/api/risk'),
   fetchJson('/api/telegram-source'),
   fetchJson('/api/signal-coverage'),
+  fetchJson('/api/promotion-gate'),
   stat(join(dataDir, 'trade-events.json')).catch(() => null)
 ]);
 
@@ -45,7 +46,8 @@ const report = {
     incidents24h: operationalPayload?.incidents?.counts || null,
     risk: pickRisk(riskPayload?.risk),
     configuration: pickConfig(riskPayload?.bingx, telegramSourcePayload?.telegramSource),
-    signalCoverage: signalCoveragePayload?.signalCoverage || operationalPayload?.signalCoverage || null
+    signalCoverage: signalCoveragePayload?.signalCoverage || operationalPayload?.signalCoverage || null,
+    promotionGate: promotionGatePayload?.promotionGate || operationalPayload?.promotionGate || null
   },
   data: {
     posts: posts.length,
@@ -345,6 +347,8 @@ function renderMarkdown(report) {
     `- Antigüedad máxima de apertura: ${report.runtime.configuration?.maxSignalAgeMinutes ?? '-'} min`,
     `- Distancia máxima del stop: ${percent(report.runtime.configuration?.maxStopDistancePercent)}`,
     `- Recarga Telegram: ${report.runtime.configuration?.telegramRefreshSeconds || '-'} s`,
+    `- Puerta de promoción: ${report.runtime.promotionGate?.label || 'sin datos'}`,
+    `- Criterios pendientes: ${(report.runtime.promotionGate?.criteria || []).filter((item) => !item.ok).map((item) => item.label).join(', ') || 'ninguno'}`,
     '',
     '## Interpretación',
     '',

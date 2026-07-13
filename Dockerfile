@@ -4,6 +4,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production \
     PORT=5178 \
+    HOST=0.0.0.0 \
     PLAYWRIGHT_HEADLESS=true \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 

@@ -8,11 +8,14 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-5178}
+      HOST: 0.0.0.0
+      APP_BASIC_USER: ${APP_BASIC_USER:-}
+      APP_BASIC_PASSWORD: ${APP_BASIC_PASSWORD:-}
       PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
       PLAYWRIGHT_NO_SANDBOX: ${PLAYWRIGHT_NO_SANDBOX:-false}
       TZ: ${TZ:-Europe/Madrid}
     ports:
-      - "${PORT:-5178}:${PORT:-5178}"
+      - "${PUBLISH_ADDRESS:-127.0.0.1}:${PORT:-5178}:${PORT:-5178}"
     volumes:
       - ./.data:/app/.data
       - ./.yt-profile:/app/.yt-profile

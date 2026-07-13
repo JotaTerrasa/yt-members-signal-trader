@@ -104,6 +104,10 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - Cada publicación con aperturas forma un paquete auditable: símbolos esperados, ejecutados, pendientes y ausentes.
 - Una alerta informa cuando un paquete queda incompleto al terminar su ventana de reintento.
 - La cohorte posterior a las mejoras conserva el histórico anterior, pero calcula sus métricas desde una marca temporal independiente.
+- Cada apertura usa un identificador determinista. Un reintento conserva la misma identidad en BingX y no puede convertirse en una orden nueva por cambiar la hora local.
+- La cola de aperturas y cierres pendientes se guarda en `.data/execution-retries.json` y se recupera después de reiniciar.
+- Antes de reintentar una apertura, la app reconcilia posiciones para resolver respuestas ambiguas sin duplicar exposición.
+- La puerta de promoción exige muestra, cobertura, seguridad y PnL neto positivo; nunca arma live automáticamente.
 
 ## Cómo ejecutar la auditoría
 
@@ -141,6 +145,8 @@ La cohorte posterior a estas mejoras debe evaluarse por separado. Los indicadore
 8. Diferencias por activo y por tipo de salida.
 9. Paquetes completos y aperturas ausentes tras agotar reintentos.
 10. Devolución de comisiones acreditada, separada de la estimación.
+11. Reintentos recuperados, expirados y resueltos sin duplicado.
+12. Estado de la puerta de promoción y criterio exacto que impide avanzar.
 
 Con menos de 30 cierres posteriores al cambio, la lectura es exploratoria. Entre 30 y 99 puede orientar ajustes, pero sigue siendo frágil. A partir de 100 se pueden contrastar hipótesis, todavía con validación fuera de muestra y sin convertir correlaciones en reglas automáticas.
 

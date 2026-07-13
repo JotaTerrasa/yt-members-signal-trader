@@ -7,10 +7,14 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore } from './configStore.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
+import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
+import { ExecutionRetryStore } from './executionRetryStore.js';
 import { FuturesTrader, validateEntryDeviation } from './futuresTrader.js';
+import { applySecurityHeaders, authorizeHttpRequest, buildHttpSecurity, createMutationRateLimiter, validateMutationOrigin } from './httpSecurity.js';
 import { buildHistoricalPnl } from './historicalPnl.js';
 import { PaperTradeStore } from './paperTradeStore.js';
 import { detectPortfolioUrl } from './portfolioDetector.js';
+import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
 import { cohortSampleStatus, commissionEvidence, isRetryableCloseError } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
@@ -28,6 +32,9 @@ const dataDir = join(rootDir, '.data');
 const backupDir = join(dataDir, 'backups');
 const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
+const httpSecurity = buildHttpSecurity();
+const host = httpSecurity.host;
+const mutationRateLimiter = createMutationRateLimiter();
 const EXCHANGE_SYNC_POLL_MS = 30_000;
 const EXCHANGE_SYNC_MIN_INTERVAL_MS = 10_000;
 const EXCHANGE_SYNC_STALE_MS = 90_000;
@@ -71,6 +78,9 @@ await paperStore.init();
 
 const tradeEventStore = new TradeEventStore(join(dataDir, 'trade-events.json'));
 await tradeEventStore.init();
+
+const executionRetryStore = new ExecutionRetryStore(join(dataDir, 'execution-retries.json'));
+await executionRetryStore.init();
 
 const scraper = new YouTubePostsScraper({ profileDir });
 const telegramNotifier = new TelegramNotifier({
@@ -129,6 +139,7 @@ const liveProtectionGraceUntil = new Map();
 const liveOrphanGraceUntil = new Map();
 const pendingStopLossRetries = new Map();
 const pendingCloseGuardRetries = new Map();
+const openingRetryTelegramNotifications = new Set();
 const closeGuardTelegramNotifications = new Set();
 const signalCoverageNotifications = new Set();
 let tradeProcessingQueue = Promise.resolve();
@@ -151,6 +162,7 @@ const state = {
   logs: [],
   trades: tradeEventStore.list(200),
   signalCoverage: null,
+  promotionGate: null,
   stats: store.stats()
 };
 let lastHealthAlertKey = '';
@@ -460,20 +472,10 @@ function handleCloseGuardRetryEvent(event = {}) {
 }
 
 function shouldQueueStopLossRetry(event = {}) {
-  const status = String(event.status || '');
-  const mode = String(event.executionMode || '').toLowerCase();
-  const signal = event.signal || {};
-  return status === 'blocked'
-    && (mode === 'demo' || mode === 'live')
-    && signal.symbol
-    && signal.direction
-    && !isPositionManagementSignal(signal)
-    && isRetryableStopLossReason(event.reason);
-}
-
-function isRetryableStopLossReason(reason = '') {
-  return /^(exchange_stop_loss_invalid|entry_missed_invalid_(?:long|short)_stop_loss|invalid_(?:long|short)_stop_loss|entry_adverse_deviation_too_high):/i
-    .test(String(reason || ''));
+  const config = configStore.getBingX();
+  return isRetryableOpeningEvent(event, {
+    vstTechnicalReserveEnabled: Boolean(config.vstTechnicalReserveEnabled)
+  });
 }
 
 function shouldQueueCloseGuardRetry(event = {}) {
@@ -500,12 +502,14 @@ function queueStopLossRetry(event, key = stopLossRetryKeyFromEvent(event)) {
     existing.lastReason = event.reason || existing.lastReason;
     existing.lastBlockedAt = event.at || new Date().toISOString();
     existing.updatedAt = new Date().toISOString();
+    persistExecutionRetry('opening', existing);
     broadcast('state', state);
     return existing;
   }
 
   const now = Date.now();
   const item = {
+    kind: 'opening',
     key,
     signal: event.signal,
     post: {
@@ -527,6 +531,7 @@ function queueStopLossRetry(event, key = stopLossRetryKeyFromEvent(event)) {
   };
 
   pendingStopLossRetries.set(key, item);
+  persistExecutionRetry('opening', item);
   pushLog({
     level: 'warn',
     message: `Reintento pendiente por SL ${item.executionMode}: ${item.signal.symbol} ${item.signal.direction}.`,
@@ -547,12 +552,14 @@ function queueCloseGuardRetry(event, key = closeGuardRetryKeyFromEvent(event)) {
     existing.lastReason = closeGuardEventReason(event) || existing.lastReason;
     existing.lastBlockedAt = event.at || new Date().toISOString();
     existing.updatedAt = new Date().toISOString();
+    persistExecutionRetry('close', existing);
     broadcast('state', state);
     return existing;
   }
 
   const now = Date.now();
   const item = {
+    kind: 'close',
     key,
     signal: event.signal,
     post: {
@@ -574,6 +581,7 @@ function queueCloseGuardRetry(event, key = closeGuardRetryKeyFromEvent(event)) {
   };
 
   pendingCloseGuardRetries.set(key, item);
+  persistExecutionRetry('close', item);
   pushLog({
     level: 'warn',
     message: `Cierre pendiente ${item.executionMode}: ${item.signal.symbol || 'todas las posiciones'} (${item.retryKind}).`,
@@ -593,6 +601,7 @@ function scheduleStopLossRetryTimer(item, delayMs = STOP_LOSS_RETRY_INTERVAL_MS)
   }
   const delay = Math.max(1000, Number(delayMs || STOP_LOSS_RETRY_INTERVAL_MS));
   item.nextRunAt = new Date(Date.now() + delay).toISOString();
+  persistExecutionRetry('opening', item);
   item.timer = setTimeout(() => {
     runStopLossRetry(item.key).catch((error) => {
       const current = pendingStopLossRetries.get(item.key);
@@ -621,6 +630,7 @@ function scheduleCloseGuardRetryTimer(item, delayMs = CLOSE_GUARD_RETRY_INTERVAL
   }
   const delay = Math.max(1000, Number(delayMs || CLOSE_GUARD_RETRY_INTERVAL_MS));
   item.nextRunAt = new Date(Date.now() + delay).toISOString();
+  persistExecutionRetry('close', item);
   item.timer = setTimeout(() => {
     runCloseGuardRetry(item.key).catch(async (error) => {
       const current = pendingCloseGuardRetries.get(item.key);
@@ -671,6 +681,18 @@ async function runStopLossRetry(key) {
     return;
   }
 
+  await syncExchangePositions({ reason: 'opening_retry_preflight' }).catch((error) => {
+    pushLog({
+      level: 'warn',
+      message: `Reconciliacion previa a reintento ${item.signal.symbol}: ${error.message}`,
+      at: new Date().toISOString()
+    });
+  });
+  if (hasOpenPositionForStopLossRetry(item) || hasOpeningExecutionForStopLossRetry(item)) {
+    clearStopLossRetry(key, 'already_open');
+    return;
+  }
+
   const config = {
     ...baseConfig,
     mode: item.executionMode
@@ -680,6 +702,7 @@ async function runStopLossRetry(key) {
   item.lastCheckedAt = new Date().toISOString();
   item.lastMarketPrice = readiness.marketPrice || null;
   item.lastReason = readiness.reason || item.lastReason;
+  persistExecutionRetry('opening', item);
 
   if (!readiness.ok) {
     rescheduleOrExpireStopLossRetry(item, readiness.reason);
@@ -744,6 +767,7 @@ async function runCloseGuardRetry(key) {
   };
   item.attempts += 1;
   item.lastCheckedAt = new Date().toISOString();
+  persistExecutionRetry('close', item);
 
   pushLog({
     level: 'warn',
@@ -828,6 +852,7 @@ function rescheduleOrExpireStopLossRetry(item, reason) {
     return;
   }
   item.lastReason = reason || item.lastReason;
+  persistExecutionRetry('opening', item);
   if (stopLossRetryExpired(item)) {
     expireStopLossRetry(item, item.lastReason || 'retry_expired');
     return;
@@ -841,6 +866,7 @@ async function rescheduleOrExpireCloseGuardRetry(item, reason) {
     return;
   }
   item.lastReason = reason || item.lastReason;
+  persistExecutionRetry('close', item);
   if (closeGuardRetryExpired(item)) {
     await executeExpiredCloseGuardFallback(item, item.lastReason || 'retry_expired');
     return;
@@ -962,6 +988,7 @@ function clearStopLossRetry(key, reason = '') {
     clearTimeout(item.timer);
   }
   pendingStopLossRetries.delete(key);
+  removePersistedExecutionRetry('opening', key);
   if (reason) {
     pushLog({
       level: reason === 'opened' || reason === 'already_open' ? 'info' : 'warn',
@@ -981,6 +1008,7 @@ function clearCloseGuardRetry(key, reason = '') {
     clearTimeout(item.timer);
   }
   pendingCloseGuardRetries.delete(key);
+  removePersistedExecutionRetry('close', key);
   if (reason) {
     pushLog({
       level: reason === 'closed' ? 'info' : 'warn',
@@ -996,6 +1024,9 @@ function stopLossRetryKeyFromEvent(event = {}) {
   const mode = String(event.executionMode || '').toLowerCase();
   if (!mode || !signal.symbol || !signal.direction || isPositionManagementSignal(signal)) {
     return '';
+  }
+  if (event.executionKey) {
+    return String(event.executionKey);
   }
   return [
     mode,
@@ -1063,10 +1094,7 @@ function configAllowsRetryMode(configMode, executionMode) {
 }
 
 function isOpeningExecutionStatusForRetry(status) {
-  const value = String(status || '');
-  return value === 'test_order_sent'
-    || value === 'demo_order_sent'
-    || value === 'live_order_sent';
+  return isOpeningExecutionStatus(status);
 }
 
 function isCloseExecutionStatusForRetry(status) {
@@ -1087,6 +1115,49 @@ function stopLossRetryQueueState() {
 
 function closeGuardRetryQueueState() {
   return [...pendingCloseGuardRetries.values()].map(publicCloseGuardRetryItem);
+}
+
+function persistExecutionRetry(kind, item) {
+  executionRetryStore.upsert({
+    ...item,
+    kind,
+    timer: undefined
+  }).catch((error) => {
+    pushLog({
+      level: 'error',
+      message: `Persistencia de reintento ${kind}: ${error.message}`,
+      at: new Date().toISOString()
+    });
+  });
+}
+
+function removePersistedExecutionRetry(kind, key) {
+  executionRetryStore.remove(kind, key).catch((error) => {
+    pushLog({
+      level: 'error',
+      message: `Limpieza de reintento ${kind}: ${error.message}`,
+      at: new Date().toISOString()
+    });
+  });
+}
+
+function hydrateExecutionRetryQueuesFromStore() {
+  for (const stored of executionRetryStore.list()) {
+    const item = {
+      ...stored,
+      timer: null
+    };
+    const nextAt = Date.parse(item.nextRunAt || 0);
+    const delay = Number.isFinite(nextAt) ? Math.max(1000, nextAt - Date.now()) : 1000;
+    if (item.kind === 'opening' && !pendingStopLossRetries.has(item.key)) {
+      pendingStopLossRetries.set(item.key, item);
+      scheduleStopLossRetryTimer(item, delay);
+    }
+    if (item.kind === 'close' && !pendingCloseGuardRetries.has(item.key)) {
+      pendingCloseGuardRetries.set(item.key, item);
+      scheduleCloseGuardRetryTimer(item, delay);
+    }
+  }
 }
 
 function publicStopLossRetryItem(item) {
@@ -1198,7 +1269,22 @@ function countParsedSignals(posts = []) {
 
 const server = createServer(async (request, response) => {
   try {
-    const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+    applySecurityHeaders(response);
+    const requestUrl = new URL(request.url, `http://${request.headers.host || `localhost:${port}`}`);
+    const authorization = authorizeHttpRequest(request, requestUrl, httpSecurity);
+    if (!authorization.ok) {
+      response.setHeader('www-authenticate', 'Basic realm="Futures Magician", charset="UTF-8"');
+      return sendJson(response, { error: authorization.reason }, authorization.status);
+    }
+    const originValidation = validateMutationOrigin(request);
+    if (!originValidation.ok) {
+      return sendJson(response, { error: originValidation.reason }, originValidation.status);
+    }
+    const rateLimit = mutationRateLimiter(request);
+    if (!rateLimit.ok) {
+      response.setHeader('retry-after', String(rateLimit.retryAfterSeconds));
+      return sendJson(response, { error: rateLimit.reason }, rateLimit.status);
+    }
 
     if (requestUrl.pathname === '/api/events') {
       return handleEvents(response);
@@ -1624,6 +1710,8 @@ const server = createServer(async (request, response) => {
       }
       const audit = await buildReplicaAudit({ month });
       replicaAuditCache = { month, at: Date.now(), audit };
+      state.promotionGate = buildCurrentPromotionGate();
+      broadcast('state', state);
       return sendJson(response, { ok: true, audit });
     }
 
@@ -1646,6 +1734,24 @@ const server = createServer(async (request, response) => {
     if (requestUrl.pathname === '/api/signal-coverage' && request.method === 'GET') {
       const signalCoverage = await refreshSignalCoverage({ notify: false });
       return sendJson(response, { ok: true, signalCoverage });
+    }
+
+    if (requestUrl.pathname === '/api/execution-packages' && request.method === 'GET') {
+      const signalCoverage = await refreshSignalCoverage({ notify: false });
+      return sendJson(response, {
+        ok: true,
+        signalCoverage,
+        openingRetries: stopLossRetryQueueState(),
+        closeRetries: closeGuardRetryQueueState(),
+        promotionGate: buildCurrentPromotionGate(signalCoverage)
+      });
+    }
+
+    if (requestUrl.pathname === '/api/promotion-gate' && request.method === 'GET') {
+      return sendJson(response, {
+        ok: true,
+        promotionGate: buildCurrentPromotionGate()
+      });
     }
 
     if (requestUrl.pathname === '/api/portfolio' && request.method === 'GET') {
@@ -1723,7 +1829,8 @@ const server = createServer(async (request, response) => {
         incidents: buildIncidentSnapshot(),
         backup: lastBackupStatus,
         pnlBackoff: pnlBackoffInfo(),
-        signalCoverage: state.signalCoverage
+        signalCoverage: state.signalCoverage,
+        promotionGate: buildCurrentPromotionGate()
       });
     }
 
@@ -1796,7 +1903,7 @@ const server = createServer(async (request, response) => {
     return serveStatic(requestUrl.pathname, response);
   } catch (error) {
     pushLog({ level: 'error', message: error.message, at: new Date().toISOString() });
-    return sendJson(response, { error: error.message }, 500);
+    return sendJson(response, { error: error.message }, Number(error.statusCode || 500));
   }
 });
 
@@ -1810,8 +1917,9 @@ server.once('error', async (error) => {
   process.exit(1);
 });
 
-server.listen(port, () => {
-  console.log(`YouTube Posts Scraper disponible en http://localhost:${port}`);
+server.listen(port, host, () => {
+  console.log(`YouTube Posts Scraper disponible en http://${displayHost(host)}:${port}`);
+  hydrateExecutionRetryQueuesFromStore();
   hydrateStopLossRetryQueueFromEvents();
   hydrateCloseGuardRetryQueueFromEvents();
   checkAutomaticMonthlyReset({ reason: 'startup' }).catch((error) => {
@@ -1966,6 +2074,7 @@ async function startScraperMonitor(input = {}, { persistMonitor = false } = {}) 
 function currentState() {
   state.health = buildHealth();
   state.priceFeed = priceFeed.status();
+  state.promotionGate = buildCurrentPromotionGate();
   return {
     ...state,
     browserOpen: scraper.isBrowserOpen,
@@ -1973,11 +2082,36 @@ function currentState() {
     monitor: configStore.getMonitor(),
     telegramSource: configStore.getTelegramSource(),
     portfolio: configStore.getPortfolio(),
+    openingRetryQueue: stopLossRetryQueueState(),
     stopLossRetryQueue: stopLossRetryQueueState(),
     closeRetryQueue: closeGuardRetryQueueState(),
     closeGuardRetryQueue: closeGuardRetryQueueState(),
     exchangeSafety: buildExchangeSafety(),
     stats: store.stats()
+  };
+}
+
+function buildCurrentPromotionGate(coverage = state.signalCoverage) {
+  return buildPromotionGate({
+    coverage,
+    exchangeSafety: buildExchangeSafety(),
+    openingRetries: stopLossRetryQueueState(),
+    closeRetries: closeGuardRetryQueueState(),
+    economics: currentPromotionEconomics()
+  });
+}
+
+function currentPromotionEconomics() {
+  const summary = replicaAuditCache?.audit?.cohort?.summary;
+  if (!summary) {
+    return null;
+  }
+  return {
+    closedTrades: Number(summary.vstCloses || 0),
+    grossPnl: Number(summary.bingxGross || 0),
+    fees: Number(summary.bingxFees || 0),
+    funding: Number(summary.bingxFunding || 0),
+    netPnl: Number(summary.bingxNet || 0)
   };
 }
 
@@ -2190,6 +2324,7 @@ async function refreshSignalCoverage({ notify = false, rememberExisting = false 
     retryWindowMs: STOP_LOSS_RETRY_MAX_AGE_MS
   });
   state.signalCoverage = coverage;
+  state.promotionGate = buildCurrentPromotionGate(coverage);
   if (rememberExisting) {
     rememberSignalCoverageNotifications(coverage);
   }
@@ -3119,7 +3254,7 @@ function notifyTradeExecutionError(event) {
   if (event?.status !== 'error') {
     return;
   }
-  if (event.phase === 'close_execution_retry') {
+  if (event.phase === 'close_execution_retry' || event.phase === 'stop_loss_retry') {
     return;
   }
 
@@ -3148,6 +3283,9 @@ function notifyTradeExecutionError(event) {
 
 function notifyTradeCriticalEvent(event = {}) {
   notifyTradeExecutionError(event);
+  if (event.status === 'error') {
+    return;
+  }
   if (!isTelegramTradeEvent(event)) {
     return;
   }
@@ -3184,6 +3322,21 @@ function notifyTradeCriticalEvent(event = {}) {
 
 function shouldNotifyTradeTelegram(event = {}) {
   const status = String(event.status || '');
+  if (shouldQueueStopLossRetry(event)) {
+    const key = stopLossRetryKeyFromEvent(event);
+    if (key && openingRetryTelegramNotifications.has(key)) {
+      return false;
+    }
+    if (key) {
+      openingRetryTelegramNotifications.add(key);
+    }
+  }
+  if (isOpeningExecutionStatusForRetry(status) || status.includes('order_retry_expired')) {
+    const key = stopLossRetryKeyFromEvent(event);
+    if (key) {
+      openingRetryTelegramNotifications.delete(key);
+    }
+  }
   if (isCloseGuardRetryStatus(status)) {
     const key = closeGuardTelegramKeyFromEvent(event);
     if (!key) {
@@ -3639,7 +3792,14 @@ function pushLog(entry) {
 
 async function readJson(request) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > 1024 * 1024) {
+      const error = new Error('request_body_too_large');
+      error.statusCode = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
@@ -3678,6 +3838,10 @@ function mimeType(extension) {
     '.json': 'application/json; charset=utf-8',
     '.svg': 'image/svg+xml'
   }[extension] || 'application/octet-stream';
+}
+
+function displayHost(value) {
+  return value === '0.0.0.0' || value === '::' ? 'localhost' : value;
 }
 
 async function exchangePnlSource({ key, mode, label, modeLabel, asset }) {
@@ -4501,6 +4665,7 @@ async function performShutdown() {
     store.flush(),
     paperStore.flush(),
     tradeEventStore.flush(),
+    executionRetryStore.flush(),
     serverClosed
   ]);
   for (const result of results) {

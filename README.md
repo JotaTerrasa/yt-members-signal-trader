@@ -39,6 +39,9 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Destaca la equity frente al capital inicial y audita la desviación entre precios publicados y ejecutados.
 - Ejecuta los cierres explícitos inmediatamente a mercado; el slippage se registra como advertencia y nunca retiene la salida.
 - Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
+- Reintenta aperturas bloqueadas por una zona temporalmente inválida o por fallos transitorios, sin perseguir precios desfavorables.
+- Asigna a cada apertura un identificador determinista: un timeout o un reinicio no puede convertir un reintento en una segunda posición.
+- Conserva en `.data/execution-retries.json` las aperturas y los cierres pendientes para recuperarlos después de reiniciar el proceso.
 - Mantiene en Demo VST una reserva técnica de margen antes de cada paquete y descuenta esas aportaciones de la equity estratégica y del ROI.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
@@ -171,6 +174,8 @@ Docker:
 cp .env.example .env
 npm run docker:up
 ```
+
+Docker publica el puerto únicamente en `127.0.0.1` de forma predeterminada. Para proteger un acceso mediante Cloudflare Tunnel, define `APP_BASIC_USER` y `APP_BASIC_PASSWORD` en `.env`; no publiques el puerto directamente en internet.
 
 Los datos persistentes siguen fuera de Git:
 
@@ -325,11 +330,13 @@ Los botones destructivos piden confirmación textual.
 
 ### Posts
 
-Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado. La lista carga 40 filas y permite ampliar el bloque sin renderizar todo el histórico de golpe.
+Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado. La lista carga 40 filas y permite ampliar el bloque sin renderizar todo el histórico de golpe. La navegación mantiene visibles el estado del monitor, las fuentes activas y la cuenta de ejecución.
 
 ### Eventos
 
 Muestra logs internos: scraping, Telegram, BingX, health, backups e incidencias. La lista carga 60 eventos y permite mostrar los anteriores progresivamente.
+
+En pantallas pequeñas, el panel de controles se pliega desde la cabecera para priorizar los datos. Las tablas operativas y la auditoría conservan scroll independiente y cabeceras fijas.
 
 ### PnL
 
@@ -341,6 +348,7 @@ Incluye:
 - Equity frente al capital inicial en Demo VST y live real.
 - Simulador de capital inicial para Google Sheet.
 - Desviación de entrada y salida, operaciones agregadas y causas de desalineación con la hoja.
+- Fiabilidad de ejecución: cobertura, paquetes completos, reintentos pendientes y puerta de promoción.
 - Guardia nocturna.
 - Incidencias 24h.
 - Preparado para live.
@@ -475,6 +483,8 @@ Endpoints:
 | `GET /api/state` | Estado completo de app y monitor. |
 | `GET /api/audit` | Snapshot auditable. |
 | `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
+| `GET /api/execution-packages` | Paquetes detectados, reintentos persistentes y estado de promoción. |
+| `GET /api/promotion-gate` | Criterios objetivos de muestra, cobertura, seguridad y resultado neto. |
 | `GET /api/bingx/positions` | Reconciliación de posiciones. |
 | `GET /api/bingx/pnl-sources` | Fuentes de rendimiento. |
 | `POST /api/bingx/vst-reserve` | Activa y completa la reserva técnica de Demo VST; exige confirmación explícita. |
@@ -497,6 +507,10 @@ src/
   youtubeScraper.js      Playwright, YouTube y Telegram Web
   futuresSignalParser.js Parser de señales
   futuresTrader.js       Test/demo/live/dual y gestión
+  executionReliability.js Identidad idempotente y clasificación de reintentos
+  executionRetryStore.js Cola persistente de aperturas y cierres pendientes
+  promotionGate.js       Criterios de promoción sin activación automática
+  httpSecurity.js        Autenticación opcional y protecciones HTTP
   bingxClient.js         Cliente REST BingX
   bingxPriceWebSocket.js WebSocket de precios
   referenceLedger.js     hoja de Google de referencia
