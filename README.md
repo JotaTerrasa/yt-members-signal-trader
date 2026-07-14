@@ -272,9 +272,12 @@ No escribas tokens en README, issues, commits ni capturas.
 4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
 5. El filtro de coste avisa cuando las fees exigen demasiado margen. En modo bloqueo solo rechaza una entrada cuando existe un TP explícito y ese objetivo no cubre la ida y vuelta estimada; una señal sin TP no se descarta solo por usar x25.
 6. En Demo VST, activa la reserva técnica para asegurar margen libre antes de cada paquete. La base estadística sigue siendo 300 VST y cada ticker sigue usando 45 VST; las recargas son colateral virtual externo y no cuentan como beneficio.
-7. Activa `Exigir stop loss`.
-8. Si vas a live, revisa el checklist `Preparado para live`.
-9. Arma live solo desde la UI y con confirmación consciente.
+7. Configura el disparador del stop loss por entorno. Demo VST usa `Último precio` (`CONTRACT_PRICE`) y live real conserva `Precio de marca` (`MARK_PRICE`).
+8. Activa `Exigir stop loss`.
+9. Si vas a live, revisa el checklist `Preparado para live`.
+10. Arma live solo desde la UI y con confirmación consciente.
+
+El disparador elegido se aplica a los próximos SL creados o modificados. Guardar la configuración no cancela ni reemplaza los stops que ya estén abiertos en BingX.
 
 ## Operación diaria
 

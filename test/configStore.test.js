@@ -19,7 +19,9 @@ test('la reserva VST y sus aportaciones sobreviven a guardados y reinicios', asy
       mode: 'demo',
       enabled: true,
       monthlyInitialCapitalVST: 300,
-      monthlyOrderPercent: 15
+      monthlyOrderPercent: 15,
+      vstStopWorkingType: 'CONTRACT_PRICE',
+      liveStopWorkingType: 'MARK_PRICE'
     });
 
     const restored = new ConfigStore(filePath);
@@ -32,6 +34,8 @@ test('la reserva VST y sus aportaciones sobreviven a guardados y reinicios', asy
     assert.equal(bingx.vstTechnicalLastTopUpAt, '2026-07-13T08:00:00.000Z');
     assert.equal(bingx.monthlyInitialCapitalVST, 300);
     assert.equal(bingx.monthlyOrderNotionalVST, 45);
+    assert.equal(bingx.vstStopWorkingType, 'CONTRACT_PRICE');
+    assert.equal(bingx.liveStopWorkingType, 'MARK_PRICE');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

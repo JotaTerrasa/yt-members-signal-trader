@@ -138,6 +138,8 @@ Configuración importante:
 - `API key` y `API secret`: se guardan localmente en `.data/config.json`.
 - `Allowlist`: si está vacía permite cualquier ticker soportado por BingX.
 - `Stop obligatorio`: bloquea aperturas sin SL.
+- `Disparador SL VST`: usa `Último precio` (`CONTRACT_PRICE`) para los nuevos stops de Demo VST.
+- `Disparador SL real`: conserva `Precio de marca` (`MARK_PRICE`) para los nuevos stops reales.
 - `Max posiciones`: consulta la cuenta BingX activa y bloquea nuevas aperturas si se alcanza el límite.
 - `Max leverage señal`: bloquea señales con demasiado apalancamiento.
 - `Edad máxima`: bloquea aperturas publicadas hace más de cinco minutos; no impide gestionar cierres, TP o SL.
@@ -149,6 +151,8 @@ Configuración importante:
 - `Capital mes VST`: capital inicial mensual para Demo VST.
 - `% fijo por señal`: porcentaje fijo aplicado a ambos capitales.
 - Criterio actual: 300 USDT/VST de capital mensual y 15% por señal, es decir 45 USDT en real y 45 VST en demo por ticker.
+
+Cambiar cualquiera de los disparadores solo afecta a los SL que se creen o modifiquen después de guardar. La aplicación no cancela ni recrea automáticamente las protecciones ya abiertas. El take profit mantiene su configuración independiente.
 
 ### Reserva técnica de Demo VST
 

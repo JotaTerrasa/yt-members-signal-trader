@@ -187,6 +187,8 @@ const elements = {
   bingxEnabled: document.querySelector('#bingx-enabled'),
   bingxMode: document.querySelector('#bingx-mode'),
   bingxMargin: document.querySelector('#bingx-margin'),
+  bingxVstStopWorkingType: document.querySelector('#bingx-vst-stop-working-type'),
+  bingxLiveStopWorkingType: document.querySelector('#bingx-live-stop-working-type'),
   bingxApiKey: document.querySelector('#bingx-api-key'),
   bingxApiSecret: document.querySelector('#bingx-api-secret'),
   bingxMonthlyInitialUsdt: document.querySelector('#bingx-monthly-initial-usdt'),
@@ -6723,6 +6725,8 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxEnabled.checked = Boolean(bingx.enabled);
   elements.bingxMode.value = bingx.mode || 'test';
   elements.bingxMargin.value = bingx.marginType || 'ISOLATED';
+  elements.bingxVstStopWorkingType.value = bingx.vstStopWorkingType || 'CONTRACT_PRICE';
+  elements.bingxLiveStopWorkingType.value = bingx.liveStopWorkingType || 'MARK_PRICE';
   elements.bingxApiKey.value = '';
   elements.bingxApiSecret.value = '';
   elements.bingxApiKey.placeholder = bingx.apiKeyConfigured ? `API key guardada ${bingx.apiKeyPreview}` : 'BingX API key';
@@ -6759,7 +6763,8 @@ function renderBingx(bingx = appState.bingx, message = '') {
 
   const ready = bingx.enabled && bingx.apiKeyConfigured && bingx.apiSecretConfigured && (!usesLiveMode(bingx.mode) || bingx.liveConfirmed);
   const modeLabel = bingxModeLabel(bingx.mode);
-  elements.bingxStatus.textContent = message || (ready ? `${modeLabel} activo` : `${modeLabel} desactivado`);
+  const triggerLabel = `SL VST ${stopWorkingTypeLabel(bingx.vstStopWorkingType)} - SL real ${stopWorkingTypeLabel(bingx.liveStopWorkingType)}`;
+  elements.bingxStatus.textContent = `${message || (ready ? `${modeLabel} activo` : `${modeLabel} desactivado`)}. ${triggerLabel}`;
   elements.bingxStatus.classList.toggle('ok', Boolean(message) || Boolean(ready && !usesLiveMode(bingx.mode)));
   elements.bingxStatus.classList.toggle('warn', usesLiveMode(bingx.mode) && (ready || bingx.enabled));
   renderHeaderContext();
@@ -6798,6 +6803,10 @@ function monthlyOrderNotional(bingx = {}, asset = 'USDT') {
   return roundPnl(base * (percent / 100));
 }
 
+function stopWorkingTypeLabel(value) {
+  return String(value || '').toUpperCase() === 'CONTRACT_PRICE' ? 'último precio' : 'precio de marca';
+}
+
 async function saveBingxConfig() {
   const monthlyInitialCapitalUSDT = Number(elements.bingxMonthlyInitialUsdt.value);
   const monthlyInitialCapitalVST = Number(elements.bingxVstBaseCapital.value);
@@ -6810,6 +6819,8 @@ async function saveBingxConfig() {
     enabled: elements.bingxEnabled.checked,
     mode: elements.bingxMode.value,
     marginType: elements.bingxMargin.value,
+    vstStopWorkingType: elements.bingxVstStopWorkingType.value,
+    liveStopWorkingType: elements.bingxLiveStopWorkingType.value,
     defaultNotionalUSDT: monthlyOrderUSDT,
     maxNotionalUSDT: monthlyOrderUSDT,
     monthlyInitialCapitalUSDT,

@@ -228,6 +228,23 @@
                 </select>
               </label>
             </div>
+            <div class="range-grid">
+              <label for="bingx-vst-stop-working-type">
+                <span>Disparador SL VST</span>
+                <select id="bingx-vst-stop-working-type">
+                  <option value="CONTRACT_PRICE" selected>Último precio</option>
+                  <option value="MARK_PRICE">Precio de marca</option>
+                </select>
+              </label>
+              <label for="bingx-live-stop-working-type">
+                <span>Disparador SL real</span>
+                <select id="bingx-live-stop-working-type">
+                  <option value="MARK_PRICE" selected>Precio de marca</option>
+                  <option value="CONTRACT_PRICE">Último precio</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-hint">Se aplica a los próximos SL creados o modificados. No reemplaza protecciones que ya están abiertas.</div>
             <div class="field">
               <label for="bingx-api-key">API key</label>
               <input id="bingx-api-key" type="password" autocomplete="off" placeholder="BingX API key">

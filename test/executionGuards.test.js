@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildCostGuard,
   FuturesTrader,
+  resolveStopWorkingType,
   validateEntryDeviation,
   validateSignalAge,
   validateStopDistance
@@ -16,6 +17,20 @@ const config = {
   costGuardMaxMarginBreakEvenPercent: 3,
   maxEntryDeviationPercent: 0.15
 };
+
+test('separa el disparador de stop de Demo VST y Live real', () => {
+  assert.equal(resolveStopWorkingType({
+    mode: 'demo',
+    vstStopWorkingType: 'CONTRACT_PRICE',
+    liveStopWorkingType: 'MARK_PRICE'
+  }), 'CONTRACT_PRICE');
+  assert.equal(resolveStopWorkingType({
+    mode: 'live',
+    vstStopWorkingType: 'CONTRACT_PRICE',
+    liveStopWorkingType: 'MARK_PRICE'
+  }), 'MARK_PRICE');
+  assert.equal(resolveStopWorkingType({ mode: 'demo', vstStopWorkingType: 'invalid' }), 'MARK_PRICE');
+});
 
 test('bloquea una entrada LONG perseguida y acepta una entrada mejor', () => {
   const signal = { direction: 'LONG', entry: { type: 'LIMIT', price: 100 } };
@@ -200,7 +215,8 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
     costGuardFeeBuffer: 2,
     costGuardMaxMarginBreakEvenPercent: 3,
     vstTechnicalReserveEnabled: true,
-    vstTechnicalReserveTargetVST: 500
+    vstTechnicalReserveTargetVST: 500,
+    vstStopWorkingType: 'CONTRACT_PRICE'
   };
   const client = {
     getBalance: async () => ({
@@ -270,9 +286,63 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
 
   assert.equal(results.filter((event) => event.status === 'demo_order_sent').length, 3);
   assert.equal(orders.length, 3);
+  assert.equal(JSON.parse(orders[0].stopLoss).workingType, 'CONTRACT_PRICE');
+  assert.equal(JSON.parse(orders[1].stopLoss).workingType, 'CONTRACT_PRICE');
+  assert.equal(JSON.parse(orders[2].stopLoss).workingType, 'CONTRACT_PRICE');
   assert.deepEqual(adjustments, [{ amount: 360, adjustType: 0 }]);
   assert.equal(externalFunding, 360);
   assert.equal(available, 365);
+});
+
+test('una modificación de SL en Demo VST usa último precio', async () => {
+  const orders = [];
+  const client = {
+    getPositions: async () => ({
+      data: [{
+        symbol: 'SOL-USDT',
+        positionSide: 'LONG',
+        availableAmt: '1',
+        markPrice: '80.6',
+        lastPrice: '81.6'
+      }]
+    }),
+    getOpenOrders: async () => ({ data: [] }),
+    placeOrder: async (order) => {
+      orders.push(order);
+      return { code: 0, data: { orderId: 'stop-1' } };
+    }
+  };
+  const trader = new FuturesTrader({
+    configStore: { getBingX: () => ({}) },
+    paperStore: null,
+    tradeEventStore: null
+  });
+  trader.getContract = async () => ({ quantityPrecision: 3 });
+  trader.fetchMarketPrice = async () => 81.6;
+
+  await trader.setExchangeStopLoss({
+    client,
+    marketClient: {},
+    config: { mode: 'demo', vstStopWorkingType: 'CONTRACT_PRICE' },
+    signal: { symbol: 'SOL-USDT', direction: 'LONG' },
+    stopLoss: 80.7
+  });
+
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0].workingType, 'CONTRACT_PRICE');
+
+  const markPriceResult = await trader.setExchangeStopLoss({
+    client,
+    marketClient: {},
+    config: { mode: 'live', liveStopWorkingType: 'MARK_PRICE' },
+    signal: { symbol: 'SOL-USDT', direction: 'LONG' },
+    stopLoss: 80.7
+  });
+
+  assert.equal(orders.length, 1);
+  assert.equal(markPriceResult.orders.length, 0);
+  assert.equal(markPriceResult.skipped.length, 1);
+  assert.match(markPriceResult.skipped[0].reason, /^invalid_long_stop_loss:/);
 });
 
 test('un cierre explícito se ejecuta aunque el mercado ya esté peor', async () => {

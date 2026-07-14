@@ -50,6 +50,8 @@ const defaultConfig = {
     monthlyOrderPercent: 10,
     maxLeverage: 5,
     marginType: 'ISOLATED',
+    vstStopWorkingType: 'CONTRACT_PRICE',
+    liveStopWorkingType: 'MARK_PRICE',
     requireStopLoss: true,
     forceMarketEntries: false,
     allowedSymbols: '',
@@ -230,6 +232,8 @@ export class ConfigStore {
       monthlyOrderNotionalVST: bingx.monthlyOrderNotionalVST,
       maxLeverage: bingx.maxLeverage,
       marginType: bingx.marginType,
+      vstStopWorkingType: bingx.vstStopWorkingType,
+      liveStopWorkingType: bingx.liveStopWorkingType,
       requireStopLoss: bingx.requireStopLoss,
       forceMarketEntries: Boolean(bingx.forceMarketEntries),
       allowedSymbols: bingx.allowedSymbols,
@@ -300,6 +304,14 @@ export class ConfigStore {
       monthlyOrderPercent,
       maxLeverage: clampInteger(input.maxLeverage, 1, 125, defaultConfig.bingx.maxLeverage),
       marginType: clean(input.marginType).toUpperCase() === 'CROSSED' ? 'CROSSED' : 'ISOLATED',
+      vstStopWorkingType: normalizeStopWorkingType(
+        input.vstStopWorkingType,
+        currentNormalized.vstStopWorkingType
+      ),
+      liveStopWorkingType: normalizeStopWorkingType(
+        input.liveStopWorkingType,
+        currentNormalized.liveStopWorkingType
+      ),
       requireStopLoss: Boolean(input.requireStopLoss),
       forceMarketEntries: Boolean(input.forceMarketEntries),
       allowedSymbols: clean(input.allowedSymbols),
@@ -518,6 +530,16 @@ function normalizeCostGuardMode(value) {
   return clean(value).toLowerCase() === 'block' ? 'block' : 'warn';
 }
 
+function normalizeStopWorkingType(value, fallback = 'MARK_PRICE') {
+  const allowed = new Set(['CONTRACT_PRICE', 'MARK_PRICE']);
+  const normalized = clean(value).toUpperCase();
+  if (allowed.has(normalized)) {
+    return normalized;
+  }
+  const normalizedFallback = clean(fallback).toUpperCase();
+  return allowed.has(normalizedFallback) ? normalizedFallback : 'MARK_PRICE';
+}
+
 function normalizeBingXConfig(input = {}) {
   const monthlyInitialCapitalUSDT = positiveNumber(
     input.monthlyInitialCapitalUSDT,
@@ -545,6 +567,14 @@ function normalizeBingXConfig(input = {}) {
     monthlyOrderPercent,
     monthlyOrderNotionalUSDT,
     monthlyOrderNotionalVST,
+    vstStopWorkingType: normalizeStopWorkingType(
+      input.vstStopWorkingType,
+      defaultConfig.bingx.vstStopWorkingType
+    ),
+    liveStopWorkingType: normalizeStopWorkingType(
+      input.liveStopWorkingType,
+      defaultConfig.bingx.liveStopWorkingType
+    ),
     maxSignalAgeMinutes: clampInteger(input.maxSignalAgeMinutes, 0, 1440, defaultConfig.bingx.maxSignalAgeMinutes),
     maxEntryDeviationPercent: clampNumber(input.maxEntryDeviationPercent, 0, 50, defaultConfig.bingx.maxEntryDeviationPercent),
     maxStopDistancePercent: clampNumber(input.maxStopDistancePercent, 0, 50, defaultConfig.bingx.maxStopDistancePercent),

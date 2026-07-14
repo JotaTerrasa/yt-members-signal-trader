@@ -1087,6 +1087,7 @@ export class FuturesTrader {
       signal: executionSignal,
       quantity,
       leverage,
+      stopWorkingType: resolveStopWorkingType(config),
       clientOrderId: openingClientOrderId({
         executionMode: config.mode,
         postId: post?.id || signal.rawText,
@@ -1595,15 +1596,14 @@ export class FuturesTrader {
     const canceled = [];
     const orders = [];
     const skipped = [];
+    const workingType = resolveStopWorkingType(config);
 
     for (const position of positions) {
       const positionSide = position.positionSide || normalizePositionSide(position);
       const direction = normalizePositionSide(position);
-      const currentPrice = firstFiniteNumber([
-        position.markPrice,
-        position.lastPrice,
-        marketPrice
-      ]);
+      const currentPrice = workingType === 'CONTRACT_PRICE'
+        ? firstFiniteNumber([position.lastPrice, marketPrice, position.markPrice])
+        : firstFiniteNumber([position.markPrice, marketPrice, position.lastPrice]);
       const validation = validateStopLossAgainstMarket({ direction, stopLoss }, currentPrice);
       if (!validation.ok) {
         skipped.push({ position, reason: validation.reason, marketPrice: currentPrice });
@@ -1639,7 +1639,7 @@ export class FuturesTrader {
         type: 'STOP_MARKET',
         stopPrice: stopLoss,
         quantity,
-        workingType: 'MARK_PRICE'
+        workingType
       };
 
       if (positionSide === 'BOTH') {
@@ -2050,6 +2050,15 @@ export function validateStopDistance(signal = {}, entryPrice = 0, config = {}) {
     };
   }
   return { ok: true, distancePercent: roundMoney(distancePercent) };
+}
+
+export function resolveStopWorkingType(config = {}) {
+  const configured = config.mode === 'demo'
+    ? config.vstStopWorkingType
+    : config.liveStopWorkingType;
+  return String(configured || '').trim().toUpperCase() === 'CONTRACT_PRICE'
+    ? 'CONTRACT_PRICE'
+    : 'MARK_PRICE';
 }
 
 function validateStopLossAgainstMarket(signal, marketPrice) {
@@ -2600,7 +2609,7 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, number));
 }
 
-function buildOrder({ signal, quantity, clientOrderId }) {
+function buildOrder({ signal, quantity, clientOrderId, stopWorkingType = 'MARK_PRICE' }) {
   const isLong = signal.direction === 'LONG';
   const limitPrice = signal.entry?.type === 'LIMIT' ? Number(signal.entry.price) : NaN;
   const order = {
@@ -2631,7 +2640,7 @@ function buildOrder({ signal, quantity, clientOrderId }) {
     order.stopLoss = JSON.stringify({
       type: 'STOP_MARKET',
       stopPrice: signal.stopLoss,
-      workingType: 'MARK_PRICE'
+      workingType: stopWorkingType
     });
   }
 
