@@ -143,6 +143,10 @@ También clasifica qué errores son transitorios. No reintenta errores de creden
 
 Mantiene la cola local de aperturas y cierres pendientes mediante reemplazo atómico. La cola no contiene secretos y conserva modo, señal, caducidad, intentos y último motivo. Al arrancar, `server.js` la recupera y reconcilia BingX antes de cualquier reenvío.
 
+### `src/coverageRecovery.js`
+
+Selecciona huecos recientes de cobertura que pueden recuperarse de forma segura. Solo propone aperturas Demo con motivo `no_execution_event`, dentro de la ventana temporal y con una señal parseada exacta. Los fallos ya explicados, los huecos antiguos y cualquier modo Live quedan fuera.
+
 ### `src/promotionGate.js`
 
 Calcula una puerta informativa basada en muestra, cobertura, paquetes completos, fallos de parser, reintentos, reconciliación, SL, órdenes huérfanas y resultado neto tras costes. Nunca cambia el modo ni arma live automáticamente.
@@ -165,6 +169,7 @@ Responsabilidades:
 - leer posts visibles;
 - abrir Telegram Web;
 - leer mensajes visibles de canal;
+- leer Telegram Web en un bucle independiente con `pollSeconds`;
 - refrescar Telegram Web cada `refreshSeconds`;
 - emitir `posts`, `status`, `progress` y `log`.
 
@@ -220,6 +225,10 @@ Reconstruye el ciclo operativo completo:
 - enlaza PnL, comisión de apertura, comisión de cierre y funding;
 - tolera operaciones ausentes sin desplazar todas las posteriores;
 - reparte un cierre de BingX entre varias entradas cuando el exchange las agregó en una posición.
+
+### `src/operationalAudit.js`
+
+Calcula métricas de ejecución y escenarios económicos comparables: bruto teórico, neto con entrada y salida taker y neto con entrada maker y salida taker. La devolución de comisiones solo se incorpora al resultado observado cuando aparece acreditada en los ingresos de BingX.
 
 ### `src/bingxClient.js`
 

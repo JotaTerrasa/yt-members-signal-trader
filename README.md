@@ -254,6 +254,8 @@ El monitor puede reanudarse automáticamente tras un reinicio si se guardó con 
 6. Mantener `Permitir aperturas` desactivado es lo más conservador.
 7. Si el modo BingX es live, marca la confirmación explícita.
 
+La lectura del DOM de Telegram Web y la recarga de su pestaña son controles independientes. La configuración recomendada es leer cada `5 s` y recargar cada `30 s`: así se detectan antes los mensajes ya visibles sin forzar una recarga completa en cada lectura.
+
 ### 3. bot de Telegram para alertas
 
 1. Crea un bot con BotFather.
@@ -461,9 +463,11 @@ docs/audits/latest.md
 docs/audits/system-audit-*.md
 ```
 
-La devolución de comisiones estimada se muestra como escenario y no modifica la equity observada. El panel separa esa hipótesis de cualquier devolución realmente acreditada por BingX.
+El panel separa el resultado bruto teórico, el neto estimado con entrada y salida a mercado, el escenario con entrada maker y la devolución realmente acreditada por BingX. Ningún descuento hipotético modifica la equity observada.
 
-La auditoría incluye una cohorte posterior a las mejoras, la tarifa maker/taker observada y la cobertura de cada paquete de señales. La lectura es exploratoria con menos de 30 cierres, orientativa entre 30 y 99 y contrastable a partir de 100.
+La auditoría incluye una cohorte posterior a las mejoras, las tarifas maker/taker, la cobertura de cada paquete y trazas desde la publicación hasta el ciclo de BingX. Una cohorte nueva archiva la frontera temporal de la anterior. La lectura es exploratoria con menos de 30 cierres, orientativa entre 30 y 99 y contrastable a partir de 100.
+
+Si un paquete Demo reciente presenta una apertura sin evento de ejecución, la cobertura vuelve a validar la señal tras un breve margen y la reenvía por la ruta idempotente. Las aperturas ya ejecutadas desde otra fuente se enlazan mediante su identidad estable en lugar de contarse como ausentes. Esta recuperación no cambia el modo, no arma Live y no habilita aperturas desde Telegram Web.
 
 Endpoints:
 

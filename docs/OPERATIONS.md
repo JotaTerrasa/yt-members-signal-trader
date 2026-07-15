@@ -65,9 +65,10 @@ Opciones:
 - `Intervalo`: frecuencia del monitor.
 - `Scrolls max.`: límite de scroll para backfill.
 - `Telegram Web`: lee mensajes visibles del canal configurado.
+- `Leer mensajes`: frecuencia de lectura del DOM de Telegram Web.
 - `Recargar pestaña`: cada cuántos segundos refresca Telegram Web.
 
-El modo live es polling. YouTube y Telegram Web no se leen como stream.
+El modo live es polling. YouTube y Telegram Web no se leen como stream. La lectura de Telegram funciona en un bucle independiente del de YouTube: puede revisar los mensajes cada 5 segundos y mantener la recarga completa de la pestaña cada 30 segundos.
 
 Autorecuperación de YouTube:
 
@@ -387,7 +388,10 @@ Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y 
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
 - `GET /api/promotion-gate` devuelve cada criterio de forma auditable.
 - `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
-- `Nueva cohorte` conserva los datos históricos y mueve únicamente el punto de inicio comparativo.
+- `Nueva cohorte` conserva las fronteras de hasta doce cohortes anteriores y mueve únicamente el punto de inicio comparativo.
+- La auditoría separa réplica bruta, réplica neta estimada con órdenes de mercado, escenario con entrada maker y devolución acreditada.
+- La trazabilidad enlaza publicación, identidad de ejecución, evento de cierre, posición y operación de BingX cuando esos identificadores están disponibles.
+- Un hueco reciente `no_execution_event` puede recuperarse automáticamente solo en Demo y siempre por la ruta idempotente. Los fallos con causa, señales antiguas y modos Live no entran en esa recuperación.
 - No se interpreta rentabilidad con menos de 30 cierres; de 30 a 99 la lectura es orientativa y a partir de 100 se contrastan hipótesis.
 
 La puerta de promoción no activa live. Solo puede quedar como `Apta para revisión humana` cuando se cumplen simultáneamente, como mínimo:

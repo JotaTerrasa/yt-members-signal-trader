@@ -17,6 +17,7 @@ La app es un servidor Node.js local con frontend estático:
 
 - `src/server.js`: API HTTP, SSE, estado global, monitor, PM2/entorno local.
 - `src/youtubeScraper.js`: Playwright Chromium persistente para YouTube y Telegram Web.
+- `src/coverageRecovery.js`: selección conservadora de huecos Demo recientes para recuperación idempotente.
 - `src/futuresSignalParser.js`: parser de texto libre a señales normalizadas.
 - `src/futuresTrader.js`: motor de ejecución, validaciones, riesgo, demo/live y gestión de posiciones.
 - `src/bingxClient.js`: cliente REST firmado de BingX.

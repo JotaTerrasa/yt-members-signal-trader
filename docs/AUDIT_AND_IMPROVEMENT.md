@@ -86,7 +86,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - El break-even por fees sigue visible.
 - Una señal sin TP no se bloquea solo por usar x25.
 - En modo bloqueo, el filtro solo rechaza una operación si hay un TP explícito y ese objetivo no cubre el coste estimado.
-- El 22% de devolución se presenta como escenario separado del resultado observado.
+- La auditoría presenta el bruto teórico, el neto estimado con entrada y salida taker, el escenario con entrada maker y la devolución que BingX haya acreditado realmente.
 
 ### Riesgo
 
@@ -97,16 +97,19 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 ### Fiabilidad
 
 - YouTube y Telegram se procesan en una cola única.
-- Telegram Web refresca cada 30 segundos.
+- Telegram Web se lee en un bucle independiente cada 5 segundos y refresca su pestaña cada 30 segundos.
+- Una lectura vacía aislada de YouTube se registra como aviso transitorio; solo un monitor parado, obsoleto o sin estado verificable se clasifica como incidencia crítica.
 - El histórico usa un diario incremental y compactación atómica.
 - Una caída durante una escritura no obliga a reescribir ni perder el archivo completo.
 - El parser, las guardas, el riesgo, los cierres, la auditoría y la persistencia tienen pruebas automáticas.
 - Cada publicación con aperturas forma un paquete auditable: símbolos esperados, ejecutados, pendientes y ausentes.
 - Una alerta informa cuando un paquete queda incompleto al terminar su ventana de reintento.
 - La cohorte posterior a las mejoras conserva el histórico anterior, pero calcula sus métricas desde una marca temporal independiente.
+- Al iniciar una cohorte, la aplicación archiva las fronteras temporales de hasta doce cohortes anteriores para poder compararlas sin reescribir eventos.
 - Cada apertura usa un identificador determinista. Un reintento conserva la misma identidad en BingX y no puede convertirse en una orden nueva por cambiar la hora local.
 - La cola de aperturas y cierres pendientes se guarda en `.data/execution-retries.json` y se recupera después de reiniciar.
 - Antes de reintentar una apertura, la app reconcilia posiciones para resolver respuestas ambiguas sin duplicar exposición.
+- Si la cobertura detecta en Demo una apertura reciente sin evento de ejecución, vuelve a validarla por la misma ruta idempotente. Las ejecuciones procedentes de otra fuente se enlazan y no se cuentan como huecos.
 - La puerta de promoción exige muestra, cobertura, seguridad y PnL neto positivo; nunca arma live automáticamente.
 
 ## Cómo ejecutar la auditoría
@@ -139,7 +142,7 @@ La cohorte posterior a estas mejoras debe evaluarse por separado. Los indicadore
 2. Desviación adversa de entrada: objetivo, cero operaciones por encima del 0,15%.
 3. Latencia y desviación de cierre.
 4. PnL bruto, fees, funding y neto, siempre separados.
-5. Resultado con devolución estimada, sin mezclarlo con la equity real.
+5. Resultado bruto y neto estimado bajo costes taker/maker, sin mezclar escenarios con la equity real.
 6. Stops antes de cierre frente a la hoja.
 7. Operaciones agregadas y reparto del PnL.
 8. Diferencias por activo y por tipo de salida.
