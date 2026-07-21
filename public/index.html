@@ -362,6 +362,34 @@
               </label>
             </div>
             <div class="field-hint">El coste alto genera aviso. Solo se bloquea cuando hay un TP explicito y ni siquiera cubre la ida y vuelta estimada.</div>
+            <label class="check-option">
+              <input id="bingx-net-entry-filter-enabled" type="checkbox" checked>
+              <span>Filtro neto en sombra</span>
+            </label>
+            <div class="range-grid">
+              <label for="bingx-net-entry-filter-mode">
+                <span>Modo filtro neto</span>
+                <select id="bingx-net-entry-filter-mode">
+                  <option value="shadow">Sombra</option>
+                  <option value="block">Bloqueo</option>
+                </select>
+              </label>
+              <label for="bingx-net-entry-filter-max-cost-risk">
+                <span>Coste/riesgo max %</span>
+                <input id="bingx-net-entry-filter-max-cost-risk" type="number" min="0" max="100" step="0.1" value="18">
+              </label>
+            </div>
+            <div class="range-grid">
+              <label for="bingx-net-entry-filter-max-be">
+                <span>BE margen max %</span>
+                <input id="bingx-net-entry-filter-max-be" type="number" min="0" max="100" step="0.1" value="3">
+              </label>
+              <label for="bingx-net-entry-filter-min-rr">
+                <span>R/R minimo</span>
+                <input id="bingx-net-entry-filter-min-rr" type="number" min="0" max="10" step="0.1" value="0.9">
+              </label>
+            </div>
+            <div class="field-hint">En sombra registra si una entrada no compensa por coste, riesgo o recompensa esperada, pero no corta la ejecucion.</div>
 	            <div class="range-grid">
 	              <label for="bingx-vst-base-capital">
 	                <span>Capital mes VST</span>

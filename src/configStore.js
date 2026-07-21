@@ -73,6 +73,11 @@ const defaultConfig = {
     costGuardMode: 'block',
     costGuardFeeBuffer: 2,
     costGuardMaxMarginBreakEvenPercent: 3,
+    netEntryFilterEnabled: true,
+    netEntryFilterMode: 'shadow',
+    netEntryFilterMinRewardRisk: 0.9,
+    netEntryFilterMaxCostToRiskPercent: 18,
+    netEntryFilterMaxBreakEvenMarginPercent: 3,
     estimatedCommissionRebatePercent: 22,
     vstTechnicalReserveEnabled: false,
     vstTechnicalReserveTargetVST: 500,
@@ -257,6 +262,11 @@ export class ConfigStore {
       costGuardMode: bingx.costGuardMode,
       costGuardFeeBuffer: bingx.costGuardFeeBuffer,
       costGuardMaxMarginBreakEvenPercent: bingx.costGuardMaxMarginBreakEvenPercent,
+      netEntryFilterEnabled: Boolean(bingx.netEntryFilterEnabled),
+      netEntryFilterMode: bingx.netEntryFilterMode,
+      netEntryFilterMinRewardRisk: bingx.netEntryFilterMinRewardRisk,
+      netEntryFilterMaxCostToRiskPercent: bingx.netEntryFilterMaxCostToRiskPercent,
+      netEntryFilterMaxBreakEvenMarginPercent: bingx.netEntryFilterMaxBreakEvenMarginPercent,
       estimatedCommissionRebatePercent: bingx.estimatedCommissionRebatePercent,
       vstTechnicalReserveEnabled: Boolean(bingx.vstTechnicalReserveEnabled),
       vstTechnicalReserveTargetVST: bingx.vstTechnicalReserveTargetVST,
@@ -340,6 +350,26 @@ export class ConfigStore {
         0,
         100,
         defaultConfig.bingx.costGuardMaxMarginBreakEvenPercent
+      ),
+      netEntryFilterEnabled: input.netEntryFilterEnabled !== false,
+      netEntryFilterMode: normalizeNetEntryFilterMode(input.netEntryFilterMode),
+      netEntryFilterMinRewardRisk: clampNumber(
+        input.netEntryFilterMinRewardRisk,
+        0,
+        10,
+        defaultConfig.bingx.netEntryFilterMinRewardRisk
+      ),
+      netEntryFilterMaxCostToRiskPercent: clampNumber(
+        input.netEntryFilterMaxCostToRiskPercent,
+        0,
+        100,
+        defaultConfig.bingx.netEntryFilterMaxCostToRiskPercent
+      ),
+      netEntryFilterMaxBreakEvenMarginPercent: clampNumber(
+        input.netEntryFilterMaxBreakEvenMarginPercent,
+        0,
+        100,
+        defaultConfig.bingx.netEntryFilterMaxBreakEvenMarginPercent
       ),
       estimatedCommissionRebatePercent: clampNumber(
         input.estimatedCommissionRebatePercent,
@@ -542,6 +572,11 @@ function normalizeCostGuardMode(value) {
   return clean(value).toLowerCase() === 'block' ? 'block' : 'warn';
 }
 
+function normalizeNetEntryFilterMode(value) {
+  const normalized = clean(value).toLowerCase();
+  return normalized === 'block' ? 'block' : 'shadow';
+}
+
 function normalizeStopWorkingType(value, fallback = 'MARK_PRICE') {
   const allowed = new Set(['CONTRACT_PRICE', 'MARK_PRICE']);
   const normalized = clean(value).toUpperCase();
@@ -598,6 +633,26 @@ function normalizeBingXConfig(input = {}) {
       0,
       100,
       defaultConfig.bingx.costGuardMaxMarginBreakEvenPercent
+    ),
+    netEntryFilterEnabled: input.netEntryFilterEnabled !== false,
+    netEntryFilterMode: normalizeNetEntryFilterMode(input.netEntryFilterMode),
+    netEntryFilterMinRewardRisk: clampNumber(
+      input.netEntryFilterMinRewardRisk,
+      0,
+      10,
+      defaultConfig.bingx.netEntryFilterMinRewardRisk
+    ),
+    netEntryFilterMaxCostToRiskPercent: clampNumber(
+      input.netEntryFilterMaxCostToRiskPercent,
+      0,
+      100,
+      defaultConfig.bingx.netEntryFilterMaxCostToRiskPercent
+    ),
+    netEntryFilterMaxBreakEvenMarginPercent: clampNumber(
+      input.netEntryFilterMaxBreakEvenMarginPercent,
+      0,
+      100,
+      defaultConfig.bingx.netEntryFilterMaxBreakEvenMarginPercent
     ),
     estimatedCommissionRebatePercent: clampNumber(
       input.estimatedCommissionRebatePercent,

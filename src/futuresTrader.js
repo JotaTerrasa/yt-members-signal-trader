@@ -1044,6 +1044,19 @@ export class FuturesTrader {
       exposure,
       leverage
     });
+    const netEntryFilter = buildNetEntryFilter({
+      config,
+      signal,
+      entryPrice: executionEntryPrice,
+      marketPrice: preOrderMarketPrice,
+      referenceEntryPrice,
+      notional,
+      exposure,
+      leverage,
+      costGuard,
+      entryValidation,
+      stopDistanceValidation
+    });
     if (!preOrderStopValidation.ok) {
       return this.emitTrade({
         ...baseEvent,
@@ -1051,7 +1064,8 @@ export class FuturesTrader {
         reason: `entry_missed_${preOrderStopValidation.reason}`,
         marketPrice: preOrderMarketPrice,
         referenceEntryPrice,
-        costGuard
+        costGuard,
+        netEntryFilter
       });
     }
 
@@ -1062,7 +1076,8 @@ export class FuturesTrader {
         ...baseEvent,
         status: 'blocked',
         reason: `quantity_too_small:${quantity}`,
-        costGuard
+        costGuard,
+        netEntryFilter
       });
     }
 
@@ -1075,7 +1090,22 @@ export class FuturesTrader {
         marketPrice: preOrderMarketPrice,
         entryPrice: executionEntryPrice,
         referenceEntryPrice,
-        costGuard
+        costGuard,
+        netEntryFilter
+      });
+    }
+
+    if (netEntryFilter.block) {
+      return this.emitTrade({
+        ...baseEvent,
+        status: 'blocked',
+        reason: netEntryFilter.reason,
+        sizing,
+        marketPrice: preOrderMarketPrice,
+        entryPrice: executionEntryPrice,
+        referenceEntryPrice,
+        costGuard,
+        netEntryFilter
       });
     }
 
@@ -1115,7 +1145,8 @@ export class FuturesTrader {
           entryPrice: executionEntryPrice,
           referenceEntryPrice,
           executionEntryType: order.type,
-          costGuard
+          costGuard,
+          netEntryFilter
         });
       }
       throw error;
@@ -1136,6 +1167,7 @@ export class FuturesTrader {
       referenceEntryPrice,
       executionEntryType: order.type,
       costGuard,
+      netEntryFilter,
       vstReserve,
       paperPosition,
       bingx
@@ -1143,6 +1175,9 @@ export class FuturesTrader {
 
     if (costGuard.warn) {
       this.log(`${modePrefix(config)} ${signal.symbol} coste alto: break-even ${costGuard.breakEvenMarginRoiPercent}% margen.`, 'warn');
+    }
+    if (netEntryFilter.warn) {
+      this.log(`${modePrefix(config)} ${signal.symbol} filtro neto ${netEntryFilter.decision}: ${netEntryFilter.reason}.`, 'warn');
     }
     this.log(`${modePrefix(config)} ${signal.symbol} ${signal.direction} qty ${quantity}`, test || config.mode === 'demo' ? 'info' : 'warn');
     return result;
@@ -1918,6 +1953,114 @@ export function buildCostGuard({ config = {}, signal = {}, entryPrice = 0, notio
     targetGrossPnl,
     targetNetAfterBufferedCost,
     targetEdgeKnown
+  };
+}
+
+export function buildNetEntryFilter({
+  config = {},
+  signal = {},
+  entryPrice = 0,
+  marketPrice = 0,
+  referenceEntryPrice = null,
+  notional = 0,
+  exposure = 0,
+  leverage = 1,
+  costGuard = null,
+  entryValidation = null,
+  stopDistanceValidation = null
+} = {}) {
+  const enabled = config.netEntryFilterEnabled !== false && config.mode === 'demo';
+  const mode = String(config.netEntryFilterMode || 'shadow').toLowerCase() === 'block' ? 'block' : 'shadow';
+  const asset = config.mode === 'demo' ? 'VST' : 'USDT';
+  const feeRate = Number(costGuard?.feeRate ?? COST_GUARD_TAKER_FEE_RATE);
+  const roundTripCost = roundMoney(Number(costGuard?.estimatedRoundTripCost ?? Number(exposure || 0) * feeRate * 2));
+  const breakEvenMarginRoiPercent = roundMoney(Number(costGuard?.breakEvenMarginRoiPercent ?? (notional > 0 ? roundTripCost / notional * 100 : 0)));
+  const stopDistancePercent = Number(costGuard?.stopDistancePercent ?? stopDistanceValidation?.distancePercent ?? directionalDistancePercent({
+    direction: signal.direction,
+    from: entryPrice,
+    to: signal.stopLoss,
+    favorable: false
+  }));
+  const stopRisk = Number(costGuard?.stopRisk ?? (Number.isFinite(stopDistancePercent) && stopDistancePercent > 0
+    ? roundMoney(Number(exposure || 0) * (stopDistancePercent / 100))
+    : 0));
+  const targetDistancePercent = Number(costGuard?.targetDistancePercent ?? 0);
+  const targetGrossPnl = Number(costGuard?.targetGrossPnl ?? 0);
+  const targetNetPnl = costGuard?.targetNetAfterBufferedCost == null
+    ? null
+    : Number(costGuard.targetNetAfterBufferedCost);
+  const rewardRisk = stopRisk > 0 && targetGrossPnl > 0 ? roundMoney(targetGrossPnl / stopRisk) : null;
+  const costToRiskPercent = stopRisk > 0 ? roundMoney(roundTripCost / stopRisk * 100) : null;
+  const adverseDeviationPercent = Math.max(0, Number(entryValidation?.signedDeviationPercent || 0));
+  const maxBreakEvenMargin = clampNumber(
+    config.netEntryFilterMaxBreakEvenMarginPercent,
+    0,
+    100,
+    3
+  );
+  const maxCostToRisk = clampNumber(
+    config.netEntryFilterMaxCostToRiskPercent,
+    0,
+    100,
+    18
+  );
+  const minRewardRisk = clampNumber(
+    config.netEntryFilterMinRewardRisk,
+    0,
+    10,
+    0.9
+  );
+  const failures = [];
+
+  if (enabled && maxBreakEvenMargin > 0 && breakEvenMarginRoiPercent > maxBreakEvenMargin) {
+    failures.push(`break_even_margin:${breakEvenMarginRoiPercent}>${maxBreakEvenMargin}`);
+  }
+  if (enabled && maxCostToRisk > 0 && costToRiskPercent != null && costToRiskPercent > maxCostToRisk) {
+    failures.push(`cost_to_stop_risk:${costToRiskPercent}>${maxCostToRisk}`);
+  }
+  if (enabled && rewardRisk != null && minRewardRisk > 0 && rewardRisk < minRewardRisk) {
+    failures.push(`reward_risk:${rewardRisk}<${minRewardRisk}`);
+  }
+  if (enabled && targetNetPnl != null && targetNetPnl <= 0) {
+    failures.push(`target_net:${roundMoney(targetNetPnl)}<=0`);
+  }
+
+  const shouldAvoid = failures.length > 0;
+  const block = enabled && mode === 'block' && shouldAvoid;
+  const decision = !enabled ? 'off' : shouldAvoid ? mode === 'block' ? 'blocked' : 'avoid_shadow' : 'enter';
+  const reason = shouldAvoid ? `net_entry_filter:${failures.join('|')}` : '';
+
+  return {
+    enabled,
+    mode,
+    asset,
+    decision,
+    status: enabled ? shouldAvoid ? mode === 'block' ? 'blocked' : 'shadow_avoid' : 'ok' : 'off',
+    warn: enabled && shouldAvoid,
+    block,
+    reason,
+    failures,
+    entryPrice: roundMoney(entryPrice),
+    marketPrice: roundMoney(marketPrice),
+    referenceEntryPrice: referenceEntryPrice == null ? null : roundMoney(referenceEntryPrice),
+    adverseDeviationPercent: roundMoney(adverseDeviationPercent),
+    notional: roundMoney(notional),
+    exposure: roundMoney(exposure),
+    leverage,
+    estimatedRoundTripCost: roundTripCost,
+    breakEvenMarginRoiPercent,
+    stopDistancePercent: Number.isFinite(stopDistancePercent) ? roundMoney(stopDistancePercent) : null,
+    stopRisk: Number.isFinite(stopRisk) ? roundMoney(stopRisk) : null,
+    costToRiskPercent,
+    targetDistancePercent: Number.isFinite(targetDistancePercent) && targetDistancePercent > 0 ? roundMoney(targetDistancePercent) : null,
+    targetGrossPnl: Number.isFinite(targetGrossPnl) && targetGrossPnl > 0 ? roundMoney(targetGrossPnl) : null,
+    targetNetPnl: targetNetPnl == null ? null : roundMoney(targetNetPnl),
+    rewardRisk,
+    thresholds: {
+      maxBreakEvenMarginPercent: maxBreakEvenMargin,
+      maxCostToRiskPercent: maxCostToRisk,
+      minRewardRisk
+    }
   };
 }
 

@@ -3383,6 +3383,7 @@ function notifyTradeCriticalEvent(event = {}) {
     event.vstReserve?.externalFundingTotal ? `Aportaciones técnicas acumuladas: ${formatSigned(event.vstReserve.externalFundingTotal).replace('+', '')} VST` : '',
     event.sizing?.notional ? `Orden: ${formatSigned(event.sizing.notional).replace('+', '')} ${event.sizing.asset || 'USDT'}` : '',
     event.costGuard?.enabled ? costGuardAlertLine(event.costGuard) : '',
+    event.netEntryFilter?.enabled ? netEntryFilterAlertLine(event.netEntryFilter) : '',
     event.takeProfit ? `TP: ${event.takeProfit}` : '',
     event.stopLoss ? `SL: ${event.stopLoss}` : '',
     event.closePercent ? `Cierre: ${event.closePercent}%` : '',
@@ -3461,6 +3462,16 @@ function costGuardAlertLine(costGuard = {}) {
   const cost = Number(costGuard.bufferedRoundTripCost || costGuard.estimatedRoundTripCost || 0);
   const marginRoi = Number(costGuard.breakEvenMarginRoiPercent || 0);
   return `Coste: ${status} - ${formatSigned(cost).replace('+', '')} ${asset} / BE margen ${formatPercentNumber(marginRoi)}`;
+}
+
+function netEntryFilterAlertLine(filter = {}) {
+  const decision = filter.block
+    ? 'bloqueo'
+    : filter.warn ? 'sombra no entraria' : filter.decision || 'entraria';
+  const costRisk = filter.costToRiskPercent == null ? '-' : formatPercentNumber(filter.costToRiskPercent);
+  const rewardRisk = filter.rewardRisk == null ? '-' : String(filter.rewardRisk);
+  const reason = filter.reason ? ` · ${filter.reason}` : '';
+  return `Filtro neto: ${decision} · coste/riesgo ${costRisk} · R/R ${rewardRisk}${reason}`;
 }
 
 function isTelegramTradeEvent(event = {}) {

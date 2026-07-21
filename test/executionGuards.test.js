@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCostGuard,
+  buildNetEntryFilter,
   FuturesTrader,
   resolveStopWorkingType,
   validateEntryDeviation,
@@ -115,7 +116,67 @@ test('el filtro solo bloquea cuando un TP explícito no cubre el coste', () => {
   assert.equal(accepted.targetEdgeKnown, true);
 });
 
-test('la reserva técnica VST recarga una vez hasta el objetivo y contabiliza el incremento real', async () => {
+
+test('el filtro neto en sombra marca entradas caras sin bloquearlas', () => {
+  const costGuard = buildCostGuard({
+    config,
+    signal: { direction: 'LONG', stopLoss: 99 },
+    entryPrice: 100,
+    notional: 45,
+    exposure: 1125,
+    leverage: 25
+  });
+  const filter = buildNetEntryFilter({
+    config: {
+      ...config,
+      netEntryFilterEnabled: true,
+      netEntryFilterMode: 'shadow',
+      netEntryFilterMaxCostToRiskPercent: 18,
+      netEntryFilterMaxBreakEvenMarginPercent: 3
+    },
+    signal: { direction: 'LONG', stopLoss: 99 },
+    entryPrice: 100,
+    notional: 45,
+    exposure: 1125,
+    leverage: 25,
+    costGuard
+  });
+
+  assert.equal(filter.warn, true);
+  assert.equal(filter.block, false);
+  assert.equal(filter.decision, 'avoid_shadow');
+  assert.match(filter.reason, /^net_entry_filter:/);
+});
+
+test('el filtro neto solo bloquea cuando se configura explicitamente en block', () => {
+  const costGuard = buildCostGuard({
+    config,
+    signal: { direction: 'LONG', stopLoss: 99 },
+    entryPrice: 100,
+    notional: 45,
+    exposure: 1125,
+    leverage: 25
+  });
+  const filter = buildNetEntryFilter({
+    config: {
+      ...config,
+      netEntryFilterEnabled: true,
+      netEntryFilterMode: 'block',
+      netEntryFilterMaxCostToRiskPercent: 18
+    },
+    signal: { direction: 'LONG', stopLoss: 99 },
+    entryPrice: 100,
+    notional: 45,
+    exposure: 1125,
+    leverage: 25,
+    costGuard
+  });
+
+  assert.equal(filter.block, true);
+  assert.equal(filter.decision, 'blocked');
+});
+
+test('la reserva tecnica VST recarga una vez hasta el objetivo y contabiliza el incremento real', async () => {
   let balance = 140;
   let externalFunding = 0;
   const adjustments = [];

@@ -212,6 +212,11 @@ const elements = {
   bingxCostGuardMode: document.querySelector('#bingx-cost-guard-mode'),
   bingxCostGuardBuffer: document.querySelector('#bingx-cost-guard-buffer'),
   bingxCostGuardMaxMargin: document.querySelector('#bingx-cost-guard-max-margin'),
+  bingxNetEntryFilterEnabled: document.querySelector('#bingx-net-entry-filter-enabled'),
+  bingxNetEntryFilterMode: document.querySelector('#bingx-net-entry-filter-mode'),
+  bingxNetEntryFilterMaxCostRisk: document.querySelector('#bingx-net-entry-filter-max-cost-risk'),
+  bingxNetEntryFilterMaxBe: document.querySelector('#bingx-net-entry-filter-max-be'),
+  bingxNetEntryFilterMinRr: document.querySelector('#bingx-net-entry-filter-min-rr'),
   bingxEstimatedFeeRebate: document.querySelector('#bingx-estimated-fee-rebate'),
   bingxVstBaseCapital: document.querySelector('#bingx-vst-base-capital'),
   bingxVstCapitalPercent: document.querySelector('#bingx-vst-capital-percent'),
@@ -6385,6 +6390,9 @@ function auditSnapshotText(event = {}) {
 }
 
 function auditFeeFundingText(event = {}) {
+  if (event.netEntryFilter?.enabled && event.netEntryFilter.warn) {
+    return netEntryFilterText(event.netEntryFilter);
+  }
   if (event.costGuard?.enabled) {
     return costGuardText(event.costGuard);
   }
@@ -6597,6 +6605,13 @@ function costGuardText(costGuard = {}) {
   return `${label}: ${formatMoney(costGuard.bufferedRoundTripCost || costGuard.estimatedRoundTripCost || 0, asset)} / BE ${formatPercent(costGuard.breakEvenMarginRoiPercent)}`;
 }
 
+function netEntryFilterText(filter = {}) {
+  const label = filter.block ? 'Filtro neto bloqueo' : filter.warn ? 'Filtro neto sombra' : 'Filtro neto ok';
+  const costRisk = filter.costToRiskPercent == null ? '-' : formatPercent(filter.costToRiskPercent);
+  const rewardRisk = filter.rewardRisk == null ? '-' : filter.rewardRisk;
+  return `${label}: coste/riesgo ${costRisk} / R:R ${rewardRisk}`;
+}
+
 function newerIso(a, b) {
   return Date.parse(b || 0) > Date.parse(a || 0) ? b : a;
 }
@@ -6760,6 +6775,11 @@ function renderBingx(bingx = appState.bingx, message = '') {
   elements.bingxCostGuardMode.value = bingx.costGuardMode || 'block';
   elements.bingxCostGuardBuffer.value = bingx.costGuardFeeBuffer ?? 2;
   elements.bingxCostGuardMaxMargin.value = bingx.costGuardMaxMarginBreakEvenPercent ?? 3;
+  elements.bingxNetEntryFilterEnabled.checked = bingx.netEntryFilterEnabled !== false;
+  elements.bingxNetEntryFilterMode.value = bingx.netEntryFilterMode || 'shadow';
+  elements.bingxNetEntryFilterMaxCostRisk.value = bingx.netEntryFilterMaxCostToRiskPercent ?? 18;
+  elements.bingxNetEntryFilterMaxBe.value = bingx.netEntryFilterMaxBreakEvenMarginPercent ?? 3;
+  elements.bingxNetEntryFilterMinRr.value = bingx.netEntryFilterMinRewardRisk ?? 0.9;
   elements.bingxEstimatedFeeRebate.value = bingx.estimatedCommissionRebatePercent ?? 22;
   elements.bingxVstBaseCapital.value = monthlyInitialCapitalVST;
   elements.bingxVstCapitalPercent.value = monthlyOrderPercent;
@@ -6851,6 +6871,11 @@ async function saveBingxConfig() {
     costGuardMode: elements.bingxCostGuardMode.value,
     costGuardFeeBuffer: Number(elements.bingxCostGuardBuffer.value),
     costGuardMaxMarginBreakEvenPercent: Number(elements.bingxCostGuardMaxMargin.value),
+    netEntryFilterEnabled: elements.bingxNetEntryFilterEnabled.checked,
+    netEntryFilterMode: elements.bingxNetEntryFilterMode.value,
+    netEntryFilterMaxCostToRiskPercent: Number(elements.bingxNetEntryFilterMaxCostRisk.value),
+    netEntryFilterMaxBreakEvenMarginPercent: Number(elements.bingxNetEntryFilterMaxBe.value),
+    netEntryFilterMinRewardRisk: Number(elements.bingxNetEntryFilterMinRr.value),
     estimatedCommissionRebatePercent: Number(elements.bingxEstimatedFeeRebate.value),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent,
