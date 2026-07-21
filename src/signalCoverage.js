@@ -84,21 +84,31 @@ export function buildSignalCoverage({
 function buildPackage({ post, detectedAt, expected, parseFailure, events, executionMode, retryWindowMs, now }) {
   const postEvents = (events || [])
     .filter((event) => String(event?.postId || '') === String(post.id || ''))
-    .filter((event) => eventMode(event) === executionMode)
     .sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
+  const eventsById = new Map((events || [])
+    .filter((event) => event?.eventId)
+    .map((event) => [String(event.eventId), event]));
   const ageMs = Math.max(0, now - detectedAt);
   const signals = expected.map((signal) => {
-    const matching = postEvents.filter((event) => eventMatchesSignal(event, signal));
+    const matching = postEvents
+      .filter((event) => eventMatchesSignal(event, signal))
+      .filter((event) => eventMode(event) === executionMode || linkedExecution(event, eventsById, executionMode));
     const sent = matching.find((event) => String(event.status || '') === `${executionMode}_order_sent`) || null;
+    const linked = sent ? null : matching
+      .map((event) => linkedExecution(event, eventsById, executionMode))
+      .find(Boolean) || null;
+    const execution = sent || linked?.target || null;
     const latest = matching.at(-1) || null;
     const retryExpired = matching.some((event) => String(event.status || '').includes('order_retry_expired'));
-    const pending = !sent && !retryExpired && ageMs < retryWindowMs;
+    const pending = !execution && !retryExpired && ageMs < retryWindowMs;
     return {
       ...signal,
-      status: sent ? 'executed' : pending ? 'pending' : 'missing',
-      executionAt: sent?.at || null,
-      finalStatus: sent?.status || latest?.status || '',
-      reason: sent ? '' : latest?.reason || (parseFailure ? 'parser_no_structured_signal' : 'no_execution_event')
+      status: execution ? 'executed' : pending ? 'pending' : 'missing',
+      executionAt: execution?.at || null,
+      finalStatus: sent?.status || (linked ? `${executionMode}_order_linked` : latest?.status || ''),
+      reason: execution ? '' : latest?.reason || (parseFailure ? 'parser_no_structured_signal' : 'no_execution_event'),
+      linkedExecution: Boolean(linked),
+      linkedEventId: linked?.target?.eventId || null
     };
   });
   const executedCount = signals.filter((signal) => signal.status === 'executed').length;
@@ -196,8 +206,27 @@ function eventMode(event = {}) {
   if (explicit) {
     return explicit;
   }
+  const snapshotMode = String(event.auditSnapshot?.mode || event.exchangePosition?.source || '').toLowerCase();
+  if (snapshotMode === 'demo' || snapshotMode === 'live' || snapshotMode === 'test') {
+    return snapshotMode;
+  }
   const status = String(event.status || '').toLowerCase();
   return status.startsWith('demo_') ? 'demo' : status.startsWith('live_') ? 'live' : '';
+}
+
+function linkedExecution(event = {}, eventsById = new Map(), executionMode = '') {
+  if (String(event.status || '') !== 'skipped'
+    || String(event.reason || '') !== 'duplicate_open_signal'
+    || !event.duplicateOf) {
+    return null;
+  }
+  const target = eventsById.get(String(event.duplicateOf));
+  if (!target
+    || eventMode(target) !== executionMode
+    || String(target.status || '') !== `${executionMode}_order_sent`) {
+    return null;
+  }
+  return { link: event, target };
 }
 
 function isYouTubePost(post = {}) {

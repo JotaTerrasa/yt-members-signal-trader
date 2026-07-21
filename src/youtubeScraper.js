@@ -18,7 +18,7 @@ export class YouTubePostsScraper extends EventEmitter {
     this.context = null;
     this.page = null;
     this.telegramPage = null;
-    this.telegramSource = { enabled: false, url: '', maxMessages: 40, refreshSeconds: 300 };
+    this.telegramSource = { enabled: false, url: '', maxMessages: 40, pollSeconds: 5, refreshSeconds: 300 };
     this.telegramLastRefreshAt = 0;
     this.running = false;
     this.stopRequested = false;
@@ -86,7 +86,10 @@ export class YouTubePostsScraper extends EventEmitter {
       }
 
       if (live && !this.stopRequested) {
-        await this.liveLoop(page, normalizedUrl, { intervalMs });
+        await Promise.all([
+          this.liveLoop(page, normalizedUrl, { intervalMs }),
+          this.telegramLiveLoop()
+        ]);
       }
     } finally {
       this.running = false;
@@ -226,14 +229,20 @@ export class YouTubePostsScraper extends EventEmitter {
         this.log(`Lectura YouTube fallida, se reintentara: ${conciseError(error)}`, 'warn');
       }
 
+      await sleepInterruptible(intervalMs, () => this.stopRequested);
+    }
+  }
+
+  async telegramLiveLoop() {
+    while (!this.stopRequested) {
       const telegram = this.telegramSource;
       if (telegram.enabled) {
         await this.readTelegramOnce(telegram, 'live').catch((error) => {
           this.log(`Lectura Telegram fallida, se reintentara: ${conciseError(error)}`, 'warn');
         });
       }
-
-      await sleepInterruptible(intervalMs, () => this.stopRequested);
+      const pollMs = Math.max(5, Number(telegram.pollSeconds) || 5) * 1000;
+      await sleepInterruptible(pollMs, () => this.stopRequested);
     }
   }
 
@@ -839,12 +848,13 @@ export function normalizeTelegramWebUrl(input) {
 function normalizeTelegramSource(input = {}) {
   const enabled = Boolean(input.enabled);
   if (!enabled) {
-    return { enabled: false, url: '', maxMessages: 40, refreshSeconds: 300 };
+    return { enabled: false, url: '', maxMessages: 40, pollSeconds: 5, refreshSeconds: 300 };
   }
   return {
     enabled: true,
     url: normalizeTelegramWebUrl(input.url),
     maxMessages: clamp(Number(input.maxMessages) || 40, 5, 200),
+    pollSeconds: clamp(Number(input.pollSeconds) || 5, 5, 60),
     refreshSeconds: clamp(Number(input.refreshSeconds) || 300, 30, 3600)
   };
 }

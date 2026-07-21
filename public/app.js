@@ -176,6 +176,7 @@ const elements = {
   telegramSourceEnabled: document.querySelector('#telegram-source-enabled'),
   telegramSourceUrl: document.querySelector('#telegram-source-url'),
   telegramSourceMax: document.querySelector('#telegram-source-max'),
+  telegramSourcePoll: document.querySelector('#telegram-source-poll'),
   telegramSourceRefresh: document.querySelector('#telegram-source-refresh'),
   telegramSourceExecute: document.querySelector('#telegram-source-execute'),
   telegramSourceOpenSignals: document.querySelector('#telegram-source-open-signals'),
@@ -3402,6 +3403,7 @@ function renderTelegramWatchPanel() {
   const missingLastHour = countAppLogs((log) => String(log.message || '').includes('No se detectaron mensajes Telegram'), 60);
   const pnlLimit = latestAppLog((log) => String(log.message || '').includes('BingX PnL no disponible'));
   const pnlCooldown = pnlCooldownText();
+  const pollSeconds = Number(source.pollSeconds || 0);
   const refreshSeconds = Number(source.refreshSeconds || 0);
   const refreshAge = secondsSinceIso(lastRefresh?.at);
   const refreshStale = active
@@ -3424,6 +3426,7 @@ function renderTelegramWatchPanel() {
   elements.telegramWatchMetrics.innerHTML = [
     ['Modo', active ? source.executeSignals ? 'Gestion' : 'Solo lectura' : 'off', active ? 'positive' : ''],
     ['Aperturas', source.executeOpenSignals ? 'habilitadas' : 'bloqueadas', source.executeOpenSignals ? 'warn' : 'positive'],
+    ['Lectura', pollSeconds ? `${pollSeconds}s` : '-', active ? 'positive' : ''],
     ['Recarga', refreshSeconds ? `${refreshSeconds}s` : '-', refreshStale ? 'negative' : active ? 'positive' : ''],
     ['Ultimo refresh', lastRefresh ? humanLogAge(lastRefresh.at) : '-', refreshStale ? 'negative' : lastRefresh ? 'positive' : ''],
     ['Sin mensajes 1h', String(missingLastHour), missingLastHour ? 'warn' : 'positive'],
@@ -4354,14 +4357,15 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
       <div class="replica-audit-grid">
         ${renderReplicaMetric('Hoja externa', formatMoney(summary.sheetPnl, 'USDT'), `${summary.sheetRows || 0} filas`, amountClass(summary.sheetPnl))}
         ${renderReplicaMetric('Réplica teórica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
+        ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), `${formatOptionalMoney(summary.replicaEstimatedMarketFees, 'VST')} fees equivalentes`, amountClass(summary.replicaEstimatedMarketNet))}
+        ${renderReplicaMetric('Escenario maker entrada', formatOptionalMoney(summary.replicaEstimatedMakerEntryNet, 'VST'), 'Simulación; cierre taker, sin operar', amountClass(summary.replicaEstimatedMakerEntryNet))}
         ${renderReplicaMetric('BingX bruto', formatMoney(summary.bingxGross, 'VST'), `${summary.vstCloses || 0} cierres`, amountClass(summary.bingxGross))}
         ${renderReplicaMetric('BingX neto', formatMoney(summary.bingxNet, 'VST'), `${formatMoney(bingxFees + bingxFunding, 'VST')} costes`, amountClass(summary.bingxNet))}
-        ${renderReplicaMetric('Neto con devolución', formatMoney(summary.bingxNetAfterEstimatedRebate, 'VST'), `${formatPercent(summary.estimatedCommissionRebatePercent)} de comisiones, escenario no acreditado`, amountClass(summary.bingxNetAfterEstimatedRebate))}
         ${renderReplicaMetric('Devolución detectada', formatMoney(actualRebate, 'VST'), summary.commissionRebateDetected ? 'Ingreso acreditado por BingX' : 'Sin ingreso de devolución en BingX', amountClass(actualRebate))}
         ${renderReplicaMetric('Tarifa real', formatCommissionRates(summary), 'Tarifa consultada en BingX', '')}
         ${renderReplicaMetric('Diferencia neta', formatMoney(summary.netGap, 'VST'), 'BingX neto frente a réplica teórica', amountClass(summary.netGap))}
       </div>
-      ${renderImprovementCohort(audit.cohort)}
+      ${renderImprovementCohort(audit.cohort, audit.cohortHistory)}
       <div class="replica-issue-strip">
         ${renderReplicaIssuePills(summary.issueCounts)}
       </div>
@@ -4387,7 +4391,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   `;
 }
 
-function renderImprovementCohort(cohort) {
+function renderImprovementCohort(cohort, cohortHistory = []) {
   if (!cohort) {
     return '<div class="replica-empty">La cohorte posterior a las mejoras todavía no está inicializada.</div>';
   }
@@ -4396,12 +4400,13 @@ function renderImprovementCohort(cohort) {
   const coverage = appState.state?.signalCoverage || {};
   const coverageSummary = coverage.summary || {};
   const latestPackage = coverage.latestPackage || null;
+  const archivedCount = Array.isArray(cohortHistory) ? cohortHistory.length : 0;
   return `
     <section class="replica-cohort">
       <div class="replica-box-title">
         <div>
           <strong>Cohorte posterior a las mejoras</strong>
-          <span>Desde ${escapeHtml(formatDateTime(cohort.startedAt))}</span>
+          <span>Desde ${escapeHtml(formatDateTime(cohort.startedAt))}${archivedCount ? ` · ${escapeHtml(String(archivedCount))} anterior${archivedCount === 1 ? '' : 'es'} preservada${archivedCount === 1 ? '' : 's'}` : ''}</span>
         </div>
         <span class="ledger-status ${escapeAttribute(sample.key === 'contrastable' ? 'positive' : 'warn')}">${escapeHtml(sample.label || 'Sin muestra')}</span>
       </div>
@@ -4409,6 +4414,7 @@ function renderImprovementCohort(cohort) {
         ${renderReplicaMetric('Aperturas', String(summary.vstOpenings || 0), `${summary.sheetRows || 0} filas en la hoja`, '')}
         ${renderReplicaMetric('Cierres', String(summary.vstCloses || 0), sample.detail || 'Esperando operaciones', '')}
         ${renderReplicaMetric('Bruto', formatMoney(summary.bingxGross, 'VST'), 'Antes de costes', amountClass(summary.bingxGross))}
+        ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), 'Referencia tras fees taker estimadas', amountClass(summary.replicaEstimatedMarketNet))}
         ${renderReplicaMetric('Comisiones + funding', formatMoney(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0), 'VST'), 'Coste observado', amountClass(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0)))}
         ${renderReplicaMetric('Neto', formatMoney(summary.bingxNet, 'VST'), 'Resultado observado', amountClass(summary.bingxNet))}
         ${renderReplicaMetric('Cobertura', `${summary.vstOpenings || 0}/${summary.sheetRows || 0}`, 'Ejecuciones frente a hoja', summary.vstOpenings === summary.sheetRows && summary.sheetRows ? 'amount positive' : 'warn')}
@@ -6669,6 +6675,7 @@ function renderTelegramSource(telegramSource = appState.telegramSource, message 
   elements.telegramSourceEnabled.checked = Boolean(telegramSource.enabled);
   elements.telegramSourceUrl.value = telegramSource.url || '';
   elements.telegramSourceMax.value = telegramSource.maxMessages || 40;
+  elements.telegramSourcePoll.value = telegramSource.pollSeconds || 5;
   elements.telegramSourceRefresh.value = telegramSource.refreshSeconds || 30;
   elements.telegramSourceExecute.checked = Boolean(telegramSource.executeSignals);
   elements.telegramSourceOpenSignals.checked = Boolean(telegramSource.executeOpenSignals);
@@ -6679,8 +6686,9 @@ function renderTelegramSource(telegramSource = appState.telegramSource, message 
   const trading = telegramSource.executeSignals
     ? telegramSource.executeOpenSignals ? 'Gestion + aperturas' : 'Gestion de posiciones'
     : 'Solo lectura';
+  const pollLabel = telegramSource.pollSeconds ? ` · lectura ${telegramSource.pollSeconds}s` : '';
   const refreshLabel = telegramSource.refreshSeconds ? ` · recarga ${telegramSource.refreshSeconds}s` : '';
-  elements.telegramSourceStatus.textContent = message || (active ? `Fuente activa · ${trading}${refreshLabel}` : 'Fuente desactivada');
+  elements.telegramSourceStatus.textContent = message || (active ? `Fuente activa · ${trading}${pollLabel}${refreshLabel}` : 'Fuente desactivada');
   elements.telegramSourceStatus.classList.toggle('ok', Boolean(message) || Boolean(active));
   elements.telegramSourceStatus.classList.toggle('warn', Boolean(telegramSource.executeSignals && !telegramSource.liveConfirmed && usesLiveMode(appState.bingx?.mode)));
   renderHeaderContext();
@@ -6696,6 +6704,7 @@ function telegramSourcePayload() {
     enabled: elements.telegramSourceEnabled.checked,
     url: elements.telegramSourceUrl.value,
     maxMessages: Number(elements.telegramSourceMax.value),
+    pollSeconds: Number(elements.telegramSourcePoll.value),
     refreshSeconds: Number(elements.telegramSourceRefresh.value),
     executeSignals: elements.telegramSourceExecute.checked,
     executeOpenSignals: elements.telegramSourceOpenSignals.checked,

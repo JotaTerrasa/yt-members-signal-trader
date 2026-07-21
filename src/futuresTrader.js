@@ -510,6 +510,8 @@ export class FuturesTrader {
             ...baseEvent,
             status: 'skipped',
             reason: duplicate.reason || 'duplicate_signal',
+            executionMode: duplicate.executionMode || null,
+            executionKey: duplicate.executionKey || null,
             duplicateOf: duplicate.eventId || null,
             duplicateAt: duplicate.at || null
           }));

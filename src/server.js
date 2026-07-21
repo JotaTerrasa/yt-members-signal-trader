@@ -6,6 +6,7 @@ import { extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore } from './configStore.js';
+import { coverageRecoveryCandidates } from './coverageRecovery.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
 import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
 import { ExecutionRetryStore } from './executionRetryStore.js';
@@ -16,7 +17,7 @@ import { PaperTradeStore } from './paperTradeStore.js';
 import { detectPortfolioUrl } from './portfolioDetector.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { cohortSampleStatus, commissionEvidence, isRetryableCloseError } from './operationalAudit.js';
+import { auditRowBelongsToWindow, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -57,6 +58,7 @@ const STOP_LOSS_RETRY_FIRST_DELAY_MS = 10_000;
 const STOP_LOSS_RETRY_INTERVAL_MS = 15_000;
 const STOP_LOSS_RETRY_MAX_AGE_MS = 3 * 60 * 1000;
 const STOP_LOSS_RETRY_MAX_ATTEMPTS = 12;
+const SIGNAL_COVERAGE_RECOVERY_GRACE_MS = 20_000;
 const CLOSE_GUARD_RETRY_FIRST_DELAY_MS = 10_000;
 const CLOSE_GUARD_RETRY_INTERVAL_MS = 15_000;
 const CLOSE_GUARD_RETRY_MAX_AGE_MS = 3 * 60 * 1000;
@@ -142,6 +144,7 @@ const pendingCloseGuardRetries = new Map();
 const openingRetryTelegramNotifications = new Set();
 const closeGuardTelegramNotifications = new Set();
 const signalCoverageNotifications = new Set();
+const signalCoverageRecoveryInFlight = new Set();
 let tradeProcessingQueue = Promise.resolve();
 
 const state = {
@@ -284,9 +287,9 @@ async function handlePosts(payload) {
         at: new Date().toISOString()
       });
     }
-    await refreshSignalCoverage({ notify: true });
+    await refreshSignalCoverage({ notify: true, recover: true });
     const delayedCoverageCheck = setTimeout(() => {
-      refreshSignalCoverage({ notify: true }).catch((error) => {
+      refreshSignalCoverage({ notify: true, recover: true }).catch((error) => {
         pushLog({ level: 'warn', message: `Cobertura de señales: ${error.message}`, at: new Date().toISOString() });
       });
     }, STOP_LOSS_RETRY_MAX_AGE_MS + 5_000);
@@ -298,6 +301,70 @@ function enqueueTradeProcessing(posts, payload, options) {
   const task = tradeProcessingQueue
     .catch(() => null)
     .then(() => futuresTrader.processPosts(posts, payload, options));
+  tradeProcessingQueue = task.catch(() => null);
+  return task;
+}
+
+async function recoverMissingCoverageExecutions(coverage) {
+  const config = configStore.getBingX({ includeSecrets: true });
+  if (!config.enabled || config.mode !== 'demo') {
+    return 0;
+  }
+  const candidates = coverageRecoveryCandidates({
+    coverage,
+    posts: store.list(),
+    parseSignals: (text) => futuresTrader.parseAll(text),
+    executionMode: 'demo',
+    graceMs: SIGNAL_COVERAGE_RECOVERY_GRACE_MS,
+    maxAgeMs: STOP_LOSS_RETRY_MAX_AGE_MS
+  });
+  let attempted = 0;
+  for (const candidate of candidates) {
+    if (signalCoverageRecoveryInFlight.has(candidate.key)) {
+      continue;
+    }
+    signalCoverageRecoveryInFlight.add(candidate.key);
+    try {
+      await enqueueCoverageRecovery(candidate);
+      attempted += 1;
+    } finally {
+      signalCoverageRecoveryInFlight.delete(candidate.key);
+    }
+  }
+  return attempted;
+}
+
+function enqueueCoverageRecovery(candidate) {
+  const task = tradeProcessingQueue
+    .catch(() => null)
+    .then(async () => {
+      const duplicate = duplicateOpenSignalGuard(candidate.signal);
+      if (duplicate) {
+        return futuresTrader.emitTrade({
+          at: new Date().toISOString(),
+          signal: candidate.signal,
+          postId: candidate.post?.id || null,
+          postUrl: candidate.post?.url || null,
+          phase: 'coverage_recovery',
+          executionMode: duplicate.executionMode || 'demo',
+          executionKey: duplicate.executionKey || null,
+          status: 'skipped',
+          reason: 'duplicate_open_signal',
+          duplicateOf: duplicate.eventId || null,
+          duplicateAt: duplicate.at || null
+        });
+      }
+
+      pushLog({
+        level: 'warn',
+        message: `Recuperando hueco de cobertura Demo: ${candidate.signal.symbol} ${candidate.signal.direction}.`,
+        at: new Date().toISOString()
+      });
+      return futuresTrader.executeSignal(candidate.signal, {
+        post: candidate.post,
+        phase: 'coverage_recovery'
+      });
+    });
   tradeProcessingQueue = task.catch(() => null);
   return task;
 }
@@ -435,8 +502,15 @@ function duplicateOpenSignalGuard(signal = {}) {
   return {
     reason: 'duplicate_open_signal',
     eventId: duplicate.eventId || null,
-    at: duplicate.at || null
+    at: duplicate.at || null,
+    executionMode: duplicate.executionMode || executionModeFromOpeningStatus(duplicate.status),
+    executionKey: duplicate.executionKey || null
   };
+}
+
+function executionModeFromOpeningStatus(status = '') {
+  const match = String(status || '').match(/^(test|demo|live)_order_sent$/);
+  return match?.[1] || '';
 }
 
 function handleStopLossRetryEvent(event = {}) {
@@ -1933,7 +2007,7 @@ server.listen(port, host, () => {
     pushLog({ level: 'error', message: `Auto-resume monitor: ${error.message}`, at: new Date().toISOString() });
   });
   scheduleAutomaticRedactedBackup();
-  refreshSignalCoverage({ notify: false, rememberExisting: true }).catch((error) => {
+  refreshSignalCoverage({ notify: false, rememberExisting: true, recover: true }).catch((error) => {
     pushLog({ level: 'warn', message: `Cobertura de señales: ${error.message}`, at: new Date().toISOString() });
   });
 });
@@ -1957,7 +2031,7 @@ setInterval(() => {
 }, MONTHLY_RESET_CHECK_MS).unref();
 
 signalCoverageTimer = setInterval(() => {
-  refreshSignalCoverage({ notify: true }).catch((error) => {
+  refreshSignalCoverage({ notify: true, recover: true }).catch((error) => {
     pushLog({ level: 'warn', message: `Cobertura de señales: ${error.message}`, at: new Date().toISOString() });
   });
 }, SIGNAL_COVERAGE_CHECK_MS);
@@ -2313,9 +2387,9 @@ async function buildRedactedBackup() {
   };
 }
 
-async function refreshSignalCoverage({ notify = false, rememberExisting = false } = {}) {
+async function refreshSignalCoverage({ notify = false, rememberExisting = false, recover = false } = {}) {
   const bingx = configStore.getBingX();
-  const coverage = buildSignalCoverage({
+  const buildCoverage = () => buildSignalCoverage({
     posts: store.list(),
     events: tradeEventStore.list(),
     parseSignals: (text) => futuresTrader.parseAll(text),
@@ -2323,6 +2397,13 @@ async function refreshSignalCoverage({ notify = false, rememberExisting = false 
     since: bingx.improvementCohortStartedAt,
     retryWindowMs: STOP_LOSS_RETRY_MAX_AGE_MS
   });
+  let coverage = buildCoverage();
+  if (recover) {
+    const recovered = await recoverMissingCoverageExecutions(coverage);
+    if (recovered > 0) {
+      coverage = buildCoverage();
+    }
+  }
   state.signalCoverage = coverage;
   state.promotionGate = buildCurrentPromotionGate(coverage);
   if (rememberExisting) {
@@ -4106,6 +4187,19 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     monthWindow,
     commissionRate
   });
+  const cohortHistory = (publicConfig.improvementCohortHistory || [])
+    .map((item) => buildReplicaAuditCohort({
+      startedAt: item.startedAt,
+      endedAt: item.endedAt,
+      sheetRows,
+      incomeRows,
+      events,
+      reference,
+      config: publicConfig,
+      monthWindow,
+      commissionRate
+    }))
+    .filter(Boolean);
 
   return {
     month,
@@ -4124,6 +4218,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     },
     summary,
     cohort,
+    cohortHistory,
     rows
   };
 }
@@ -4152,6 +4247,7 @@ async function demoCommissionRate({ config }) {
 
 function buildReplicaAuditCohort({
   startedAt,
+  endedAt = null,
   sheetRows,
   incomeRows,
   events,
@@ -4160,15 +4256,10 @@ function buildReplicaAuditCohort({
   monthWindow,
   commissionRate
 }) {
-  const parsedStart = Date.parse(startedAt || 0);
-  if (!Number.isFinite(parsedStart) || parsedStart <= 0) {
+  const cohortWindow = cohortWindowBounds({ startedAt, endedAt, monthWindow });
+  if (!cohortWindow) {
     return null;
   }
-  const cohortWindow = {
-    startTime: Math.max(monthWindow.startTime, parsedStart),
-    endTime: monthWindow.endTime,
-    resetAt: parsedStart
-  };
   const cohortSheetRows = sheetRows.filter((row) => {
     const timestamp = Date.parse(row.openedAt || row.closedAt || 0);
     return Number.isFinite(timestamp) && timestamp >= cohortWindow.startTime && timestamp <= cohortWindow.endTime;
@@ -4179,11 +4270,11 @@ function buildReplicaAuditCohort({
   });
   const cohortEvents = events.filter((event) => auditEventInWindow(event, cohortWindow));
   const rows = buildReplicaAuditRows({
-    sheetRows: cohortSheetRows,
-    incomeRows: cohortIncomeRows,
-    events: cohortEvents,
+    sheetRows,
+    incomeRows,
+    events,
     defaultNotional: config.defaultNotionalUSDT || config.monthlyOrderNotionalUSDT || 0
-  });
+  }).filter((row) => auditRowBelongsToWindow(row, cohortWindow));
   const summary = summarizeReplicaAudit({
     rows,
     sheetRows: cohortSheetRows,
@@ -4192,10 +4283,12 @@ function buildReplicaAuditCohort({
     reference,
     config,
     monthWindow: cohortWindow,
-    commissionRate
+    commissionRate,
+    scopeToRows: true
   });
   return {
     startedAt: new Date(cohortWindow.startTime).toISOString(),
+    endedAt: endedAt ? new Date(cohortWindow.endTime).toISOString() : null,
     generatedAt: new Date().toISOString(),
     sampleStatus: cohortSampleStatus(summary.vstCloses),
     summary,
@@ -4251,13 +4344,17 @@ function replicaAuditRow({
 }) {
   const sheetPnl = auditNumber(sheet?.realizedPnl ?? sheet?.paperPnl, null);
   const sheetNotional = auditNumber(sheet?.notional, 0);
+  const leverage = auditNumber(sheet?.leverage ?? opening?.signal?.leverage, 1);
   const entryPrice = auditOpeningPrice(opening);
   const closePrice = auditClosePrice(closeEvent);
   const notional = auditNumber(opening?.sizing?.notional, 0) || auditNumber(opening?.notional, 0) || auditNumber(defaultNotional, 0);
   const scaleRatio = sheetNotional > 0 && notional > 0 ? notional / sheetNotional : 0;
   const replicaPnl = sheetPnl == null ? null : roundMoney(sheetPnl * scaleRatio);
   const grossPnl = realized ? roundMoney(Number(realized.income || 0)) : null;
-  const fees = roundMoney(Number(openingFee?.income || 0) + Number(closingFee?.income || 0) + Number(funding || 0));
+  const openingFeeAmount = roundMoney(Number(openingFee?.income || 0));
+  const closingFeeAmount = roundMoney(Number(closingFee?.income || 0));
+  const fundingAmount = roundMoney(Number(funding || 0));
+  const fees = roundMoney(openingFeeAmount + closingFeeAmount + fundingAmount);
   const netPnl = grossPnl == null ? null : roundMoney(grossPnl + fees);
   const entryDiffPercent = auditPercentDiff(entryPrice, sheet?.entryPrice);
   const closeDiffPercent = auditPercentDiff(closePrice, sheet?.closePrice || sheet?.currentPrice);
@@ -4288,10 +4385,14 @@ function replicaAuditRow({
       exit: auditRound(sheet.closePrice || sheet.currentPrice),
       pnl: auditRound(sheetPnl),
       notional: auditRound(sheetNotional),
-      outcome: sheet.outcome || ''
+      leverage: auditRound(leverage),
+      outcome: sheet.outcome || '',
+      openedAt: sheet.openedAt || null,
+      closedAt: sheet.closedAt || null
     } : null,
     replica: {
       notional: auditRound(notional),
+      leverage: auditRound(leverage),
       scaleRatio: auditRound(scaleRatio),
       pnl: auditRound(replicaPnl)
     },
@@ -4300,6 +4401,9 @@ function replicaAuditRow({
       exit: auditRound(closePrice),
       grossPnl: auditRound(grossPnl),
       fees: auditRound(fees),
+      openingFee: auditRound(openingFeeAmount),
+      closingFee: auditRound(closingFeeAmount),
+      funding: auditRound(fundingAmount),
       netPnl: auditRound(netPnl),
       openingAt: opening?.at || null,
       closingAt: realized ? new Date(Number(realized.time || 0)).toISOString() : closeEvent?.at || null,
@@ -4313,6 +4417,15 @@ function replicaAuditRow({
       net: auditRound(diffNet),
       entryPercent: auditRound(entryDiffPercent),
       closePercent: auditRound(closeDiffPercent)
+    },
+    trace: {
+      openingEventId: opening?.eventId || null,
+      executionKey: opening?.executionKey || null,
+      closeEventId: closeEvent?.eventId || null,
+      exchangePositionId: closeEvent?.exchangePosition?.id || null,
+      tradeId: realized?.tradeId || null,
+      openingFeeTradeId: openingFee?.tradeId || null,
+      closingFeeTradeId: closingFee?.tradeId || null
     },
     cause: status.cause,
     detail: status.detail,
@@ -4366,19 +4479,46 @@ function auditRowStatus({
   return { cause: 'Alineada', detail: 'La operación está razonablemente cerca de la réplica teórica.', severity: 'positive' };
 }
 
-function summarizeReplicaAudit({ rows, sheetRows, incomeRows, events, reference, config, monthWindow, commissionRate = null }) {
+function summarizeReplicaAudit({
+  rows,
+  sheetRows,
+  incomeRows,
+  events,
+  reference,
+  config,
+  monthWindow,
+  commissionRate = null,
+  scopeToRows = false
+}) {
   const sheetPnl = roundMoney(sheetRows.reduce((sum, row) => sum + Number(row.realizedPnl ?? row.paperPnl ?? 0), 0));
   const replicaPnl = roundMoney(rows.reduce((sum, row) => sum + Number(row.replica?.pnl || 0), 0));
   const bingxGross = roundMoney(rows.reduce((sum, row) => sum + Number(row.vst?.grossPnl || 0), 0));
-  const bingxFees = roundMoney(auditIncomeByType(incomeRows, 'TRADING_FEE').reduce((sum, row) => sum + Number(row.income || 0), 0));
-  const bingxFunding = roundMoney(auditIncomeByType(incomeRows, 'FUNDING_FEE').reduce((sum, row) => sum + Number(row.income || 0), 0));
+  const bingxFees = scopeToRows
+    ? roundMoney(rows.reduce((sum, row) => (
+        sum + Number(row.vst?.openingFee || 0) + Number(row.vst?.closingFee || 0)
+      ), 0))
+    : roundMoney(auditIncomeByType(incomeRows, 'TRADING_FEE').reduce((sum, row) => sum + Number(row.income || 0), 0));
+  const bingxFunding = scopeToRows
+    ? roundMoney(rows.reduce((sum, row) => sum + Number(row.vst?.funding || 0), 0))
+    : roundMoney(auditIncomeByType(incomeRows, 'FUNDING_FEE').reduce((sum, row) => sum + Number(row.income || 0), 0));
   const bingxNet = roundMoney(bingxGross + bingxFees + bingxFunding);
   const estimatedCommissionRebatePercent = Number(config.estimatedCommissionRebatePercent || 0);
   const estimatedCommissionRebate = roundMoney(Math.abs(bingxFees) * (estimatedCommissionRebatePercent / 100));
   const bingxNetAfterEstimatedRebate = roundMoney(bingxNet + estimatedCommissionRebate);
   const commission = commissionEvidence({ incomeRows, commissionRate });
-  const openings = auditOpeningEvents(events);
-  const closes = auditIncomeByType(incomeRows, 'REALIZED_PNL');
+  const replicaEconomics = estimateReplicaEconomics({
+    rows,
+    takerCommissionRate: commission.takerCommissionRate,
+    makerCommissionRate: commission.makerCommissionRate
+  });
+  const openings = scopeToRows
+    ? rows.filter((row) => row.vst?.openingAt)
+    : auditOpeningEvents(events);
+  const closes = scopeToRows
+    ? new Set(rows
+        .filter((row) => row.vst?.grossPnl != null)
+        .map((row) => row.trace?.tradeId || row.id))
+    : new Set(auditIncomeByType(incomeRows, 'REALIZED_PNL').map((row) => row.tradeId || `${row.symbol}|${row.time}`));
   const issueCounts = rows.reduce((totals, row) => {
     totals[row.cause] = (totals[row.cause] || 0) + 1;
     return totals;
@@ -4397,11 +4537,16 @@ function summarizeReplicaAudit({ rows, sheetRows, incomeRows, events, reference,
   return {
     sheetRows: sheetRows.length,
     vstOpenings: openings.length,
-    vstCloses: closes.length,
+    vstCloses: closes.size,
     incomeRecords: incomeRows.length,
     eventRecords: events.length,
     sheetPnl,
     replicaPnl,
+    replicaEstimatedMarketFees: replicaEconomics.marketFees,
+    replicaEstimatedMarketNet: replicaEconomics.marketNet,
+    replicaEstimatedMakerEntryFees: replicaEconomics.makerEntryFees,
+    replicaEstimatedMakerEntryNet: replicaEconomics.makerEntryNet,
+    replicaEstimatedFeeRows: replicaEconomics.rows,
     bingxGross,
     bingxFees,
     bingxFunding,

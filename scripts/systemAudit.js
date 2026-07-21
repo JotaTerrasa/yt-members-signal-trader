@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFuturesSignals } from '../src/futuresSignalParser.js';
+import { monitorHealthFinding } from '../src/operationalAudit.js';
 
 const rootDir = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dataDir = join(rootDir, '.data');
@@ -273,8 +274,9 @@ function buildFindings(report) {
   if (report.replica && Math.abs(report.replica.fees) > 0 && !report.replica.commissionRebateDetected) {
     findings.push({ severity: 'info', code: 'rebate_not_detected', detail: 'BingX no acredita ninguna devolución de comisiones en el histórico consultado.' });
   }
-  if (report.runtime.health?.level !== 'ok') {
-    findings.push({ severity: 'critical', code: 'monitor_unhealthy', detail: 'El monitor no está en estado operativo correcto.' });
+  const healthFinding = monitorHealthFinding(report.runtime.health);
+  if (healthFinding) {
+    findings.push(healthFinding);
   }
   if (!findings.length) {
     findings.push({ severity: 'info', code: 'no_critical_findings', detail: 'No se detectan incidencias críticas con la evidencia disponible.' });
@@ -346,6 +348,7 @@ function renderMarkdown(report) {
     `- Desviación adversa máxima: ${percent(report.runtime.configuration?.maxEntryDeviationPercent)}`,
     `- Antigüedad máxima de apertura: ${report.runtime.configuration?.maxSignalAgeMinutes ?? '-'} min`,
     `- Distancia máxima del stop: ${percent(report.runtime.configuration?.maxStopDistancePercent)}`,
+    `- Lectura Telegram: ${report.runtime.configuration?.telegramPollSeconds || '-'} s`,
     `- Recarga Telegram: ${report.runtime.configuration?.telegramRefreshSeconds || '-'} s`,
     `- Puerta de promoción: ${report.runtime.promotionGate?.label || 'sin datos'}`,
     `- Criterios pendientes: ${(report.runtime.promotionGate?.criteria || []).filter((item) => !item.ok).map((item) => item.label).join(', ') || 'ninguno'}`,
@@ -412,6 +415,10 @@ function pickHealth(health = {}) {
     phase: health.phase || '',
     ageSeconds: finite(health.ageSeconds),
     visiblePosts: finite(health.visiblePosts),
+    stale: Boolean(health.stale),
+    noVisiblePosts: Boolean(health.noVisiblePosts),
+    consecutiveEmptyReads: finite(health.scraper?.consecutiveEmptyReads),
+    recoveryCount: finite(health.scraper?.recoveryCount),
     lastError: health.lastError || null
   };
 }
@@ -449,6 +456,7 @@ function pickConfig(config = {}, telegramSource = {}) {
     maxStopDistancePercent: finite(config.maxStopDistancePercent),
     costGuardMode: config.costGuardMode || '',
     estimatedCommissionRebatePercent: finite(config.estimatedCommissionRebatePercent),
+    telegramPollSeconds: finite(telegramSource.pollSeconds),
     telegramRefreshSeconds: finite(telegramSource.refreshSeconds)
   };
 }

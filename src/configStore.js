@@ -24,6 +24,7 @@ const defaultConfig = {
     enabled: false,
     url: '',
     maxMessages: 40,
+    pollSeconds: 5,
     refreshSeconds: 30,
     executeSignals: false,
     executeOpenSignals: false,
@@ -78,6 +79,7 @@ const defaultConfig = {
     vstTechnicalExternalFundingVST: 0,
     vstTechnicalLastTopUpAt: null,
     improvementCohortStartedAt: null,
+    improvementCohortHistory: [],
     vstBaseCapital: 300,
     vstCapitalPercent: 10,
     vstPnlResetAt: null,
@@ -171,6 +173,7 @@ export class ConfigStore {
       enabled: Boolean(input.enabled),
       url: clean(input.url),
       maxMessages: clampInteger(input.maxMessages, 5, 200, defaultConfig.telegramSource.maxMessages),
+      pollSeconds: clampInteger(input.pollSeconds, 5, 60, defaultConfig.telegramSource.pollSeconds),
       refreshSeconds: clampInteger(input.refreshSeconds, 30, 3600, defaultConfig.telegramSource.refreshSeconds),
       executeSignals: Boolean(input.executeSignals),
       executeOpenSignals: Boolean(input.executeOpenSignals),
@@ -260,6 +263,7 @@ export class ConfigStore {
       vstTechnicalExternalFundingVST: bingx.vstTechnicalExternalFundingVST,
       vstTechnicalLastTopUpAt: bingx.vstTechnicalLastTopUpAt || null,
       improvementCohortStartedAt: bingx.improvementCohortStartedAt || null,
+      improvementCohortHistory: normalizeCohortHistory(bingx.improvementCohortHistory),
       vstBaseCapital: bingx.vstBaseCapital,
       vstCapitalPercent: bingx.vstCapitalPercent,
       vstPnlResetAt: bingx.vstPnlResetAt || null,
@@ -361,6 +365,7 @@ export class ConfigStore {
         input.improvementCohortStartedAt,
         current.improvementCohortStartedAt || defaultConfig.bingx.improvementCohortStartedAt
       ),
+      improvementCohortHistory: normalizeCohortHistory(current.improvementCohortHistory),
       vstBaseCapital: monthlyInitialCapitalVST,
       vstCapitalPercent: monthlyOrderPercent,
       vstPnlResetAt: input.clearVstPnlReset
@@ -439,7 +444,14 @@ export class ConfigStore {
   async resetImprovementCohort({ startedAt = new Date() } = {}) {
     const date = startedAt instanceof Date ? startedAt : new Date(startedAt);
     const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
-    this.data.bingx.improvementCohortStartedAt = safeDate.toISOString();
+    const nextStartedAt = safeDate.toISOString();
+    const currentStartedAt = this.data.bingx.improvementCohortStartedAt;
+    const history = normalizeCohortHistory(this.data.bingx.improvementCohortHistory);
+    if (currentStartedAt && currentStartedAt !== nextStartedAt) {
+      history.push({ startedAt: currentStartedAt, endedAt: nextStartedAt });
+    }
+    this.data.bingx.improvementCohortHistory = history.slice(-12);
+    this.data.bingx.improvementCohortStartedAt = nextStartedAt;
     await this.save();
     return this.getBingX();
   }
@@ -605,6 +617,7 @@ function normalizeBingXConfig(input = {}) {
       defaultConfig.bingx.vstTechnicalExternalFundingVST
     ),
     vstTechnicalLastTopUpAt: isoDateOrCurrent(input.vstTechnicalLastTopUpAt, null),
+    improvementCohortHistory: normalizeCohortHistory(input.improvementCohortHistory),
     vstBaseCapital: monthlyInitialCapitalVST,
     vstCapitalPercent: monthlyOrderPercent
   };
@@ -612,6 +625,19 @@ function normalizeBingXConfig(input = {}) {
 
 function monthlyOrderNotional(capital, percent) {
   return roundMoney(Number(capital || 0) * (Number(percent || 0) / 100));
+}
+
+function normalizeCohortHistory(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => ({
+      startedAt: isoDateOrCurrent(item?.startedAt, null),
+      endedAt: isoDateOrCurrent(item?.endedAt, null)
+    }))
+    .filter((item) => item.startedAt && item.endedAt)
+    .slice(-12);
 }
 
 function tokenPreview(token) {
