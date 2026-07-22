@@ -150,7 +150,7 @@ Configuración importante:
 - `Distancia máxima SL`: bloquea stops anormalmente alejados, incluidos posibles errores tipográficos.
 - `Filtro de coste`: siempre avisa si el coste es alto. En modo `block` solo rechaza cuando hay un TP explícito que no cubre la ida y vuelta estimada.
 - `Filtro neto Demo`: se aplica solo en Demo VST. Por defecto está activo en modo `shadow`; avisa si la entrada supera 18% de coste/riesgo, 3% de break-even de margen, baja de 0,9 R/R o deja un TP neto no positivo. En modo `block` esos mismos criterios bloquean la apertura Demo.
-- `Auditoría del filtro neto`: el panel de fiabilidad enlaza las aperturas evaluadas con sus cierres, resta el coste de ida y vuelta estimado y señala si el umbral de break-even marca automáticamente todas las operaciones con el apalancamiento observado.
+- `Auditoría del filtro neto`: el panel de fiabilidad enlaza las aperturas evaluadas con sus cierres, resta el coste de ida y vuelta estimado y señala si el umbral de break-even marca automáticamente todas las operaciones con el apalancamiento observado. El PnL mostrado pertenece a las entradas marcadas: un valor negativo indica la pérdida que se habría evitado al bloquearlas y uno positivo, el beneficio que se habría descartado.
 - `Devolución fees estimada`: crea un escenario comparativo; no modifica la equity real ni da por abonado el reembolso.
 - `Capital mes USDT`: capital inicial mensual para futuros reales.
 - `Capital mes VST`: capital inicial mensual para Demo VST.

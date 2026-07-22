@@ -2214,9 +2214,18 @@ function renderNetEntryFilterAudit(audit = {}) {
   const tone = recommendation.key === 'candidate_block'
     ? 'negative'
     : recommendation.key === 'keep_shadow' ? 'positive' : 'warn';
+  const estimatedNetFlagged = Number(audit.estimatedNetFlagged || 0);
   const netValue = audit.closedFlagged > 0
-    ? formatMoney(audit.estimatedNetFlagged, 'VST')
+    ? formatMoney(estimatedNetFlagged, 'VST')
     : '-';
+  const outcomeMix = `${audit.winnersFlagged || 0} ganadoras · ${audit.losersFlagged || 0} perdedoras.`;
+  const netDetail = audit.closedFlagged <= 0
+    ? 'Sin cierres suficientes para medir el efecto'
+    : estimatedNetFlagged < 0
+      ? `${outcomeMix} Bloquearlas habría evitado ${formatMoney(Math.abs(estimatedNetFlagged), 'VST')} de pérdida`
+      : estimatedNetFlagged > 0
+        ? `${outcomeMix} Bloquearlas habría descartado ${formatMoney(estimatedNetFlagged, 'VST')} de beneficio`
+        : `${outcomeMix} Bloquearlas habría tenido un efecto neto neutral`;
   const reason = audit.topReason
     ? `${netEntryReasonLabel(audit.topReason.reason)} · ${audit.topReason.count}`
     : 'Sin motivo dominante';
@@ -2235,8 +2244,8 @@ function renderNetEntryFilterAudit(audit = {}) {
     </div>
     <div class="net-entry-audit-grid">
       ${renderReliabilityMetric('Evaluadas', String(audit.sample || 0), `${audit.closed || 0} ya cerradas`)}
-      ${renderReliabilityMetric('Habría evitado', String(audit.flagged || 0), `${audit.closedFlagged || 0} con resultado`)}
-      ${renderReliabilityMetric('Neto estimado evitado', netValue, `${audit.winnersFlagged || 0} ganadoras · ${audit.losersFlagged || 0} perdedoras`)}
+      ${renderReliabilityMetric('Entradas marcadas', String(audit.flagged || 0), `${audit.closedFlagged || 0} con resultado`)}
+      ${renderReliabilityMetric('PnL de las entradas marcadas', netValue, netDetail)}
       ${renderReliabilityMetric('Motivo principal', reason, recommendation.detail || 'Sin conclusión todavía')}
     </div>
   `;

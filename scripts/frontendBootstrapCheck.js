@@ -332,7 +332,9 @@ try {
     const panel = document.querySelector('#external-sheet-panel');
     const wrap = document.querySelector('.external-sheet-table-wrap');
     const domainGrid = document.querySelector('#reliability-domains');
+    const skipLink = document.querySelector('.skip-link');
     const panelRect = panel?.getBoundingClientRect();
+    const skipLinkRect = skipLink?.getBoundingClientRect();
     const viewportWidth = document.documentElement.clientWidth;
     return {
       viewportWidth,
@@ -352,7 +354,9 @@ try {
       domainColumns: domainGrid ? getComputedStyle(domainGrid).gridTemplateColumns.split(' ').filter(Boolean).length : 0,
       clippedDomains: domainGrid
         ? [...domainGrid.children].filter((item) => item.scrollWidth > item.clientWidth + 1).length
-        : -1
+        : -1,
+      skipLinkVisible: Boolean(skipLinkRect && skipLinkRect.bottom > 0 && skipLinkRect.top < innerHeight),
+      netEntryAuditText: document.querySelector('#net-entry-filter-audit')?.textContent || ''
     };
   });
   if (mobileSheetState.viewportWidth !== 390
@@ -369,7 +373,9 @@ try {
     || mobileSheetState.tableOverflowY !== 'auto'
     || mobileSheetState.domainCount !== 5
     || mobileSheetState.domainColumns !== 1
-    || mobileSheetState.clippedDomains !== 0) {
+    || mobileSheetState.clippedDomains !== 0
+    || mobileSheetState.skipLinkVisible
+    || !mobileSheetState.netEntryAuditText.includes('PnL de las entradas marcadas')) {
     throw new Error(`La vista móvil no conserva scroll y lectura completa: ${JSON.stringify(mobileSheetState)}.`);
   }
   if (mobileSheetErrors.length) {
