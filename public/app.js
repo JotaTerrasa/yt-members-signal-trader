@@ -42,7 +42,9 @@ const elements = {
   replicaHealthPanel: document.querySelector('#replica-health-panel'),
   reliabilityPanel: document.querySelector('#reliability-panel'),
   reliabilityStatus: document.querySelector('#reliability-status'),
+  reliabilityReason: document.querySelector('#reliability-reason'),
   reliabilitySummary: document.querySelector('#reliability-summary'),
+  reliabilityDomains: document.querySelector('#reliability-domains'),
   netEntryFilterAudit: document.querySelector('#net-entry-filter-audit'),
   reliabilityCriteria: document.querySelector('#reliability-criteria'),
   costControlPanel: document.querySelector('#cost-control-panel'),
@@ -2068,6 +2070,10 @@ function renderReliabilityPanel() {
   elements.reliabilityPanel.dataset.tone = tone;
   elements.reliabilityStatus.className = `amount ${tone}`;
   elements.reliabilityStatus.textContent = gate.label || 'Recogiendo muestra';
+  if (elements.reliabilityReason) {
+    const cohortSince = gate.evidenceSince ? ` Cohorte desde ${formatDateTime(gate.evidenceSince)}.` : '';
+    elements.reliabilityReason.textContent = `${gate.reasonSummary || 'Separando muestra, fiabilidad, rentabilidad y seguridad.'}${cohortSince}`;
+  }
   elements.reliabilitySummary.innerHTML = [
     renderReliabilityMetric('Paquetes', `${metrics.packages || 0}/${gate.thresholds?.minPackages || 50}`, 'Muestra observada'),
     renderReliabilityMetric('Cobertura', formatPercent(metrics.coveragePercent || 0), `${metrics.executedOpenings || 0}/${metrics.expectedOpenings || 0} aperturas`),
@@ -2076,6 +2082,9 @@ function renderReliabilityPanel() {
     renderReliabilityMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : '-', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin paquete reciente'),
     renderReliabilityMetric('Reloj BingX', clockMetric.value, clockMetric.detail, clockMetric.tone)
   ].join('');
+  if (elements.reliabilityDomains) {
+    elements.reliabilityDomains.innerHTML = (gate.domains || []).map(renderReliabilityDomain).join('');
+  }
   renderNetEntryFilterAudit(appState.state?.netEntryFilterAudit || {});
   elements.reliabilityCriteria.innerHTML = (gate.criteria || []).map((item) => `
     <div class="reliability-check ${item.ok ? 'ok' : 'missing'} ${escapeAttribute(item.group || '')}">
@@ -2086,6 +2095,25 @@ function renderReliabilityPanel() {
       </span>
     </div>
   `).join('');
+}
+
+function renderReliabilityDomain(item = {}) {
+  const tone = item.status === 'ok' ? 'ok' : item.status === 'blocked' ? 'blocked' : 'waiting';
+  const statusLabel = {
+    ok: 'Verificado',
+    blocked: 'No cumple',
+    collecting: 'En muestra',
+    waiting: 'Pendiente'
+  }[item.status] || 'Sin datos';
+  return `
+    <div class="reliability-domain ${escapeAttribute(tone)}">
+      <div>
+        <span>${escapeHtml(item.label || item.key || 'Área')}</span>
+        <strong>${escapeHtml(statusLabel)}</strong>
+      </div>
+      <small>${escapeHtml(item.detail || '-')}</small>
+    </div>
+  `;
 }
 
 function renderReplicaHealthPanel(reference = currentReferenceLedger()) {

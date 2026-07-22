@@ -649,6 +649,10 @@ function renderMarkdown(report) {
     '',
     ...renderCohortComparisonLines(report.cohortComparison),
     '',
+    '## Puerta de promoción',
+    '',
+    ...renderPromotionGateLines(report.runtime.promotionGate),
+    '',
     '## Estado operativo',
     '',
     `- Monitor: ${report.runtime.health?.level || 'sin datos'}`,
@@ -662,8 +666,6 @@ function renderMarkdown(report) {
     `- Distancia máxima del stop: ${percent(report.runtime.configuration?.maxStopDistancePercent)}`,
     `- Lectura Telegram: ${report.runtime.configuration?.telegramPollSeconds || '-'} s`,
     `- Recarga Telegram: ${report.runtime.configuration?.telegramRefreshSeconds || '-'} s`,
-    `- Puerta de promoción: ${report.runtime.promotionGate?.label || 'sin datos'}`,
-    `- Criterios pendientes: ${(report.runtime.promotionGate?.criteria || []).filter((item) => !item.ok).map((item) => item.label).join(', ') || 'ninguno'}`,
     `- Reloj REST BingX: ${clockStatus(report.runtime.bingxClock)}`,
     '',
     '## Interpretación',
@@ -672,6 +674,32 @@ function renderMarkdown(report) {
     ''
   ];
   return lines.join('\n');
+}
+
+function renderPromotionGateLines(gate) {
+  if (!gate) {
+    return ['- Sin evidencia disponible.'];
+  }
+  const domainLines = (gate.domains || []).map((item) => (
+    `- ${item.label}: ${promotionDomainStatus(item.status)}. ${withFinalPeriod(item.detail || '')}`
+  ));
+  return [
+    `- Veredicto: ${gate.label || 'sin clasificar'}.`,
+    `- Diagnóstico: ${gate.reasonSummary || 'sin detalle'}`,
+    `- Revisión humana habilitada: ${gate.eligibleForReview ? 'sí' : 'no'}.`,
+    `- Promoción automática: ${gate.automaticLivePromotion ? 'sí' : 'no'}.`,
+    ...domainLines,
+    `- Criterios pendientes: ${(gate.criteria || []).filter((item) => !item.ok).map((item) => item.label).join(', ') || 'ninguno'}.`
+  ];
+}
+
+function promotionDomainStatus(status) {
+  return {
+    ok: 'verificado',
+    blocked: 'no cumple',
+    collecting: 'recogiendo muestra',
+    waiting: 'pendiente'
+  }[status] || 'sin clasificar';
 }
 
 function renderGapBridgeLines(bridge) {

@@ -1,8 +1,8 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-22T23:00:02.496Z
+Generada: 2026-07-22T23:16:03.415Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T23:00:02.917Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T23:16:03.949Z
 
 ## Resumen ejecutivo
 
@@ -294,6 +294,19 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T23:00:02.917Z
 - Bootstrap determinista (4000 iteraciones): intervalo del 95% -4.3778 a 4.3028 VST; probabilidad exploratoria de mejora 49.58%; lectura inconclusa.
 - Límite: el contraste describe esta muestra. La cobertura parcial y un intervalo que cruce cero impiden afirmar una mejora económica o garantizar rentabilidad futura.
 
+## Puerta de promoción
+
+- Veredicto: No apta para revisión.
+- Diagnóstico: Pendiente: muestra, fiabilidad y rentabilidad.
+- Revisión humana habilitada: no.
+- Promoción automática: no.
+- Muestra: recogiendo muestra. 16/50 paquetes.
+- Fiabilidad: no cumple. 47/48 aperturas · 1 fallo por corrección posterior.
+- Rentabilidad: no cumple. -90,3774 VST · -2,1018 VST/cierre · 43 cierres.
+- Colas: verificado. 0 aperturas · 0 reintentos.
+- Seguridad: verificado. 0 posiciones sin SL · 0 órdenes huérfanas.
+- Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes.
+
 ## Estado operativo
 
 - Monitor: ok
@@ -307,9 +320,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T23:00:02.917Z
 - Distancia máxima del stop: 5.00%
 - Lectura Telegram: 5 s
 - Recarga Telegram: 30 s
-- Puerta de promoción: Bloqueada por fiabilidad
-- Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes
-- Reloj REST BingX: +744 ms de offset; RTT 183 ms; antigüedad 136.1 s; warn; solo observación
+- Reloj REST BingX: +810 ms de offset; RTT 319 ms; antigüedad 187.0 s; warn; solo observación
 
 ## Interpretación
 

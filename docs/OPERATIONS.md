@@ -413,7 +413,7 @@ El informe estratégico se genera a las 09:00 y el mantenimiento de auditoría, 
 
 - `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
-- `GET /api/promotion-gate` devuelve cada criterio de forma auditable.
+- `GET /api/promotion-gate` devuelve cada criterio de forma auditable, un diagnóstico breve y cinco dominios separados: muestra, fiabilidad, rentabilidad, colas y seguridad. `No apta para revisión` no implica por sí solo un fallo del bot: el detalle permite distinguir una muestra aún corta, un hueco técnico, una cola transitoria, una protección ausente o un neto negativo tras costes.
 - `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
 - `cohortComparison` contrasta la cohorte activa con la última cohorte archivada que terminó antes de ella. No compara contra un periodo solapado ni modifica las fronteras guardadas.
 - Las incidencias, desviaciones, latencia, costes y resultados se presentan por cierre. Las métricas dependientes de la hoja se presentan por operación emparejada y quedan marcadas como parciales cuando la referencia no cubre al menos el 80% o 30 operaciones actuales.

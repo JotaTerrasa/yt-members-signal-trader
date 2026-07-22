@@ -196,6 +196,20 @@ try {
       && sourceGrid?.children.length >= 2
       && !document.querySelector('#external-sheet-panel')?.getAttribute('aria-busy')?.includes('true');
   }, null, { timeout: 20_000 });
+  await pnlIsolationPage.waitForFunction(() => (
+    document.querySelectorAll('#reliability-domains .reliability-domain').length === 5
+    && document.querySelector('#reliability-reason')?.textContent
+  ), null, { timeout: 10_000 });
+  const reliabilityDiagnosis = await pnlIsolationPage.evaluate(() => ({
+    status: document.querySelector('#reliability-status')?.textContent || '',
+    reason: document.querySelector('#reliability-reason')?.textContent || '',
+    domains: [...document.querySelectorAll('#reliability-domains .reliability-domain')].map((item) => item.textContent.replace(/\s+/g, ' ').trim())
+  }));
+  if (reliabilityDiagnosis.status === 'Bloqueada por fiabilidad'
+    || (!reliabilityDiagnosis.reason.includes('Pendiente:') && !reliabilityDiagnosis.reason.includes('verificadas'))
+    || !reliabilityDiagnosis.domains.some((item) => item.startsWith('Rentabilidad'))) {
+    throw new Error(`El diagnóstico de promoción sigue siendo ambiguo: ${JSON.stringify(reliabilityDiagnosis)}.`);
+  }
   if (historicalFailures < 1 || pnlSourcesRequests < 1 || replicaAuditRequests < 1) {
     throw new Error(`La prueba PnL no consulto todas las fuentes: ${historicalFailures}/${pnlSourcesRequests}/${replicaAuditRequests}.`);
   }

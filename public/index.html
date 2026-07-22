@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=50">
-    <link rel="stylesheet" href="/polish.css?v=2">
+    <link rel="stylesheet" href="/polish.css?v=3">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=101" defer></script>
+    <script src="/app.js?v=102" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -594,11 +594,12 @@
               <div class="trade-section-header">
                 <div>
                   <h3>Fiabilidad de ejecución</h3>
-                  <p>Paquetes, reintentos y criterio de promoción</p>
+                  <p id="reliability-reason">Paquetes, reintentos y criterio de promoción</p>
                 </div>
                 <span id="reliability-status">Recogiendo muestra</span>
               </div>
               <div class="reliability-summary" id="reliability-summary"></div>
+              <div class="reliability-domains" id="reliability-domains" aria-label="Diagnóstico por área"></div>
               <div class="net-entry-audit" id="net-entry-filter-audit" aria-live="polite"></div>
               <div class="reliability-criteria" id="reliability-criteria"></div>
             </section>

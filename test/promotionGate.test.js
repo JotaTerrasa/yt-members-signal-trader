@@ -8,6 +8,9 @@ test('la puerta nunca activa live y exige muestra completa', () => {
     exchangeSafety: safeExchange()
   });
   assert.equal(collecting.status, 'collecting');
+  assert.equal(collecting.label, 'Recogiendo muestra');
+  assert.equal(collecting.reasonSummary, 'Pendiente: muestra y rentabilidad.');
+  assert.equal(collecting.domains.find((item) => item.key === 'reliability').status, 'ok');
   assert.equal(collecting.automaticLivePromotion, false);
   assert.equal(collecting.explicitLiveConfirmationRequired, true);
 
@@ -18,6 +21,8 @@ test('la puerta nunca activa live y exige muestra completa', () => {
   });
   assert.equal(eligible.status, 'eligible_for_review');
   assert.equal(eligible.eligibleForReview, true);
+  assert.equal(eligible.domains.every((item) => item.ok), true);
+  assert.equal(eligible.blockers.total, 0);
 });
 
 test('un hueco operativo bloquea la promocion aunque haya muestra', () => {
@@ -34,8 +39,10 @@ test('un hueco operativo bloquea la promocion aunque haya muestra', () => {
     economics: { closedTrades: 149, netPnl: 20 }
   });
   assert.equal(result.status, 'blocked');
+  assert.equal(result.label, 'No apta para revisión');
   assert.equal(result.eligibleForReview, false);
   assert.equal(result.criteria.find((item) => item.key === 'missing-openings').ok, false);
+  assert.equal(result.domains.find((item) => item.key === 'reliability').status, 'blocked');
 });
 
 test('una replica negativa tras costes no puede promocionarse', () => {
@@ -46,6 +53,28 @@ test('una replica negativa tras costes no puede promocionarse', () => {
   });
   assert.equal(result.status, 'blocked');
   assert.equal(result.criteria.find((item) => item.key === 'net-after-costs').ok, false);
+  assert.equal(result.domains.find((item) => item.key === 'economics').detail, '-12,4 VST · -0,0827 VST/cierre · 150 cierres');
+  assert.deepEqual(result.blockers.groups, ['economics']);
+});
+
+test('explica una apertura perdida por una corrección posterior sin ocultar el bloqueo', () => {
+  const result = buildPromotionGate({
+    coverage: coverageSummary({
+      packages: 16,
+      completePackages: 15,
+      expectedOpenings: 48,
+      executedOpenings: 47,
+      missingOpenings: 1,
+      correctedAfterEventMissingOpenings: 1
+    }),
+    exchangeSafety: safeExchange(),
+    economics: { closedTrades: 43, netPnl: -90.3774 }
+  });
+
+  assert.equal(result.metrics.correctedAfterEventMissingOpenings, 1);
+  assert.equal(result.criteria.find((item) => item.key === 'missing-openings').detail, '1 · 1 por corrección posterior');
+  assert.equal(result.domains.find((item) => item.key === 'reliability').detail, '47/48 aperturas · 1 fallo por corrección posterior');
+  assert.equal(result.reasonSummary, 'Pendiente: muestra, fiabilidad y rentabilidad.');
 });
 
 function coverageSummary(overrides = {}) {

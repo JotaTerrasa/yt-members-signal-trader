@@ -167,7 +167,7 @@ Compara las señales estructuradas antes y después de una edición. Solo devuel
 
 ### `src/promotionGate.js`
 
-Calcula una puerta informativa basada en muestra, cobertura, paquetes completos, fallos de parser, reintentos, reconciliación, SL, órdenes huérfanas y resultado neto tras costes. Nunca cambia el modo ni arma live automáticamente.
+Calcula una puerta informativa basada en muestra, cobertura, paquetes completos, fallos de parser, reintentos, reconciliación, SL, órdenes huérfanas y resultado neto tras costes. Conserva un único veredicto, pero publica además cinco dominios independientes: muestra, fiabilidad, rentabilidad, colas y seguridad. De este modo, una pérdida económica no se presenta como un fallo técnico y una incidencia causada por una edición posterior queda explicada sin ocultar que redujo la cobertura. Nunca cambia el modo ni arma live automáticamente.
 
 ### `src/httpSecurity.js`
 
