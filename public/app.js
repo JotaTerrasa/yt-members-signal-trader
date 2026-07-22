@@ -276,6 +276,7 @@ const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
 const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
+const PNL_REQUEST_TIMEOUT_MS = 30 * 1000;
 const CLIENT_ERROR_PRIORITIES = Object.freeze({ bootstrap: 1, realtime: 2, action: 3 });
 let referenceRefreshTimer = null;
 let pnlRealtimeRenderTimer = null;
@@ -957,82 +958,112 @@ async function loadPnl() {
   renderPnl();
 
   try {
-    const [historicalResponse, sourcesResponse, replicaAuditResponse] = await Promise.all([
-      fetchJson('/api/historical-pnl?months=72'),
-      fetchJson('/api/bingx/pnl-sources').catch((error) => ({
+    const [historicalResult, sourcesResult, replicaAuditResult] = await Promise.allSettled([
+      fetchJson('/api/historical-pnl?months=72', { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
+      fetchJson('/api/bingx/pnl-sources', { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
+      fetchJson('/api/replica-audit', { timeoutMs: PNL_REQUEST_TIMEOUT_MS })
+    ]);
+
+    let historical = appState.pnl?.historical || null;
+    let historicalError = '';
+    if (historicalResult.status === 'fulfilled' && historicalResult.value?.historical) {
+      historical = historicalResult.value.historical;
+      appState.externalSheetLoadedAt = new Date().toISOString();
+    } else {
+      historicalError = historicalResult.status === 'rejected'
+        ? historicalResult.reason?.message || 'No se pudo actualizar la hoja.'
+        : 'La hoja no devolvió un histórico válido.';
+    }
+
+    let sourcesError = '';
+    if (sourcesResult.status === 'fulfilled' && sourcesResult.value) {
+      appState.pnlSources = sourcesResult.value;
+    } else {
+      sourcesError = sourcesResult.status === 'rejected'
+        ? sourcesResult.reason?.message || 'No se pudieron leer las fuentes de PnL.'
+        : 'Las fuentes de PnL no devolvieron datos válidos.';
+      appState.pnlSources = appState.pnlSources || {
         ok: false,
-        error: error.message,
+        error: sourcesError,
         sources: {},
         positions: {}
-      })),
-      fetchJson('/api/replica-audit').catch((error) => ({
-        ok: false,
-        error: error.message,
-        audit: null
-      }))
-    ]);
-    const historical = historicalResponse.historical;
-    appState.externalSheetLoadedAt = new Date().toISOString();
-    appState.pnlSources = sourcesResponse;
-    const replicaAuditError = replicaAuditResponse.audit
-      ? ''
-      : replicaAuditResponse.error || 'No se pudo actualizar la auditoría de réplica.';
-    if (replicaAuditResponse.audit) {
-      appState.replicaAudit = replicaAuditResponse.audit;
-    } else if (!appState.replicaAudit) {
-      appState.replicaAudit = { error: replicaAuditError };
+      };
     }
-    if (replicaAuditError) {
-      markReferenceRefreshFailure(replicaAuditError);
+
+    let replicaAuditError = '';
+    if (replicaAuditResult.status === 'fulfilled' && replicaAuditResult.value?.audit) {
+      appState.replicaAudit = replicaAuditResult.value.audit;
+    } else {
+      replicaAuditError = replicaAuditResult.status === 'rejected'
+        ? replicaAuditResult.reason?.message || 'No se pudo actualizar la auditoría de réplica.'
+        : 'La auditoría no devolvió datos válidos.';
+      if (!appState.replicaAudit) {
+        appState.replicaAudit = { error: replicaAuditError };
+      }
+    }
+
+    appState.externalSheetError = historicalError;
+    const referenceErrors = [historicalError, replicaAuditError].filter(Boolean);
+    if (referenceErrors.length) {
+      markReferenceRefreshFailure(referenceErrors.join(' | '));
     } else {
       markReferenceRefreshSuccess();
     }
+
+    const sourcesResponse = appState.pnlSources || {};
     appState.pnlMeta = {
+      ...(appState.pnlMeta || {}),
       cached: Boolean(sourcesResponse.cached),
       stale: Boolean(sourcesResponse.stale),
-      warning: sourcesResponse.warning || '',
+      warning: sourcesError || sourcesResponse.warning || '',
       cooldownUntil: sourcesResponse.cooldownUntil || null
     };
     appState.pnl = {
       ...(appState.pnl || {}),
       months: appState.pnl?.months || [],
-      historical
+      ...(historical ? { historical } : {})
     };
     renderPnl();
 
     if (appState.bingx?.apiKeyConfigured && appState.bingx?.apiSecretConfigured) {
       try {
-        const response = await fetchJson('/api/bingx/pnl?months=3');
+        const response = await fetchJson('/api/bingx/pnl?months=3', {
+          timeoutMs: PNL_REQUEST_TIMEOUT_MS
+        });
+        const pnlWarning = response.warning || response.pnl?.warning || '';
         appState.pnl = {
           ...response.pnl,
-          historical
+          ...(historical ? { historical } : {})
         };
-        appState.pnlError = response.warning || response.pnl?.warning || '';
+        appState.pnlError = [sourcesError, pnlWarning].filter(Boolean).join(' | ');
         appState.pnlMeta = {
           ...(appState.pnlMeta || {}),
           cached: Boolean(response.cached),
           stale: Boolean(response.stale),
-          warning: response.warning || response.pnl?.warning || '',
+          warning: appState.pnlError,
           cooldownUntil: response.cooldownUntil || appState.pnlMeta?.cooldownUntil || null,
           lastGoodAt: response.lastGoodAt || null
         };
         appState.paperTrades = response.pnl?.paper?.positions || appState.paperTrades;
       } catch (error) {
         appState.pnl = {
-          months: [],
-          historical
+          ...(appState.pnl || {}),
+          months: appState.pnl?.months || [],
+          ...(historical ? { historical } : {})
         };
-        appState.pnlError = error.message;
+        appState.pnlError = [sourcesError, error.message].filter(Boolean).join(' | ');
         appState.pnlMeta = {
           ...(appState.pnlMeta || {}),
-          warning: error.message
+          warning: appState.pnlError
         };
       }
     } else {
       appState.pnl = {
+        ...(appState.pnl || {}),
         months: [],
-        historical
+        ...(historical ? { historical } : {})
       };
+      appState.pnlError = sourcesError;
     }
   } catch (error) {
     appState.pnlError = error.message;

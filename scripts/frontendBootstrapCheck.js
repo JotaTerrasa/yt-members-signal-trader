@@ -157,6 +157,52 @@ try {
     throw new Error(`Errores JavaScript tras el timeout inicial: ${timeoutPageErrors.join(' | ')}`);
   }
 
+  const pnlIsolationPage = await browser.newPage();
+  const pnlIsolationErrors = [];
+  let historicalFailures = 0;
+  let pnlSourcesRequests = 0;
+  let replicaAuditRequests = 0;
+  pnlIsolationPage.on('pageerror', (error) => pnlIsolationErrors.push(error.message));
+  await pnlIsolationPage.route('**/api/historical-pnl?**', async (route) => {
+    historicalFailures += 1;
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ error: 'Hoja no disponible en QA' })
+    });
+  });
+  await pnlIsolationPage.route('**/api/bingx/pnl-sources', async (route) => {
+    pnlSourcesRequests += 1;
+    await route.continue();
+  });
+  await pnlIsolationPage.route('**/api/replica-audit', async (route) => {
+    replicaAuditRequests += 1;
+    await route.continue();
+  });
+
+  await pnlIsolationPage.goto(`${baseUrl}/?pnl-isolation-check=${Date.now()}#external-sheet-panel`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await pnlIsolationPage.waitForFunction(() => {
+    const pnlView = document.querySelector('#pnl-view');
+    const sheetStatus = document.querySelector('#external-sheet-status');
+    const sheetEmpty = document.querySelector('#external-sheet-empty');
+    const sourceGrid = document.querySelector('#pnl-source-grid');
+    return pnlView
+      && !pnlView.classList.contains('hidden')
+      && sheetStatus?.textContent.includes('No disponible')
+      && sheetEmpty?.textContent.includes('No se pudo actualizar la hoja')
+      && sourceGrid?.children.length >= 2
+      && !document.querySelector('#external-sheet-panel')?.getAttribute('aria-busy')?.includes('true');
+  }, null, { timeout: 20_000 });
+  if (historicalFailures < 1 || pnlSourcesRequests < 1 || replicaAuditRequests < 1) {
+    throw new Error(`La prueba PnL no consulto todas las fuentes: ${historicalFailures}/${pnlSourcesRequests}/${replicaAuditRequests}.`);
+  }
+  if (pnlIsolationErrors.length) {
+    throw new Error(`Errores JavaScript al aislar Google Sheet: ${pnlIsolationErrors.join(' | ')}`);
+  }
+
   console.log(JSON.stringify({
     ok: true,
     injectedFailures,
@@ -166,7 +212,9 @@ try {
     realtimeInjectedFailures,
     realtimeRecovered: true,
     timeoutInjectedFailures,
-    timeoutRecovered: true
+    timeoutRecovered: true,
+    historicalFailures,
+    pnlIsolationPassed: true
   }));
 } finally {
   await browser?.close().catch(() => {});
