@@ -6,6 +6,7 @@ import { extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore } from './configStore.js';
+import { buildCohortComparison } from './cohortComparison.js';
 import { coverageRecoveryCandidates } from './coverageRecovery.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
 import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
@@ -4327,6 +4328,16 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
       commissionRate
     }))
     .filter(Boolean);
+  const activeCohortStart = Date.parse(cohort?.startedAt || '');
+  const previousCohort = cohortHistory
+    .filter((item) => {
+      const endedAt = Date.parse(item.endedAt || '');
+      return Number.isFinite(activeCohortStart)
+        && Number.isFinite(endedAt)
+        && endedAt <= activeCohortStart;
+    })
+    .sort((left, right) => Date.parse(right.endedAt) - Date.parse(left.endedAt))[0] || null;
+  const cohortComparison = buildCohortComparison({ current: cohort, previous: previousCohort });
 
   return {
     month,
@@ -4353,6 +4364,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     summary,
     cohort,
     cohortHistory,
+    cohortComparison,
     rows
   };
 }

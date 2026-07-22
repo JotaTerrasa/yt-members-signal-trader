@@ -4879,7 +4879,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
           ${escapeHtml(`${unprocessedClosePosts} publicación${unprocessedClosePosts === 1 ? '' : 'es'} de cierre no ${unprocessedClosePosts === 1 ? 'generó' : 'generaron'} ejecución y afectó a ${unprocessedCloseRows} posiciones. El parser actual ya reconoce la errata CUERRE.`)}
         </p>
       ` : ''}
-      ${renderImprovementCohort(audit.cohort, audit.cohortHistory)}
+      ${renderImprovementCohort(audit.cohort, audit.cohortHistory, audit.cohortComparison)}
       <div class="replica-issue-strip">
         ${renderReplicaIssuePills(summary.issueCounts)}
       </div>
@@ -4905,7 +4905,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   `;
 }
 
-function renderImprovementCohort(cohort, cohortHistory = []) {
+function renderImprovementCohort(cohort, cohortHistory = [], comparison = null) {
   if (!cohort) {
     return '<div class="replica-empty">La cohorte posterior a las mejoras todavía no está inicializada.</div>';
   }
@@ -4937,8 +4937,159 @@ function renderImprovementCohort(cohort, cohortHistory = []) {
         ${renderReplicaMetric('Correcciones tardías', String(coverageSummary.correctedAfterEventMissingOpenings || 0), coverageSummary.correctedAfterEventMissingOpenings ? 'Fallo histórico explicado; la recuperación actual ya está activa' : 'Ningún faltante causado por una edición posterior', coverageSummary.correctedAfterEventMissingOpenings ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : 'Esperando', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin señales nuevas', latestPackage?.status === 'complete' ? 'amount positive' : latestPackage?.status === 'incomplete' ? 'amount negative' : 'warn')}
       </div>
+      ${renderCohortComparison(comparison)}
     </section>
   `;
+}
+
+function renderCohortComparison(comparison) {
+  if (!comparison || !Array.isArray(comparison.metrics)) {
+    return '<div class="replica-empty">Hace falta una cohorte anterior cerrada para construir el contraste antes/después.</div>';
+  }
+  const verdicts = (comparison.verdicts || []).map((verdict) => `
+    <div class="cohort-verdict ${escapeAttribute(cohortAssessmentClass(verdict.status))}">
+      <span>${escapeHtml(verdict.label)}</span>
+      <strong>${escapeHtml(cohortAssessmentLabel(verdict.status))}</strong>
+      <small>${escapeHtml(verdict.detail || '')}</small>
+    </div>
+  `).join('');
+  const metrics = comparison.metrics.map((metric) => `
+    <div class="cohort-comparison-row ${escapeAttribute(metric.scope || '')}" role="row">
+      <div class="cohort-comparison-name" role="cell">
+        <strong>${escapeHtml(metric.label)}</strong>
+        <span>${escapeHtml(metric.description || '')}</span>
+      </div>
+      <div role="cell"><span>Antes</span><strong>${escapeHtml(formatCohortMetricValue(metric, metric.previous))}</strong></div>
+      <div role="cell"><span>Ahora</span><strong>${escapeHtml(formatCohortMetricValue(metric, metric.current))}</strong></div>
+      <div role="cell"><span>Cambio</span><strong class="${escapeAttribute(cohortAssessmentClass(metric.assessment))}">${escapeHtml(formatCohortMetricDelta(metric))}</strong></div>
+      <div role="cell"><span>Lectura</span><strong class="${escapeAttribute(cohortAssessmentClass(metric.assessment))}">${escapeHtml(cohortAssessmentLabel(metric.assessment))}</strong></div>
+    </div>
+  `).join('');
+  const statistics = comparison.statistics || {};
+  const currentStatistics = statistics.current || {};
+  const previousStatistics = statistics.previous || {};
+  const interval = statistics.ci95Low !== null && statistics.ci95Low !== undefined
+    ? `${formatMoney(statistics.ci95Low, 'VST')} a ${formatMoney(statistics.ci95High, 'VST')}`
+    : 'Sin muestra suficiente';
+  const probability = statistics.probabilityCurrentHigherPercent !== null
+    && statistics.probabilityCurrentHigherPercent !== undefined
+    ? formatOptionalPercent(statistics.probabilityCurrentHigherPercent)
+    : '-';
+  const meanDifference = Number(statistics.meanDifference);
+  const meanDifferenceText = Number.isFinite(meanDifference)
+    ? `${meanDifference > 0 ? '+' : ''}${formatMoney(meanDifference, 'VST')}`
+    : '-';
+
+  return `
+    <div class="cohort-comparison" aria-labelledby="cohort-comparison-title">
+      <div class="replica-gap-heading">
+        <div>
+          <span>Antes frente a ahora</span>
+          <strong id="cohort-comparison-title">Efecto observado de las mejoras</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(cohortAssessmentClass(comparison.status?.key))}">${escapeHtml(comparison.status?.label || 'Sin clasificar')}</span>
+      </div>
+      <div class="cohort-comparison-overall ${escapeAttribute(cohortAssessmentClass(comparison.overall?.key))}">
+        <strong>${escapeHtml(comparison.overall?.label || 'Lectura pendiente')}</strong>
+        <span>${escapeHtml(comparison.overall?.detail || '')}</span>
+      </div>
+      <div class="cohort-periods">
+        ${renderCohortPeriod('Antes', comparison.previous)}
+        ${renderCohortPeriod('Ahora', comparison.current)}
+      </div>
+      <div class="cohort-verdicts">${verdicts}</div>
+      <div class="cohort-comparison-table" role="table" aria-label="Comparación de cohortes antes y después">
+        ${metrics}
+      </div>
+      <div class="cohort-statistics">
+        <div><span>Media neta enlazada antes</span><strong>${escapeHtml(formatOptionalMoney(previousStatistics.mean, 'VST'))}</strong><small>${escapeHtml(`${previousStatistics.samples || 0} cierres`)}</small></div>
+        <div><span>Media neta enlazada ahora</span><strong>${escapeHtml(formatOptionalMoney(currentStatistics.mean, 'VST'))}</strong><small>${escapeHtml(`${currentStatistics.samples || 0} cierres`)}</small></div>
+        <div><span>Diferencia media</span><strong class="${escapeAttribute(cohortAssessmentClass(statistics.conclusion))}">${escapeHtml(meanDifferenceText)}</strong><small>Ahora menos antes</small></div>
+        <div><span>Intervalo exploratorio 95%</span><strong>${escapeHtml(interval)}</strong><small>${escapeHtml(`${probability} de remuestreos favorecen a la cohorte actual`)}</small></div>
+      </div>
+      <p class="replica-gap-note">Bootstrap determinista sobre el PnL neto enlazado por operación. El intervalo cruza cero cuando la diferencia no está demostrada; esta lectura no garantiza rentabilidad futura ni sustituye la cobertura pendiente de la hoja.</p>
+    </div>
+  `;
+}
+
+function renderCohortPeriod(label, period = {}) {
+  return `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(`${period.closes || 0} cierres`)}</strong>
+      <small>${escapeHtml(`${formatDateTime(period.startedAt)}${period.endedAt ? ` → ${formatDateTime(period.endedAt)}` : ' → vigente'}`)}</small>
+      <small>${escapeHtml(`${period.matched || 0}/${period.observedClosed || 0} con referencia · ${formatOptionalPercent(period.exactFillCoveragePercent)} precios exactos`)}</small>
+    </div>
+  `;
+}
+
+function formatCohortMetricValue(metric, value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return '-';
+  }
+  if (metric.unit === 'percent') {
+    return formatCohortPercent(value);
+  }
+  if (metric.unit === 'seconds') {
+    return formatLatencySeconds(value);
+  }
+  return formatMoney(value, 'VST');
+}
+
+function formatCohortMetricDelta(metric) {
+  const value = Number(metric.delta);
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  const sign = value > 0 ? '+' : '';
+  if (metric.unit === 'percent') {
+    return `${sign}${value.toLocaleString('es-ES', { maximumFractionDigits: Math.abs(value) < 1 ? 4 : 2 })} pp`;
+  }
+  if (metric.unit === 'seconds') {
+    return `${sign}${value.toLocaleString('es-ES', { maximumFractionDigits: 2 })} s`;
+  }
+  return `${sign}${formatMoney(value, 'VST')}`;
+}
+
+function formatCohortPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  return `${number.toLocaleString('es-ES', {
+    maximumFractionDigits: Math.abs(number) < 1 ? 4 : 1
+  })}%`;
+}
+
+function cohortAssessmentLabel(value) {
+  return {
+    improved: 'Mejora',
+    worse: 'Empeora',
+    stable: 'Estable',
+    mixed: 'Mixto',
+    positive: 'Positiva',
+    negative: 'Negativa',
+    partial: 'Parcial',
+    partial_reference: 'Cobertura parcial',
+    exploratory: 'Exploratoria',
+    preliminary: 'Preliminar',
+    contrastable: 'Contrastable',
+    inconclusive: 'Inconcluso',
+    insufficient: 'Sin muestra'
+  }[value] || value || '-';
+}
+
+function cohortAssessmentClass(value) {
+  if (['improved', 'positive', 'contrastable'].includes(value)) {
+    return 'positive';
+  }
+  if (['worse', 'negative'].includes(value)) {
+    return 'negative';
+  }
+  if (['partial', 'partial_reference', 'exploratory', 'preliminary', 'mixed', 'inconclusive', 'insufficient'].includes(value)) {
+    return 'warn';
+  }
+  return '';
 }
 
 function formatCommissionRates(summary = {}) {

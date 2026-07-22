@@ -2864,6 +2864,196 @@ summary.dashboard-section-title {
   line-height: 1.45;
 }
 
+.cohort-comparison {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 16px 0 4px;
+  border-top: 1px solid var(--line);
+}
+
+.cohort-comparison-overall {
+  display: grid;
+  gap: 3px;
+  padding: 11px 13px;
+  border-left: 4px solid #c5d6d3;
+  background: #f3f7f6;
+}
+
+.cohort-comparison-overall.positive {
+  border-left-color: var(--accent);
+  background: #eaf7f4;
+}
+
+.cohort-comparison-overall.negative {
+  border-left-color: var(--danger);
+  background: #fff1f0;
+}
+
+.cohort-comparison-overall.warn {
+  border-left-color: var(--gold);
+  background: #fff8e8;
+}
+
+.cohort-comparison-overall strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.cohort-comparison-overall span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.cohort-periods,
+.cohort-verdicts,
+.cohort-statistics {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.cohort-periods {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cohort-verdicts {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.cohort-statistics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cohort-periods > div,
+.cohort-verdict,
+.cohort-statistics > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.cohort-periods span,
+.cohort-verdict span,
+.cohort-statistics span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.cohort-periods strong,
+.cohort-verdict strong,
+.cohort-statistics strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.cohort-periods small,
+.cohort-verdict small,
+.cohort-statistics small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.cohort-verdict.positive {
+  background: rgba(234, 247, 244, 0.7);
+}
+
+.cohort-verdict.negative {
+  background: rgba(255, 241, 240, 0.7);
+}
+
+.cohort-verdict.warn {
+  background: rgba(255, 248, 232, 0.7);
+}
+
+.cohort-comparison-table {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.cohort-comparison-row {
+  display: grid;
+  grid-template-columns: minmax(250px, 1.7fr) repeat(4, minmax(105px, 1fr));
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.cohort-comparison-row:last-child {
+  border-bottom: 0;
+}
+
+.cohort-comparison-row:nth-child(even) {
+  background: #f8fbfa;
+}
+
+.cohort-comparison-row > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 11px;
+  border-right: 1px solid var(--line);
+}
+
+.cohort-comparison-row > div:last-child {
+  border-right: 0;
+}
+
+.cohort-comparison-row span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.cohort-comparison-row strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.cohort-comparison-name span {
+  text-transform: none;
+  line-height: 1.35;
+}
+
+.cohort-comparison-name strong {
+  font-size: 0.84rem;
+}
+
+.cohort-comparison strong.positive,
+.cohort-statistics strong.positive {
+  color: var(--accent-strong);
+}
+
+.cohort-comparison strong.negative,
+.cohort-statistics strong.negative {
+  color: var(--danger);
+}
+
+.cohort-comparison strong.warn,
+.cohort-statistics strong.warn {
+  color: #9a6700;
+}
+
 .replica-matched-gap-panel {
   margin-top: 4px;
 }
@@ -4407,6 +4597,14 @@ summary.dashboard-section-title {
   .actions input {
     width: 100%;
   }
+
+  .cohort-verdicts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .cohort-statistics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 680px) {
@@ -5266,6 +5464,27 @@ h1 {
 
   .execution-route-row > div:nth-child(3),
   .execution-route-row > div:nth-child(5) {
+    border-right: 0;
+  }
+
+  .cohort-periods,
+  .cohort-verdicts,
+  .cohort-statistics {
+    grid-template-columns: 1fr;
+  }
+
+  .cohort-comparison-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cohort-comparison-name {
+    grid-column: 1 / -1;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cohort-comparison-row > div:nth-child(3),
+  .cohort-comparison-row > div:nth-child(5) {
     border-right: 0;
   }
 }

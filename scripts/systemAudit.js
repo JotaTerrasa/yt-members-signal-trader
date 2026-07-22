@@ -102,7 +102,8 @@ const report = {
     generatedAt: replica.cohort.generatedAt,
     sampleStatus: replica.cohort.sampleStatus || null,
     summary: pickCohortSummary(replica.cohort.summary)
-  } : null
+  } : null,
+  cohortComparison: replica?.cohortComparison || null
 };
 report.findings = buildFindings(report);
 
@@ -428,6 +429,46 @@ function buildFindings(report) {
       });
     }
   }
+  if (report.cohortComparison) {
+    const comparison = report.cohortComparison;
+    const verdict = (key) => comparison.verdicts?.find((item) => item.key === key);
+    if (verdict('reliability')?.status === 'improved') {
+      findings.push({
+        severity: 'info',
+        code: 'cohort_reliability_improved',
+        detail: `La cohorte actual reduce las incidencias técnicas observadas de ${comparison.previous?.historicalIncidents ?? '-'} a ${comparison.current?.historicalIncidents ?? '-'} operaciones.`
+      });
+    }
+    if (verdict('entry')?.status === 'worse') {
+      findings.push({
+        severity: 'high',
+        code: 'cohort_entry_execution_worse',
+        detail: `La ejecución de entrada empeora frente a la cohorte anterior: ${verdict('entry').detail}.`
+      });
+    }
+    if (verdict('economics')?.status === 'negative') {
+      findings.push({
+        severity: 'high',
+        code: 'cohort_net_per_close_negative',
+        detail: `La economía de la cohorte actual sigue siendo negativa: ${verdict('economics').detail}.`
+      });
+    }
+    if (comparison.status?.key === 'partial_reference') {
+      const detail = comparison.status.detail || 'La hoja no cubre todavía toda la cohorte actual.';
+      findings.push({
+        severity: 'info',
+        code: 'cohort_reference_partial',
+        detail: withFinalPeriod(detail)
+      });
+    }
+    if (comparison.statistics?.conclusion === 'inconclusive') {
+      findings.push({
+        severity: 'info',
+        code: 'cohort_effect_inconclusive',
+        detail: `El intervalo exploratorio del cambio neto va de ${money(comparison.statistics.ci95Low)} a ${money(comparison.statistics.ci95High)} VST por cierre y cruza cero.`
+      });
+    }
+  }
   if (report.replica && Math.abs(report.replica.fees) > 0 && !report.replica.commissionRebateDetected) {
     findings.push({ severity: 'info', code: 'rebate_not_detected', detail: 'BingX no acredita ninguna devolución de comisiones en el histórico consultado.' });
   }
@@ -535,6 +576,10 @@ function renderMarkdown(report) {
     '',
     ...renderCohortLines(report.cohort, report.runtime.signalCoverage),
     '',
+    '## Contraste antes y después',
+    '',
+    ...renderCohortComparisonLines(report.cohortComparison),
+    '',
     '## Estado operativo',
     '',
     `- Monitor: ${report.runtime.health?.level || 'sin datos'}`,
@@ -553,7 +598,7 @@ function renderMarkdown(report) {
     '',
     '## Interpretación',
     '',
-    'El informe separa resultados observados de escenarios estimados. La devolución de comisiones no modifica la equity real hasta que aparezca como ingreso en BingX. La cohorte posterior a las mejoras mide el comportamiento nuevo sin reescribir el histórico. Una mejora de ejecución reduce divergencias, pero no garantiza rentabilidad futura.',
+    'El informe separa resultados observados de escenarios estimados. La devolución de comisiones no modifica la equity real hasta que aparezca como ingreso en BingX. La cohorte posterior a las mejoras mide el comportamiento nuevo sin reescribir el histórico. El contraste normaliza las métricas por cierre y muestra su cobertura; una mejora de ejecución reduce divergencias, pero no garantiza rentabilidad futura.',
     ''
   ];
   return lines.join('\n');
@@ -699,6 +744,81 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,
     `- Clasificación: ${JSON.stringify(summary.issueCounts || {})}`
   ];
+}
+
+function renderCohortComparisonLines(comparison) {
+  if (!comparison) {
+    return ['- No existe una cohorte anterior cerrada con la que construir el contraste.'];
+  }
+  const previous = comparison.previous || {};
+  const current = comparison.current || {};
+  const statistics = comparison.statistics || {};
+  const metricLines = (comparison.metrics || []).map((metric) => (
+    `- ${metric.label}: antes ${cohortMetricValue(metric, metric.previous)}; ahora ${cohortMetricValue(metric, metric.current)}; cambio ${cohortMetricDelta(metric)}; ${cohortAssessmentLabel(metric.assessment)}.`
+  ));
+  const verdictLines = (comparison.verdicts || []).map((verdict) => (
+    `- ${verdict.label}: ${cohortAssessmentLabel(verdict.status)}. ${withFinalPeriod(verdict.detail || '')}`
+  ));
+  return [
+    `- Estado: ${comparison.status?.label || 'sin clasificar'}. ${withFinalPeriod(comparison.status?.detail || '')}`,
+    `- Antes: ${previous.closes || 0} cierres; ${previous.matched || 0}/${previous.observedClosed || 0} con referencia; ${percent(previous.exactFillCoveragePercent)} con precio ejecutado exacto.`,
+    `- Ahora: ${current.closes || 0} cierres; ${current.matched || 0}/${current.observedClosed || 0} con referencia; ${percent(current.exactFillCoveragePercent)} con precio ejecutado exacto.`,
+    `- Veredicto global: ${comparison.overall?.label || 'sin lectura'}. ${withFinalPeriod(comparison.overall?.detail || '')}`,
+    '- Lecturas por ámbito:',
+    ...verdictLines,
+    '- Métricas normalizadas:',
+    ...metricLines,
+    `- Media neta enlazada: antes ${money(statistics.previous?.mean)} VST; ahora ${money(statistics.current?.mean)} VST; diferencia ${money(statistics.meanDifference)} VST por cierre.`,
+    `- Bootstrap determinista (${statistics.iterations || 0} iteraciones): intervalo del 95% ${money(statistics.ci95Low)} a ${money(statistics.ci95High)} VST; probabilidad exploratoria de mejora ${percent(statistics.probabilityCurrentHigherPercent)}; lectura ${cohortAssessmentLabel(statistics.conclusion)}.`,
+    '- Límite: el contraste describe esta muestra. La cobertura parcial y un intervalo que cruce cero impiden afirmar una mejora económica o garantizar rentabilidad futura.'
+  ];
+}
+
+function cohortMetricValue(metric, value) {
+  if (!Number.isFinite(Number(value))) {
+    return '-';
+  }
+  if (metric.unit === 'percent') {
+    return percent(value);
+  }
+  if (metric.unit === 'seconds') {
+    return seconds(value);
+  }
+  return `${money(value)} VST`;
+}
+
+function cohortMetricDelta(metric) {
+  if (!Number.isFinite(Number(metric.delta))) {
+    return '-';
+  }
+  const value = Number(metric.delta);
+  const sign = value > 0 ? '+' : '';
+  if (metric.unit === 'percent') {
+    return `${sign}${value.toFixed(2)} pp`;
+  }
+  if (metric.unit === 'seconds') {
+    return `${sign}${value.toFixed(2)} s`;
+  }
+  return `${sign}${money(value)} VST`;
+}
+
+function cohortAssessmentLabel(value) {
+  return {
+    improved: 'mejora',
+    worse: 'empeora',
+    stable: 'estable',
+    mixed: 'mixto',
+    positive: 'positivo',
+    negative: 'negativo',
+    partial: 'cobertura parcial',
+    inconclusive: 'inconclusa',
+    insufficient: 'muestra insuficiente'
+  }[value] || value || 'sin clasificar';
+}
+
+function withFinalPeriod(value) {
+  const text = String(value || '').trim();
+  return !text || /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 function sameSignal(event, signal) {

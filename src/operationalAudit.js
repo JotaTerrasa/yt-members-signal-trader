@@ -563,11 +563,13 @@ export function buildMatchedGapAttribution(rows = []) {
 }
 
 export function buildExecutionRouteAnalysis(rows = []) {
-  const matchedRows = (Array.isArray(rows) ? rows : []).filter((row) => (
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const matchedRows = sourceRows.filter((row) => (
     Boolean(row?.sheet)
     && nullableNumber(row?.replica?.pnl) !== null
     && nullableNumber(row?.vst?.grossPnl) !== null
   ));
+  const observed = summarizeObservedExecutionRoutes(sourceRows);
   const groups = new Map();
   let replicaPnlTotal = 0;
   let bingxGrossTotal = 0;
@@ -647,10 +649,15 @@ export function buildExecutionRouteAnalysis(rows = []) {
       routes: routeGroups.length,
       historicalIncidentRows: families.find((family) => family.key === 'historical_defect')?.rows || 0,
       guardRetryRows: families.find((family) => family.key === 'guard_retry')?.rows || 0,
-      evidenceGapRows: families.find((family) => family.key === 'evidence_gap')?.rows || 0
+      evidenceGapRows: families.find((family) => family.key === 'evidence_gap')?.rows || 0,
+      observedClosed: observed.closedRows,
+      historicalIncidentObservedRows: observed.families.find((family) => family.key === 'historical_defect')?.rows || 0,
+      guardRetryObservedRows: observed.families.find((family) => family.key === 'guard_retry')?.rows || 0,
+      evidenceGapObservedRows: observed.families.find((family) => family.key === 'evidence_gap')?.rows || 0
     },
     families,
     groups: routeGroups,
+    observed,
     topRows: matchedRows
       .map((row) => {
         const route = executionRouteDescriptor(row);
@@ -1078,6 +1085,38 @@ function executionRoute(key, label, family) {
   return { key, label, family };
 }
 
+function summarizeObservedExecutionRoutes(rows = []) {
+  const groups = new Map();
+  const families = new Map();
+  let closedRows = 0;
+  for (const row of rows) {
+    if (nullableNumber(row?.vst?.grossPnl) === null) {
+      continue;
+    }
+    closedRows += 1;
+    const route = executionRouteDescriptor(row);
+    const group = groups.get(route.key) || { ...route, rows: 0 };
+    group.rows += 1;
+    groups.set(route.key, group);
+    const family = families.get(route.family) || {
+      key: route.family,
+      label: executionRouteFamilyLabel(route.family),
+      rows: 0
+    };
+    family.rows += 1;
+    families.set(route.family, family);
+  }
+  return {
+    closedRows,
+    groups: [...groups.values()].sort((left, right) => (
+      executionRouteOrder(left.key) - executionRouteOrder(right.key)
+    )),
+    families: [...families.values()].sort((left, right) => (
+      executionRouteFamilyOrder(left.key) - executionRouteFamilyOrder(right.key)
+    ))
+  };
+}
+
 function createExecutionRouteGroup(route) {
   return {
     ...route,
@@ -1134,18 +1173,11 @@ function finalizeExecutionRouteGroup(group) {
 }
 
 function summarizeExecutionRouteFamilies(groups = []) {
-  const labels = {
-    observed_execution: 'Ejecución observada',
-    historical_defect: 'Incidencia histórica corregida',
-    guard_retry: 'Reintento protegido',
-    close_incident: 'Otra incidencia de cierre',
-    evidence_gap: 'Evidencia local incompleta'
-  };
   const families = new Map();
   for (const group of groups) {
     const family = families.get(group.family) || {
       key: group.family,
-      label: labels[group.family] || group.family,
+      label: executionRouteFamilyLabel(group.family),
       rows: 0,
       replicaPnl: 0,
       bingxGross: 0,
@@ -1177,6 +1209,16 @@ function summarizeExecutionRouteFamilies(groups = []) {
       funding: roundMoney(family.funding)
     }))
     .sort((left, right) => executionRouteFamilyOrder(left.key) - executionRouteFamilyOrder(right.key));
+}
+
+function executionRouteFamilyLabel(key) {
+  return {
+    observed_execution: 'Ejecución observada',
+    historical_defect: 'Incidencia histórica corregida',
+    guard_retry: 'Reintento protegido',
+    close_incident: 'Otra incidencia de cierre',
+    evidence_gap: 'Evidencia local incompleta'
+  }[key] || key;
 }
 
 function executionRouteOrder(key) {

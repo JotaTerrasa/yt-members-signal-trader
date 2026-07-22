@@ -396,6 +396,13 @@ GET /api/price-feed
 
 `GET /api/replica-audit` devuelve, además del detalle por operación, `summary.gapBridge`. Este bloque forma una identidad contable desde la réplica teórica hasta el neto BingX y conserva por separado las operaciones posteriores a la cobertura de la hoja. `summary.matchedGapAttribution` abre a su vez el tramo de operaciones emparejadas en contabilidad de referencia, diferencia de entrada, diferencia de salida, cantidad/fills y evidencia incompleta.
 
+La respuesta incorpora asimismo `cohortComparison`. El servidor selecciona la cohorte archivada que terminó inmediatamente antes del inicio de la cohorte activa y delega el cálculo en `src/cohortComparison.js`. El módulo trabaja con dos niveles de evidencia:
+
+- métricas observadas sobre todos los cierres de cada periodo, como incidencias técnicas, costes, PnL y cobertura del histórico firmado;
+- métricas de alineación únicamente sobre las operaciones que todavía tienen una fila comparable en la hoja.
+
+Los totales se normalizan por cierre o por operación emparejada. El contraste económico usa un bootstrap determinista de 4.000 remuestreos sobre el PnL neto enlazado de cada ciclo y publica media, intervalo exploratorio del 95% y proporción de remuestreos favorables. La cobertura inferior al 80% o menos de 30 operaciones comparables se etiqueta como parcial. Todo este flujo es de solo lectura y queda fuera del camino que procesa o ejecuta señales.
+
 `summary.executionRouteAnalysis` clasifica cada operación emparejada según la evidencia que precede al fill de cierre: cierre explícito, stop sin una señal de cierre anterior, publicación histórica no procesada, error histórico del guard, reintento protegido u ausencia de señal local enlazada. Cada ruta conserva su PnL de referencia, bruto BingX, gap, impacto de entrada y salida, costes, latencia y contadores de evidencia. Las familias y rutas forman otra identidad con residual máximo de 0,01 VST. Esta clasificación es analítica: describe asociaciones observadas y no estima dinero contrafactualmente recuperable.
 
 `summary.executionPriceChain` profundiza un nivel más: usa la referencia parseada, la cotización inmediatamente anterior al envío y el fill confirmado para reconstruir cada cambio de precio. En cierres por stop emplea el stop configurado como objetivo y la posición observada al reconciliar; si falta una traza intermedia, conserva ese impacto en una categoría explícita. `summary.executionLatency` enlaza los eventos con `firstSeenAt` y separa reacción inicial de espera por reintentos. Los tres puentes se representan como waterfalls de Plotly y son exclusivamente analíticos: no intervienen en el parser, los guards ni la ejecución de señales.

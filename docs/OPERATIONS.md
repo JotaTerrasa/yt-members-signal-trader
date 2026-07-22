@@ -407,6 +407,10 @@ Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y 
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
 - `GET /api/promotion-gate` devuelve cada criterio de forma auditable.
 - `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
+- `cohortComparison` contrasta la cohorte activa con la última cohorte archivada que terminó antes de ella. No compara contra un periodo solapado ni modifica las fronteras guardadas.
+- Las incidencias, desviaciones, latencia, costes y resultados se presentan por cierre. Las métricas dependientes de la hoja se presentan por operación emparejada y quedan marcadas como parciales cuando la referencia no cubre al menos el 80% o 30 operaciones actuales.
+- El intervalo exploratorio procede de 4.000 remuestreos deterministas del PnL neto por ciclo. Si cruza cero, el resultado correcto es `rentabilidad no demostrada`; una mejora de fiabilidad no debe traducirse manualmente en una promesa económica.
+- El informe diario conserva el mismo contraste bajo `Contraste antes y después` y genera incidencias separadas para regresión de entradas, neto negativo, cobertura parcial y efecto económico inconcluso.
 - La comparación distingue entre filas emparejables y aperturas VST posteriores al último día disponible en la hoja. Estas últimas quedan como `Fuera de cobertura de la hoja` hasta que la referencia se actualice y nunca se utilizan para rellenar huecos anteriores.
 - Las filas `No ejecutada en VST` enlazan el intento fallido únicamente cuando coinciden día, activo, dirección y precio. La API expone `failure` y `missingReasonCounts`; el frontend muestra el motivo y la publicación original sin alterar la ejecución.
 - Los stops se auditan como `alineado`, `con deslizamiento`, `divergente` o `sin referencia`. `/api/replica-audit` expone `stopAnalysis`; el denominador incluye solo stops con una operación comparable en la hoja. Cada divergencia conserva también las señales de cierre fallidas que ocurrieron durante la vida de la posición, de modo que un fallo previo no se atribuya erróneamente a la agregación posterior.

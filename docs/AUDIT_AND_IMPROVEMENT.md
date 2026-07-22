@@ -216,6 +216,21 @@ La cohorte posterior a estas mejoras debe evaluarse por separado. Los indicadore
 
 Con menos de 30 cierres posteriores al cambio, la lectura es exploratoria. Entre 30 y 99 puede orientar ajustes, pero sigue siendo frágil. A partir de 100 se pueden contrastar hipótesis, todavía con validación fuera de muestra y sin convertir correlaciones en reglas automáticas.
 
+## Contraste antes y después
+
+La aplicación compara siempre la cohorte activa con la cohorte archivada inmediatamente anterior. No compara totales sin ajustar: expresa incidencias por cada cien cierres y divide PnL, costes e impactos entre el número de operaciones correspondiente. La parte que depende de la hoja solo utiliza filas emparejadas y muestra su cobertura de forma explícita.
+
+El corte de referencia del 22 de julio de 2026 contiene 34 cierres en la cohorte anterior y 38 en la actual. La lectura observada es:
+
+- las incidencias técnicas históricas bajan de cuatro a cero;
+- la desviación de cierre mejora: las salidas por encima del 0,15% pasan del 57,1% al 32,1%, la desviación adversa media baja del 0,1739% al 0,1116% y la latencia p95 baja de 3,454 a 2,356 segundos;
+- la entrada empeora: las ejecuciones por encima del 0,15% suben del 42,9% al 60,5% y la desviación adversa media pasa del 0,1252% al 0,1409%;
+- el coste por cierre mejora ligeramente, pero el neto continúa siendo negativo, aproximadamente -2,05 VST antes y -1,94 VST ahora;
+- solo 9 de los 38 cierres actuales tienen todavía referencia en la hoja, por lo que la alineación de la cohorte vigente es parcial;
+- la diferencia media neta observada es pequeña y su intervalo exploratorio del 95% cruza cero. No existe evidencia suficiente para afirmar que la mejora técnica haya producido una mejora económica.
+
+El panel y el informe expresan por ello el veredicto `Mejora técnica; rentabilidad no demostrada`. El bootstrap usa una semilla fija y 4.000 remuestreos para que dos auditorías sobre la misma evidencia produzcan exactamente la misma salida. Es una medida descriptiva de incertidumbre, no una predicción ni una garantía de beneficio.
+
 ## Límites de la mejora
 
 El sistema puede reducir latencia, errores, duplicados, slippage evitable y mediciones incorrectas. No puede garantizar que las señales futuras sean rentables ni reproducir un precio que ya no está disponible.

@@ -373,7 +373,16 @@ test('separa las rutas de salida sin confundir incidencias históricas con ejecu
       closeKind: 'other',
       closeFailures: [{ category: 'close_slippage_guard' }]
     }),
-    row('evidence-gap', { grossPnl: 2, closeKind: 'other' })
+    row('evidence-gap', { grossPnl: 2, closeKind: 'other' }),
+    {
+      ...row('outside-runtime', {
+        exit: 95,
+        grossPnl: -1,
+        closeKind: 'stop',
+        closeFailures: [{ category: 'close_guard_runtime_error' }]
+      }),
+      sheet: null
+    }
   ]);
 
   assert.equal(analysis.counts.matched, 7);
@@ -381,6 +390,8 @@ test('separa las rutas de salida sin confundir incidencias históricas con ejecu
   assert.equal(analysis.counts.historicalIncidentRows, 3);
   assert.equal(analysis.counts.guardRetryRows, 1);
   assert.equal(analysis.counts.evidenceGapRows, 1);
+  assert.equal(analysis.counts.observedClosed, 8);
+  assert.equal(analysis.counts.historicalIncidentObservedRows, 4);
   assert.equal(analysis.gap, -11);
   assert.equal(analysis.residual, 0);
   assert.equal(analysis.reconciled, true);
@@ -389,6 +400,7 @@ test('separa las rutas de salida sin confundir incidencias históricas con ejecu
   assert.equal(analysis.groups.find((group) => group.key === 'explicit_close').closeLatency.medianSeconds, 1);
   assert.equal(analysis.groups.find((group) => group.key === 'runtime_error_then_stop').closeFailureEvents, 1);
   assert.equal(analysis.groups.find((group) => group.key === 'unprocessed_close_then_stop').unprocessedCloseSignals, 1);
+  assert.equal(analysis.observed.groups.find((group) => group.key === 'runtime_error_then_stop').rows, 2);
 });
 
 test('reconcilia el gap por tramos entre señal, cotización y fill', () => {
