@@ -4657,6 +4657,10 @@ summary.dashboard-section-title {
   color: var(--accent-strong);
 }
 
+.external-sheet-panel[data-sheet-state='stale'] #external-sheet-status {
+  color: #684a0f;
+}
+
 .external-sheet-panel[data-sheet-state='error'] #external-sheet-status,
 .external-sheet-panel .empty-state.error {
   color: var(--danger);

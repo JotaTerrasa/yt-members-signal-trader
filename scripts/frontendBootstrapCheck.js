@@ -203,6 +203,78 @@ try {
     throw new Error(`Errores JavaScript al aislar Google Sheet: ${pnlIsolationErrors.join(' | ')}`);
   }
 
+  const nativeSheetPage = await browser.newPage();
+  const nativeSheetErrors = [];
+  const fixtureMonth = localMonthKey();
+  const fixtureAt = new Date();
+  fixtureAt.setDate(1);
+  fixtureAt.setHours(12, 0, 0, 0);
+  nativeSheetPage.on('pageerror', (error) => nativeSheetErrors.push(error.message));
+  await nativeSheetPage.route('**/api/historical-pnl?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        historical: {
+          source: {
+            alignedMonth: fixtureMonth,
+            referenceLedger: {
+              label: 'HOJA QA',
+              url: 'https://docs.google.com/spreadsheets/d/qa/edit'
+            }
+          },
+          months: [{
+            month: fixtureMonth,
+            asset: 'USDT',
+            total: 15,
+            realized: 15,
+            closedTrades: 1
+          }],
+          positions: [{
+            id: 'sheet-qa-1',
+            orderNumber: 1,
+            referenceLedger: true,
+            symbol: 'BTC-USDT',
+            direction: 'LONG',
+            leverage: 25,
+            openedAt: fixtureAt.toISOString(),
+            closedAt: fixtureAt.toISOString(),
+            entryPrice: 100,
+            closePrice: 101,
+            realizedPnl: 15,
+            notional: 1500,
+            outcome: 'GANADA'
+          }]
+        }
+      })
+    });
+  });
+
+  await nativeSheetPage.goto(`${baseUrl}/?native-sheet-check=${Date.now()}#external-sheet-panel`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await nativeSheetPage.waitForFunction(() => {
+    const panel = document.querySelector('#external-sheet-panel');
+    const status = document.querySelector('#external-sheet-status');
+    return panel
+      && panel.dataset.sheetState !== 'loading'
+      && document.querySelectorAll('#external-sheet-body tr').length === 1
+      && status?.textContent.includes('datos hasta');
+  }, null, { timeout: 20_000 });
+  const nativeSheetState = await nativeSheetPage.evaluate(() => ({
+    iframeCount: document.querySelectorAll('#external-sheet-panel iframe').length,
+    rowCount: document.querySelectorAll('#external-sheet-body tr').length,
+    status: document.querySelector('#external-sheet-status')?.textContent || '',
+    tableVisible: !document.querySelector('#external-sheet-native')?.classList.contains('hidden')
+  }));
+  if (nativeSheetState.iframeCount !== 0 || nativeSheetState.rowCount !== 1 || !nativeSheetState.tableVisible) {
+    throw new Error(`La hoja externa no uso la tabla nativa: ${JSON.stringify(nativeSheetState)}.`);
+  }
+  if (nativeSheetErrors.length) {
+    throw new Error(`Errores JavaScript en la hoja nativa: ${nativeSheetErrors.join(' | ')}`);
+  }
+
   console.log(JSON.stringify({
     ok: true,
     injectedFailures,
@@ -214,7 +286,8 @@ try {
     timeoutInjectedFailures,
     timeoutRecovered: true,
     historicalFailures,
-    pnlIsolationPassed: true
+    pnlIsolationPassed: true,
+    externalSheetNativePassed: true
   }));
 } finally {
   await browser?.close().catch(() => {});
@@ -227,4 +300,10 @@ function optionValue(name) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function localMonthKey(value = new Date()) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
 }

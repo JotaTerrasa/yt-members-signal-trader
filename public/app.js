@@ -7945,27 +7945,30 @@ function renderExternalSheetEmbed() {
   const reference = currentReferenceLedger();
   const positions = [...(reference?.positions || [])]
     .sort((left, right) => Number(right.orderNumber || 0) - Number(left.orderNumber || 0));
+  const freshness = externalSheetFreshness(positions);
   const loadState = appState.externalSheetError
     ? 'error'
     : appState.externalSheetLoading
       ? 'loading'
       : positions.length
-        ? 'ready'
+        ? (freshness.stale ? 'stale' : 'ready')
         : 'empty';
   const updatedLabel = appState.externalSheetLoadedAt
     ? formatShortDateTime(appState.externalSheetLoadedAt)
     : '';
   elements.externalSheetPanel.dataset.sheetState = loadState;
   elements.externalSheetPanel.setAttribute('aria-busy', appState.externalSheetLoading ? 'true' : 'false');
-  elements.externalSheetStatus.title = appState.referenceRefreshWarning
-    ? friendlyBingxError(appState.referenceRefreshWarning)
-    : '';
+  elements.externalSheetStatus.title = [
+    appState.referenceRefreshWarning ? friendlyBingxError(appState.referenceRefreshWarning) : '',
+    freshness.latestAt ? `Última operación de la hoja: ${formatDateTime(freshness.latestAt)}` : '',
+    updatedLabel ? `Última lectura local: ${updatedLabel}` : ''
+  ].filter(Boolean).join(' · ');
   elements.externalSheetStatus.textContent = positions.length
     ? appState.externalSheetError
       ? `${positions.length} filas · fallo al actualizar`
       : appState.externalSheetLoading
         ? `${positions.length} filas · actualizando...`
-        : `${positions.length} filas${updatedLabel ? ` · ${updatedLabel}` : ''}`
+        : `${positions.length} filas · ${externalSheetFreshnessLabel(freshness, updatedLabel)}`
     : appState.externalSheetLoading
       ? 'Cargando hoja...'
       : appState.externalSheetError
@@ -8052,6 +8055,45 @@ function externalSheetDataKey(reference, positions) {
     position.outcome
   ].join(':')).join('|');
   return `${reference?.label || ''}:${reference?.equity ?? ''}:${reference?.row?.total ?? ''}:${rows}`;
+}
+
+function externalSheetFreshness(positions = []) {
+  const coverage = appState.replicaAudit?.summary?.referenceCoverage || {};
+  const coverageTimestamp = Date.parse(coverage.latestSheetAt || '');
+  const positionTimestamp = positions
+    .map((position) => Date.parse(position.closedAt || position.openedAt || ''))
+    .filter(Number.isFinite)
+    .reduce((latest, value) => Math.max(latest, value), 0);
+  const latestTimestamp = positionTimestamp || (Number.isFinite(coverageTimestamp) ? coverageTimestamp : 0);
+  const latestAt = latestTimestamp ? new Date(latestTimestamp).toISOString() : null;
+  const auditedCoverageMatches = Number.isFinite(coverageTimestamp)
+    && Math.abs(coverageTimestamp - latestTimestamp) < unitMs.minute;
+  const calculatedLagHours = latestTimestamp
+    ? Math.max(0, Date.now() - latestTimestamp) / unitMs.hour
+    : null;
+  const lagHours = auditedCoverageMatches && Number.isFinite(Number(coverage.lagHours))
+    ? Math.max(0, Number(coverage.lagHours))
+    : calculatedLagHours;
+  const staleAfterHours = Number.isFinite(Number(coverage.staleAfterHours))
+    ? Math.max(0, Number(coverage.staleAfterHours))
+    : 24;
+  return {
+    latestAt,
+    lagHours,
+    stale: auditedCoverageMatches && typeof coverage.stale === 'boolean'
+      ? coverage.stale
+      : lagHours != null && lagHours >= staleAfterHours
+  };
+}
+
+function externalSheetFreshnessLabel(freshness = {}, updatedLabel = '') {
+  if (!freshness.latestAt) {
+    return updatedLabel ? `leída ${updatedLabel}` : 'datos cargados';
+  }
+  const lag = freshness.stale && Number.isFinite(Number(freshness.lagHours))
+    ? ` · ${formatMilliseconds(Number(freshness.lagHours) * unitMs.hour)} de retraso`
+    : '';
+  return `datos hasta ${formatShortDateTime(freshness.latestAt)}${lag}`;
 }
 
 function renderExternalSheetRow(position) {
