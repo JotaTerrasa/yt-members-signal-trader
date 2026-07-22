@@ -391,6 +391,89 @@ export function summarizeReplicaStops(rows = []) {
   };
 }
 
+export function buildReplicaGapBridge({ rows = [], bingxFees = 0, bingxFunding = 0 } = {}) {
+  const auditRows = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  const sheetRows = auditRows.filter((row) => Boolean(row.sheet));
+  const matchedRows = sheetRows.filter(hasReplicaGrossPnl);
+  const missingRows = sheetRows.filter((row) => (
+    !hasReplicaGrossPnl(row) && row.cause === 'No ejecutada en VST'
+  ));
+  const unresolvedSheetRows = sheetRows.filter((row) => (
+    !hasReplicaGrossPnl(row) && row.cause !== 'No ejecutada en VST'
+  ));
+  const unreferencedRows = auditRows.filter((row) => !row.sheet);
+  const outsideCoverageRows = unreferencedRows.filter((row) => row.cause === 'Fuera de cobertura de la hoja');
+  const extraRows = unreferencedRows.filter((row) => row.cause === 'Extra en VST');
+  const unlinkedCloseRows = unreferencedRows.filter((row) => row.cause === 'Cierre sin apertura enlazada');
+  const knownUnreferenced = new Set([
+    'Fuera de cobertura de la hoja',
+    'Extra en VST',
+    'Cierre sin apertura enlazada'
+  ]);
+  const otherRows = unreferencedRows.filter((row) => !knownUnreferenced.has(row.cause));
+
+  const replicaPnl = sumFinite(sheetRows.map((row) => row.replica?.pnl));
+  const matchedReplicaPnl = sumFinite(matchedRows.map((row) => row.replica?.pnl));
+  const matchedGrossPnl = sumFinite(matchedRows.map((row) => row.vst?.grossPnl));
+  const observedGross = sumFinite(auditRows.map((row) => row.vst?.grossPnl));
+  const fees = roundMoney(bingxFees);
+  const funding = roundMoney(bingxFunding);
+  const steps = [
+    bridgeStep('matched_gap', 'Emparejadas vs hoja', matchedGrossPnl - matchedReplicaPnl, matchedRows.length),
+    bridgeStep('missing_execution', 'No ejecutadas', -sumFinite(missingRows.map((row) => row.replica?.pnl)), missingRows.length),
+    bridgeStep('sheet_without_result', 'Hoja sin cierre VST', -sumFinite(unresolvedSheetRows.map((row) => row.replica?.pnl)), unresolvedSheetRows.length),
+    bridgeStep('outside_coverage', 'Posteriores sin hoja', sumFinite(outsideCoverageRows.map((row) => row.vst?.grossPnl)), outsideCoverageRows.length),
+    bridgeStep('extra_execution', 'Extras en cobertura', sumFinite(extraRows.map((row) => row.vst?.grossPnl)), extraRows.length),
+    bridgeStep('unlinked_close', 'Cierres no enlazados', sumFinite(unlinkedCloseRows.map((row) => row.vst?.grossPnl)), unlinkedCloseRows.length),
+    bridgeStep('other_unreferenced', 'Otros sin referencia', sumFinite(otherRows.map((row) => row.vst?.grossPnl)), otherRows.length),
+    bridgeStep('fees', 'Comisiones', fees, null),
+    bridgeStep('funding', 'Funding', funding, null)
+  ];
+  const grossSteps = steps.filter((step) => !['fees', 'funding'].includes(step.key));
+  const reconstructedGross = roundMoney(replicaPnl + sumFinite(grossSteps.map((step) => step.value)));
+  const observedNet = roundMoney(observedGross + fees + funding);
+  const reconstructedNet = roundMoney(reconstructedGross + fees + funding);
+  const residual = roundMoney(observedNet - reconstructedNet);
+
+  return {
+    replicaPnl,
+    bingxGross: observedGross,
+    bingxFees: fees,
+    bingxFunding: funding,
+    bingxNet: observedNet,
+    reconstructedGross,
+    reconstructedNet,
+    residual,
+    reconciled: Math.abs(residual) <= 0.01,
+    counts: {
+      sheet: sheetRows.length,
+      matched: matchedRows.length,
+      missingExecution: missingRows.length,
+      sheetWithoutResult: unresolvedSheetRows.length,
+      outsideCoverage: outsideCoverageRows.length,
+      extras: extraRows.length,
+      unlinkedCloses: unlinkedCloseRows.length,
+      otherUnreferenced: otherRows.length
+    },
+    steps
+  };
+}
+
+function bridgeStep(key, label, value, count) {
+  return {
+    key,
+    label,
+    value: roundMoney(value),
+    count: count !== null && count !== undefined && Number.isFinite(Number(count))
+      ? Number(count)
+      : null
+  };
+}
+
+function hasReplicaGrossPnl(row = {}) {
+  return nullableNumber(row?.vst?.grossPnl) !== null;
+}
+
 function nullableNumber(value) {
   if (value === null || value === undefined || value === '') {
     return null;

@@ -389,6 +389,8 @@ GET /api/replica-audit
 GET /api/price-feed
 ```
 
+`GET /api/replica-audit` devuelve, además del detalle por operación, `summary.gapBridge`. Este bloque forma una identidad contable desde la réplica teórica hasta el neto BingX y conserva por separado las operaciones posteriores a la cobertura de la hoja. La UI lo representa como un waterfall de Plotly; no interviene en la ejecución de señales.
+
 ## Eventos SSE
 
 La UI escucha:

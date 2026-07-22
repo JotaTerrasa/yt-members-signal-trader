@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -239,6 +239,49 @@ test('infiere un stop histórico cuando el cierre genérico coincide con el SL',
     closePrice: 1860,
     grossPnl: -13.8
   }), { kind: 'other', source: 'exchange_position_closed' });
+});
+
+test('el puente contable reconcilia réplica, incidencias, costes y neto BingX', () => {
+  const bridge = buildReplicaGapBridge({
+    rows: [
+      { sheet: {}, replica: { pnl: 10 }, vst: { grossPnl: 7 }, cause: 'Diferencia de ejecución' },
+      { sheet: {}, replica: { pnl: -2 }, vst: { grossPnl: null }, cause: 'No ejecutada en VST' },
+      { sheet: null, replica: { pnl: null }, vst: { grossPnl: 3 }, cause: 'Fuera de cobertura de la hoja' },
+      { sheet: null, replica: { pnl: null }, vst: { grossPnl: -1 }, cause: 'Extra en VST' },
+      { sheet: null, replica: { pnl: null }, vst: { grossPnl: -4 }, cause: 'Cierre sin apertura enlazada' },
+      { sheet: null, replica: { pnl: null }, vst: { grossPnl: 2 }, cause: 'Sin clasificar' }
+    ],
+    bingxFees: -1.5,
+    bingxFunding: -0.5
+  });
+
+  assert.equal(bridge.replicaPnl, 8);
+  assert.equal(bridge.bingxGross, 7);
+  assert.equal(bridge.bingxNet, 5);
+  assert.equal(bridge.residual, 0);
+  assert.equal(bridge.reconciled, true);
+  assert.deepEqual(bridge.counts, {
+    sheet: 2,
+    matched: 1,
+    missingExecution: 1,
+    sheetWithoutResult: 0,
+    outsideCoverage: 1,
+    extras: 1,
+    unlinkedCloses: 1,
+    otherUnreferenced: 1
+  });
+  assert.deepEqual(Object.fromEntries(bridge.steps.map((step) => [step.key, step.value])), {
+    matched_gap: -3,
+    missing_execution: 2,
+    sheet_without_result: 0,
+    outside_coverage: 3,
+    extra_execution: -1,
+    unlinked_close: -4,
+    other_unreferenced: 2,
+    fees: -1.5,
+    funding: -0.5
+  });
+  assert.equal(bridge.steps.find((step) => step.key === 'fees').count, null);
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

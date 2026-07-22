@@ -84,6 +84,7 @@ const report = {
     issueCounts: summary.issueCounts || {},
     signAnalysis: summary.signAnalysis || {},
     fillQuality: summary.fillQuality || {},
+    gapBridge: summary.gapBridge || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -282,6 +283,13 @@ function buildFindings(report) {
       detail: `${report.replica.signAnalysis.costFlip} operaciones coincidieron con la hoja en bruto, pero comisiones y funding convirtieron la ganancia VST en pérdida neta.`
     });
   }
+  if (report.replica?.gapBridge?.reconciled === false) {
+    findings.push({
+      severity: 'critical',
+      code: 'gap_bridge_unreconciled',
+      detail: `El puente contable deja un residual de ${money(report.replica.gapBridge.residual)} VST.`
+    });
+  }
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
     const missingSheetOperations = report.replica.issueCounts['No ejecutada en VST'];
     findings.push({
@@ -420,6 +428,10 @@ function renderMarkdown(report) {
     `- Stops divergentes en posiciones agregadas: ${r.stopAnalysis?.aggregatedDivergent ?? 0}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
     '',
+    '## Puente contable',
+    '',
+    ...renderGapBridgeLines(r.gapBridge),
+    '',
     '## Cohorte posterior a las mejoras',
     '',
     ...renderCohortLines(report.cohort, report.runtime.signalCoverage),
@@ -448,6 +460,25 @@ function renderMarkdown(report) {
   return lines.join('\n');
 }
 
+function renderGapBridgeLines(bridge) {
+  if (!bridge || !Array.isArray(bridge.steps)) {
+    return ['- Sin puente disponible.'];
+  }
+  const stepLines = bridge.steps
+    .filter((step) => Math.abs(Number(step.value || 0)) > 0.0000001 || Number(step.count || 0) > 0)
+    .map((step) => {
+      const count = step.count !== null && step.count !== undefined ? ` (${step.count} operaciones)` : '';
+      return `- ${step.label}${count}: ${money(step.value)} VST`;
+    });
+  return [
+    `- Réplica teórica inicial: ${money(bridge.replicaPnl)} VST`,
+    ...stepLines,
+    `- Bruto BingX reconstruido: ${money(bridge.reconstructedGross)} VST`,
+    `- Neto BingX reconstruido: ${money(bridge.reconstructedNet)} VST`,
+    `- Residual: ${money(bridge.residual)} VST (${bridge.reconciled ? 'reconciliado' : 'revisar'})`
+  ];
+}
+
 function pickCohortSummary(summary = {}) {
   return {
     sheetRows: summary.sheetRows || 0,
@@ -464,6 +495,7 @@ function pickCohortSummary(summary = {}) {
     issueCounts: summary.issueCounts || {},
     signAnalysis: summary.signAnalysis || {},
     fillQuality: summary.fillQuality || {},
+    gapBridge: summary.gapBridge || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,

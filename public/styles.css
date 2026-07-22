@@ -2785,6 +2785,85 @@ summary.dashboard-section-title {
   gap: 8px;
 }
 
+.replica-gap-panel {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 14px 0 4px;
+  border-top: 1px solid var(--line);
+}
+
+.replica-gap-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.replica-gap-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.replica-gap-heading span:not(.ledger-status) {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.replica-gap-heading strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.replica-gap-chart {
+  width: 100%;
+  min-width: 0;
+  min-height: 370px;
+}
+
+.replica-gap-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.replica-gap-facts > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.replica-gap-facts > div:last-child {
+  border-right: 0;
+}
+
+.replica-gap-facts span,
+.replica-gap-facts small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.replica-gap-facts strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.replica-gap-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
 .replica-issue-strip {
   display: flex;
   flex-wrap: wrap;

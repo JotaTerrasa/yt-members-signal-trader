@@ -4140,6 +4140,7 @@ function renderReplicaControlPreservingScroll(audit) {
     left: previous.scrollLeft
   } : null;
   elements.replicaControl.innerHTML = renderReplicaAudit(audit);
+  requestAnimationFrame(() => renderReplicaGapWaterfall('replica-gap-waterfall', audit?.summary?.gapBridge));
   if (!scroll) {
     return;
   }
@@ -4392,6 +4393,143 @@ function renderReplicaMetric(label, value, detail, className = '') {
   `;
 }
 
+function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
+  if (!bridge || !Array.isArray(bridge.steps)) {
+    return '';
+  }
+  const steps = Object.fromEntries(bridge.steps.map((step) => [step.key, step]));
+  const costs = Number(bridge.bingxFees || 0) + Number(bridge.bingxFunding || 0);
+  const outsideCoverage = Number(bridge.counts?.outsideCoverage || referenceCoverage.outsideCoverageRows || 0);
+  const status = bridge.reconciled
+    ? 'Cuadra al céntimo'
+    : `Residual ${formatMoney(bridge.residual, 'VST')}`;
+  const coverageNote = referenceCoverage.stale
+    ? `${outsideCoverage} operaciones posteriores a la hoja se muestran como resultado sin referencia y no como diferencia de estrategia.`
+    : 'La hoja cubre toda la ventana temporal utilizada por el puente.';
+  const fact = (key, label) => {
+    const step = steps[key] || {};
+    const count = step.count !== null && step.count !== undefined && Number.isFinite(Number(step.count))
+      ? `${Number(step.count)} ops.`
+      : '';
+    return `
+      <div>
+        <span>${escapeHtml(label)}</span>
+        <strong class="${amountClass(step.value)}">${escapeHtml(formatMoney(step.value || 0, 'VST'))}</strong>
+        <small>${escapeHtml(count)}</small>
+      </div>
+    `;
+  };
+
+  return `
+    <section class="replica-gap-panel" aria-labelledby="replica-gap-title">
+      <div class="replica-gap-heading">
+        <div>
+          <span>Puente contable</span>
+          <strong id="replica-gap-title">De réplica teórica a neto BingX</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(bridge.reconciled ? 'positive' : 'negative')}">${escapeHtml(status)}</span>
+      </div>
+      <div id="replica-gap-waterfall" class="replica-gap-chart" role="img" aria-label="Puente de resultado entre réplica teórica y neto BingX"></div>
+      <div class="replica-gap-facts">
+        ${fact('matched_gap', 'Emparejadas vs hoja')}
+        ${fact('missing_execution', 'No ejecutadas')}
+        ${fact('unlinked_close', 'Cierres no enlazados')}
+        <div>
+          <span>Comisiones + funding</span>
+          <strong class="${amountClass(costs)}">${escapeHtml(formatMoney(costs, 'VST'))}</strong>
+          <small>Coste observado</small>
+        </div>
+      </div>
+      <p class="replica-gap-note">${escapeHtml(coverageNote)}</p>
+    </section>
+  `;
+}
+
+function renderReplicaGapWaterfall(chartId, bridge) {
+  const chart = document.getElementById(chartId);
+  if (!chart || !bridge || !Array.isArray(bridge.steps)) {
+    return;
+  }
+  if (!window.Plotly?.react) {
+    chart.innerHTML = '<div class="pnl-chart-empty">Cargando puente contable...</div>';
+    loadPlotlyLibrary()
+      .then(() => renderReplicaGapWaterfall(chartId, bridge))
+      .catch(() => {
+        const current = document.getElementById(chartId);
+        if (current) {
+          current.innerHTML = '<div class="pnl-chart-empty">Plotly no está disponible.</div>';
+        }
+      });
+    return;
+  }
+
+  const steps = bridge.steps.filter((step) => (
+    Math.abs(Number(step.value || 0)) > 0.0000001 || Number(step.count || 0) > 0
+  ));
+  const labels = ['Réplica teórica', ...steps.map((step) => step.label), 'BingX neto'];
+  const values = [Number(bridge.replicaPnl || 0), ...steps.map((step) => Number(step.value || 0)), Number(bridge.bingxNet || 0)];
+  const measure = ['absolute', ...steps.map(() => 'relative'), 'total'];
+  const compact = chart.clientWidth < 640;
+  const trace = {
+    type: 'waterfall',
+    orientation: compact ? 'h' : 'v',
+    ...(compact ? { x: values, y: labels } : { x: labels, y: values }),
+    measure,
+    customdata: values.map((value, index) => [labels[index], formatMoney(value, 'VST')]),
+    text: values.map((value) => formatMoney(value, 'VST')),
+    textposition: compact ? 'none' : 'outside',
+    textfont: { color: '#19373a', size: 10 },
+    cliponaxis: false,
+    connector: { line: { color: '#9eb8b5', width: 1 } },
+    increasing: { marker: { color: '#0f766e' } },
+    decreasing: { marker: { color: '#c43d36' } },
+    totals: { marker: { color: '#17383c' } },
+    hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>'
+  };
+  const layout = {
+    autosize: true,
+    height: compact ? 470 : 370,
+    margin: compact
+      ? { l: 132, r: 38, t: 18, b: 44 }
+      : { l: 54, r: 20, t: 24, b: 96 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    showlegend: false,
+    font: { family: 'Inter, system-ui, sans-serif', color: '#19373a', size: 11 },
+    xaxis: {
+      automargin: true,
+      fixedrange: true,
+      tickangle: compact ? 0 : -24,
+      tickfont: { color: '#526a6d', size: 10 },
+      ...(compact ? {
+        gridcolor: '#dce8e6',
+        zeroline: true,
+        zerolinecolor: '#78908f',
+        zerolinewidth: 1,
+        title: { text: 'VST', font: { size: 10, color: '#526a6d' } }
+      } : {})
+    },
+    yaxis: {
+      automargin: true,
+      fixedrange: true,
+      tickfont: { color: '#526a6d', size: compact ? 9 : 10 },
+      ...(compact ? {} : {
+        gridcolor: '#dce8e6',
+        zeroline: true,
+        zerolinecolor: '#78908f',
+        zerolinewidth: 1,
+        title: { text: 'VST', font: { size: 10, color: '#526a6d' } }
+      })
+    }
+  };
+  window.Plotly.react(chart, [trace], layout, {
+    responsive: true,
+    displaylogo: false,
+    displayModeBar: false,
+    scrollZoom: false
+  });
+}
+
 function renderReplicaAudit(audit = appState.replicaAudit) {
   if (!audit) {
     return `
@@ -4429,6 +4567,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const stopAnalysis = summary.stopAnalysis || {};
   const signAnalysis = summary.signAnalysis || {};
   const fillQuality = summary.fillQuality || {};
+  const gapBridge = summary.gapBridge || null;
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
@@ -4464,6 +4603,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Ejecución de entrada', `${Number(fillQuality.entryAboveTolerance || 0)}/${Number(fillQuality.entryMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.entryAverageAdversePercent)}`, Number(fillQuality.entryAboveTolerance || 0) ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
       </div>
+      ${renderReplicaGapBridge(gapBridge, referenceCoverage)}
       ${unprocessedCloseRows ? `
         <p class="notice replica-audit-notice">
           <strong>Incidencia histórica corregida.</strong>

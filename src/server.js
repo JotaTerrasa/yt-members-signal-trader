@@ -20,7 +20,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4797,6 +4797,7 @@ function summarizeReplicaAudit({
     costFlip: Number(issueCounts['Ganancia absorbida por costes'] || 0)
   };
   const fillQuality = summarizeReplicaFillQuality(rows);
+  const gapBridge = buildReplicaGapBridge({ rows, bingxFees, bingxFunding });
   const missingReasonCounts = rows
     .filter((row) => row.cause === 'No ejecutada en VST')
     .reduce((totals, row) => {
@@ -4856,6 +4857,7 @@ function summarizeReplicaAudit({
     issueCounts,
     signAnalysis,
     fillQuality,
+    gapBridge,
     missingReasonCounts,
     stopAnalysis,
     unprocessedCloseRows: unprocessedCloseRows.length,
