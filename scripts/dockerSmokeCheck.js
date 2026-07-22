@@ -35,6 +35,11 @@ async function main() {
     removeContainer(container);
 
     const secondHealth = await startAndWait({ container, volumes, image, port, timeoutMs });
+    if (!firstHealth.runtime?.id
+      || !secondHealth.runtime?.id
+      || firstHealth.runtime.id === secondHealth.runtime.id) {
+      throw new Error('La identidad de instancia no cambia al recrear el contenedor.');
+    }
     const probes = readProbes(container);
     const uid = runDocker(['exec', container, 'id', '-u'], { capture: true });
 
@@ -44,6 +49,7 @@ async function main() {
       port,
       firstHealth: firstHealth.health?.level || 'ok',
       secondHealth: secondHealth.health?.level || 'ok',
+      runtimeRenewed: true,
       persistedVolumes: probes.length,
       uid
     }, null, 2));

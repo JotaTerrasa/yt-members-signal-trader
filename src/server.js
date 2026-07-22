@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
@@ -86,6 +87,10 @@ const BINGX_CLOCK_POLL_MS = 5 * 60 * 1000;
 const BINGX_CLOCK_STALE_MS = 15 * 60 * 1000;
 const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 const SSE_RETRY_MS = 3_000;
+const serverRuntime = Object.freeze({
+  id: randomUUID(),
+  startedAt: new Date().toISOString()
+});
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -1447,7 +1452,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-      return sendJson(response, { ok: true, health: buildHealth() });
+      return sendJson(response, { ok: true, runtime: serverRuntime, health: buildHealth() });
     }
 
     if (requestUrl.pathname === '/api/admin/restart' && request.method === 'POST') {
@@ -2249,6 +2254,7 @@ function currentState() {
   });
   return {
     ...state,
+    runtime: serverRuntime,
     browserOpen: scraper.isBrowserOpen,
     running: scraper.running,
     monitor: configStore.getMonitor(),

@@ -269,6 +269,7 @@ const REALTIME_STALE_MS = 45 * 1000;
 const REALTIME_WATCHDOG_INTERVAL_MS = 5 * 1000;
 const REALTIME_RECONNECT_BASE_MS = 1000;
 const REALTIME_RECONNECT_MAX_MS = 15 * 1000;
+const RUNTIME_STORAGE_KEY = 'futures-magician-runtime-id';
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
@@ -282,6 +283,7 @@ let realtimeWatchdogTimer = null;
 let realtimeReconnectTimer = null;
 let realtimeReconnectAttempts = 0;
 let realtimeLastActivityAt = 0;
+document.documentElement.dataset.uiLoadedAt = new Date().toISOString();
 
 const appState = {
   state: null,
@@ -793,6 +795,9 @@ function bindEvents() {
 
 async function loadState() {
   const state = await fetchJson('/api/state');
+  if (syncRuntimeInstance(state)) {
+    return;
+  }
   appState.state = state;
   appState.logs = state.logs || appState.logs;
   appState.portfolio = state.portfolio || appState.portfolio;
@@ -1147,7 +1152,11 @@ function connectEvents() {
 
   source.addEventListener('state', (event) => {
     recordRealtimeActivity(source, { render: false });
-    appState.state = JSON.parse(event.data);
+    const nextState = JSON.parse(event.data);
+    if (syncRuntimeInstance(nextState)) {
+      return;
+    }
+    appState.state = nextState;
     appState.logs = appState.state.logs || appState.logs;
     appState.trades = appState.state.trades || appState.trades;
     appState.exchangeSafety = appState.state.exchangeSafety || appState.exchangeSafety;
@@ -1274,6 +1283,26 @@ function recordRealtimeActivity(source, { render = true } = {}) {
   if (render || connectionChanged) {
     renderState();
   }
+}
+
+function syncRuntimeInstance(nextState) {
+  const runtimeId = String(nextState?.runtime?.id || '').trim();
+  if (!runtimeId) {
+    return false;
+  }
+
+  document.documentElement.dataset.runtimeId = runtimeId.slice(0, 8);
+  try {
+    const previousRuntimeId = window.sessionStorage.getItem(RUNTIME_STORAGE_KEY);
+    window.sessionStorage.setItem(RUNTIME_STORAGE_KEY, runtimeId);
+    if (previousRuntimeId && previousRuntimeId !== runtimeId) {
+      window.location.reload();
+      return true;
+    }
+  } catch {
+    // La sincronizacion SSE sigue funcionando aunque el navegador bloquee sessionStorage.
+  }
+  return false;
 }
 
 function markRealtimeDisconnected() {

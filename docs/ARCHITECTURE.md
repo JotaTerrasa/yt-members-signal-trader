@@ -454,6 +454,8 @@ Los eventos `state` se envían como snapshot completo de `currentState()`. La UI
 
 El servidor envía `heartbeat` cada 15 segundos y declara `retry: 3000`, `Cache-Control: no-transform` y `X-Accel-Buffering: no` para que proxies y túneles no retengan el flujo. El frontend considera congelado un canal sin actividad durante 45 segundos, lo cierra y lo recrea con esperas de 1, 2, 4, 8 y 15 segundos. El indicador superior cambia a `Reconectando panel` durante el corte y vuelve al estado operativo al recibir el siguiente evento. Este supervisor solo mantiene actualizada la interfaz; el monitor y la ejecución residen en el backend y continúan de forma independiente.
 
+Cada proceso genera además una identidad efímera `runtime.id`, visible en `/api/state`, `/api/health` y el estado inicial SSE. El navegador conserva la última identidad únicamente durante la sesión de esa pestaña. Si tras una reconexión recibe otra distinta, actualiza la identidad y recarga el documento una sola vez; así un despliegue no deja HTML o JavaScript antiguos conectados a un backend nuevo. La recarga no cambia configuraciones, monitor, parser ni estado de órdenes.
+
 ## Ciclo de un item nuevo
 
 1. Scraper extrae posts de YouTube y mensajes de Telegram Web.
