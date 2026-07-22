@@ -26,6 +26,7 @@ import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
 import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
+import { formatSseEvent, formatSseRetry } from './sseTransport.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
 import { etagMatches, isCompressibleStatic, selectStaticEncoding, staticEtag } from './staticDelivery.js';
@@ -83,6 +84,8 @@ const ENTRY_QUOTE_HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const ENTRY_QUOTE_HISTORY_MAX_SYMBOLS = 24;
 const BINGX_CLOCK_POLL_MS = 5 * 60 * 1000;
 const BINGX_CLOCK_STALE_MS = 15 * 60 * 1000;
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+const SSE_RETRY_MS = 3_000;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -2122,6 +2125,11 @@ signalCoverageTimer = setInterval(() => {
   });
 }, SIGNAL_COVERAGE_CHECK_MS);
 signalCoverageTimer.unref();
+
+const sseHeartbeatTimer = setInterval(() => {
+  broadcast('heartbeat', { at: new Date().toISOString() });
+}, SSE_HEARTBEAT_INTERVAL_MS);
+sseHeartbeatTimer.unref();
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
@@ -4179,17 +4187,19 @@ async function notifyHealthRecovered(health = {}) {
 function handleEvents(response) {
   response.writeHead(200, {
     'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive'
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no'
   });
-  response.write(`event: state\ndata: ${JSON.stringify(currentState())}\n\n`);
+  response.write(formatSseRetry(SSE_RETRY_MS));
+  response.write(formatSseEvent('state', currentState()));
   clients.add(response);
   response.on('close', () => clients.delete(response));
 }
 
 function broadcast(event, payload) {
   const data = event === 'state' ? currentRealtimeState() : payload;
-  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const message = formatSseEvent(event, data);
   for (const client of clients) {
     if (client.destroyed || client.writableEnded) {
       clients.delete(client);

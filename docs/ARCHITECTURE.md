@@ -448,8 +448,11 @@ La UI escucha:
 - `portfolio`
 - `trade`
 - `price`
+- `heartbeat`
 
 Los eventos `state` se envían como snapshot completo de `currentState()`. La UI los usa para mantener sincronizados paneles derivados como `closeGuardRetryQueue`, PnL, monitor, Telegram Web y estado BingX aunque el origen del broadcast haya pasado un payload parcial.
+
+El servidor envía `heartbeat` cada 15 segundos y declara `retry: 3000`, `Cache-Control: no-transform` y `X-Accel-Buffering: no` para que proxies y túneles no retengan el flujo. El frontend considera congelado un canal sin actividad durante 45 segundos, lo cierra y lo recrea con esperas de 1, 2, 4, 8 y 15 segundos. El indicador superior cambia a `Reconectando panel` durante el corte y vuelve al estado operativo al recibir el siguiente evento. Este supervisor solo mantiene actualizada la interfaz; el monitor y la ejecución residen en el backend y continúan de forma independiente.
 
 ## Ciclo de un item nuevo
 

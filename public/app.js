@@ -265,6 +265,10 @@ const EXTERNAL_SHEET_PAGE_SIZE = 40;
 const REPLICA_AUDIT_PAGE_SIZE = 40;
 const PNL_REALTIME_RENDER_INTERVAL_MS = 250;
 const PNL_FULL_RENDER_INTERVAL_MS = 15 * 1000;
+const REALTIME_STALE_MS = 45 * 1000;
+const REALTIME_WATCHDOG_INTERVAL_MS = 5 * 1000;
+const REALTIME_RECONNECT_BASE_MS = 1000;
+const REALTIME_RECONNECT_MAX_MS = 15 * 1000;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
@@ -273,6 +277,11 @@ let referenceRefreshTimer = null;
 let pnlRealtimeRenderTimer = null;
 let pnlRealtimeRenderFrame = null;
 let pnlDeferredFullRenderTimer = null;
+let realtimeEventSource = null;
+let realtimeWatchdogTimer = null;
+let realtimeReconnectTimer = null;
+let realtimeReconnectAttempts = 0;
+let realtimeLastActivityAt = 0;
 
 const appState = {
   state: null,
@@ -283,6 +292,8 @@ const appState = {
   postsVisibleLimit: POSTS_PAGE_SIZE,
   logsVisibleLimit: LOGS_PAGE_SIZE,
   eventsConnected: null,
+  eventsLastAt: null,
+  eventsReconnectAttempts: 0,
   telegram: null,
   telegramSource: null,
   bingx: null,
@@ -1109,19 +1120,33 @@ async function fetchReferenceJson(url) {
 }
 
 function connectEvents() {
+  if (realtimeReconnectTimer !== null) {
+    window.clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer = null;
+  }
+  realtimeEventSource?.close();
   const source = new EventSource('/api/events');
+  realtimeEventSource = source;
+  startRealtimeWatchdog();
 
   source.addEventListener('open', () => {
-    appState.eventsConnected = true;
-    renderState();
+    recordRealtimeActivity(source);
   });
 
   source.onerror = () => {
-    appState.eventsConnected = false;
-    renderState();
+    if (source !== realtimeEventSource) {
+      return;
+    }
+    markRealtimeDisconnected();
+    source.close();
+    realtimeEventSource = null;
+    scheduleRealtimeReconnect();
   };
 
+  source.addEventListener('heartbeat', () => recordRealtimeActivity(source));
+
   source.addEventListener('state', (event) => {
+    recordRealtimeActivity(source, { render: false });
     appState.state = JSON.parse(event.data);
     appState.logs = appState.state.logs || appState.logs;
     appState.trades = appState.state.trades || appState.trades;
@@ -1236,6 +1261,86 @@ function connectEvents() {
   });
 }
 
+function recordRealtimeActivity(source, { render = true } = {}) {
+  if (source !== realtimeEventSource) {
+    return;
+  }
+  const connectionChanged = appState.eventsConnected !== true || realtimeReconnectAttempts > 0;
+  realtimeLastActivityAt = Date.now();
+  realtimeReconnectAttempts = 0;
+  appState.eventsConnected = true;
+  appState.eventsLastAt = new Date(realtimeLastActivityAt).toISOString();
+  appState.eventsReconnectAttempts = 0;
+  if (render || connectionChanged) {
+    renderState();
+  }
+}
+
+function markRealtimeDisconnected() {
+  if (appState.eventsConnected !== false) {
+    appState.eventsConnected = false;
+    renderState();
+  }
+}
+
+function scheduleRealtimeReconnect({ immediate = false } = {}) {
+  if (realtimeReconnectTimer !== null) {
+    return;
+  }
+  const delay = immediate
+    ? 0
+    : Math.min(
+      REALTIME_RECONNECT_BASE_MS * (2 ** Math.min(realtimeReconnectAttempts, 4)),
+      REALTIME_RECONNECT_MAX_MS
+    );
+  realtimeReconnectAttempts += 1;
+  appState.eventsReconnectAttempts = realtimeReconnectAttempts;
+  if (appState.eventsConnected === false) {
+    renderState();
+  }
+  realtimeReconnectTimer = window.setTimeout(() => {
+    realtimeReconnectTimer = null;
+    connectEvents();
+  }, delay);
+}
+
+function restartRealtimeConnection({ immediate = false } = {}) {
+  realtimeEventSource?.close();
+  realtimeEventSource = null;
+  if (immediate && realtimeReconnectTimer !== null) {
+    window.clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer = null;
+  }
+  markRealtimeDisconnected();
+  scheduleRealtimeReconnect({ immediate });
+}
+
+function startRealtimeWatchdog() {
+  if (realtimeWatchdogTimer !== null) {
+    return;
+  }
+  realtimeWatchdogTimer = window.setInterval(() => {
+    if (document.hidden || appState.eventsConnected !== true || !realtimeEventSource) {
+      return;
+    }
+    if (Date.now() - realtimeLastActivityAt > REALTIME_STALE_MS) {
+      restartRealtimeConnection();
+    }
+  }, REALTIME_WATCHDOG_INTERVAL_MS);
+
+  window.addEventListener('online', () => {
+    if (appState.eventsConnected !== true) {
+      restartRealtimeConnection({ immediate: true });
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden
+      && (appState.eventsConnected !== true || Date.now() - realtimeLastActivityAt > REALTIME_STALE_MS)) {
+      restartRealtimeConnection({ immediate: true });
+    }
+  });
+}
+
 function renderState() {
   const state = appState.state || {};
   const running = Boolean(state.running);
@@ -1243,6 +1348,11 @@ function renderState() {
 
   elements.statusPill.classList.toggle('running', running);
   elements.statusPill.classList.toggle('reconnecting', running && appState.eventsConnected === false);
+  elements.statusPill.title = running && appState.eventsConnected === false
+    ? `Canal del panel reconectando${appState.eventsReconnectAttempts ? ` · intento ${appState.eventsReconnectAttempts}` : ''}`
+    : running && appState.eventsConnected === true
+      ? `Panel en tiempo real conectado${appState.eventsLastAt ? ` · pulso ${formatShortDateTime(appState.eventsLastAt)}` : ''}`
+      : '';
   elements.statusText.textContent = running && appState.eventsConnected === false
     ? 'Reconectando panel'
     : running ? phaseLabel(phase) : 'Inactivo';

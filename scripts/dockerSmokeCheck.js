@@ -30,6 +30,7 @@ async function main() {
     volumes.forEach((volume) => runDocker(['volume', 'create', volume], { capture: true }));
 
     const firstHealth = await startAndWait({ container, volumes, image, port, timeoutMs });
+    await verifyRealtimeStream(port);
     writeProbes(container);
     removeContainer(container);
 
@@ -133,6 +134,43 @@ async function verifyStaticAssets(port) {
     if (conditional.status !== 304) {
       throw new Error(`El recurso visual no responde 304 en Docker: ${asset} (HTTP ${conditional.status})`);
     }
+  }
+}
+
+async function verifyRealtimeStream(port) {
+  const signal = AbortSignal.timeout(20_000);
+  const response = await fetch(`http://127.0.0.1:${port}/api/events`, {
+    headers: { accept: 'text/event-stream' },
+    signal
+  });
+  const cacheControl = String(response.headers.get('cache-control') || '');
+  const buffering = String(response.headers.get('x-accel-buffering') || '');
+  if (!response.ok
+    || !String(response.headers.get('content-type') || '').includes('text/event-stream')
+    || !cacheControl.includes('no-transform')
+    || buffering.toLowerCase() !== 'no') {
+    throw new Error(`Canal SSE no preparado para streaming (HTTP ${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let content = '';
+  try {
+    while (!content.includes('event: heartbeat')) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      content += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  if (!content.includes('retry: 3000')
+    || !content.includes('event: state')
+    || !content.includes('event: heartbeat')) {
+    throw new Error('El canal SSE no entregó retry, estado inicial y heartbeat.');
   }
 }
 

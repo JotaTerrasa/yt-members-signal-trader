@@ -50,6 +50,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
 - Limita el trabajo visual de Posts, Eventos y las tablas extensas de Rendimiento mediante paginación progresiva. Los totales y diagnósticos siguen usando la muestra completa, mientras el canal SSE se mantiene compacto durante el monitor continuo.
+- Supervisa el canal SSE con heartbeat cada 15 segundos. Si el panel queda 45 segundos sin actividad, muestra la reconexión y crea un canal nuevo con espera exponencial, sin detener el monitor del backend.
 - Agrupa las ráfagas de precios de BingX y actualiza primero posiciones, riesgo y totales. Gráficos, histórico y auditoría se sincronizan después sin reconstruirse con cada tick.
 - Sirve Lucide desde la propia aplicación y carga Plotly localmente solo al abrir Rendimiento. Posts y Eventos arrancan sin la librería de gráficos y los CDN quedan como respaldo, no como dependencia del funcionamiento normal.
 - Negocia Brotli o gzip para HTML, CSS, JavaScript, JSON y SVG, y usa `ETag` para responder `304` cuando el archivo no ha cambiado. Esto reduce especialmente la carga de Rendimiento mediante móvil o túnel.
