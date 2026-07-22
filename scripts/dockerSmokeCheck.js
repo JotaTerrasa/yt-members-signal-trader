@@ -76,7 +76,9 @@ async function startAndWait({ container, volumes, image, port, timeoutMs }) {
   });
   args.push(image);
   runDocker(args, { capture: true });
-  return waitForHealth(port, timeoutMs);
+  const health = await waitForHealth(port, timeoutMs);
+  await verifyStaticAssets(port);
+  return health;
 }
 
 async function waitForHealth(port, timeoutMs) {
@@ -98,6 +100,21 @@ async function waitForHealth(port, timeoutMs) {
     await delay(500);
   }
   throw new Error(`El contenedor no alcanzo /api/health: ${lastError}`);
+}
+
+async function verifyStaticAssets(port) {
+  const assets = ['/vendor/lucide.min.js?v=1.25.0', '/vendor/plotly.min.js?v=2.35.2'];
+  for (const asset of assets) {
+    const response = await fetch(`http://127.0.0.1:${port}${asset}`, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(5_000)
+    });
+    const contentType = String(response.headers.get('content-type') || '');
+    const cacheControl = String(response.headers.get('cache-control') || '');
+    if (!response.ok || !contentType.includes('text/javascript') || !cacheControl.includes('immutable')) {
+      throw new Error(`Recurso visual no disponible en Docker: ${asset} (HTTP ${response.status})`);
+    }
+  }
 }
 
 function writeProbes(container) {

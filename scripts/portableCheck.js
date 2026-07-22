@@ -23,6 +23,15 @@ await check('package-lock.json', async () => {
   return 'presente';
 });
 
+await check('Dependencias visuales locales', async () => {
+  const assets = [
+    resolve(rootDir, 'node_modules', 'lucide', 'dist', 'umd', 'lucide.min.js'),
+    resolve(rootDir, 'node_modules', 'plotly.js-dist-min', 'plotly.min.js')
+  ];
+  await Promise.all(assets.map((asset) => access(asset, constants.R_OK)));
+  return 'Lucide 1.25.0 y Plotly 2.35.2';
+});
+
 await check('Chromium de Playwright', async () => {
   const executable = chromium.executablePath();
   await access(executable, constants.X_OK).catch(async () => access(executable, constants.R_OK));

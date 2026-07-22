@@ -252,9 +252,9 @@ const elements = {
   clientError: document.querySelector('#client-error')
 };
 
-const PLOTLY_CDN_SOURCES = [
+const PLOTLY_SCRIPT_SOURCES = [
+  '/vendor/plotly.min.js?v=2.35.2',
   'https://cdn.plot.ly/plotly-2.35.2.min.js',
-  'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js',
   'https://unpkg.com/plotly.js-dist-min@2.35.2/plotly.min.js'
 ];
 let plotlyLoadPromise = null;
@@ -3323,7 +3323,7 @@ function loadPlotlyLibrary() {
     return plotlyLoadPromise;
   }
 
-  plotlyLoadPromise = PLOTLY_CDN_SOURCES
+  plotlyLoadPromise = PLOTLY_SCRIPT_SOURCES
     .reduce((chain, src) => chain.catch(() => loadPlotlyScript(src)), Promise.reject(new Error('plotly_pending')))
     .then(() => {
       if (!window.Plotly?.react) {
@@ -3341,7 +3341,8 @@ function loadPlotlyLibrary() {
 
 function loadPlotlyScript(src) {
   return new Promise((resolve, reject) => {
-    const existing = Array.from(document.scripts).find((script) => script.src === src);
+    const normalizedSrc = new URL(src, document.baseURI).href;
+    const existing = Array.from(document.scripts).find((script) => script.src === normalizedSrc);
     if (existing?.dataset.plotlyLoaded === 'true' && window.Plotly?.react) {
       resolve();
       return;
@@ -3377,7 +3378,7 @@ function loadPlotlyScript(src) {
     };
 
     if (!existing) {
-      script.src = src;
+      script.src = normalizedSrc;
       script.async = true;
       script.dataset.plotlyDynamic = 'true';
       document.head.appendChild(script);

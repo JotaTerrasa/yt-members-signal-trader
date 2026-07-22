@@ -35,6 +35,10 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const execFileAsync = promisify(execFile);
 const rootDir = resolve(__dirname, '..');
 const publicDir = join(rootDir, 'public');
+const vendorAssets = new Map([
+  ['/vendor/lucide.min.js', join(rootDir, 'node_modules', 'lucide', 'dist', 'umd', 'lucide.min.js')],
+  ['/vendor/plotly.min.js', join(rootDir, 'node_modules', 'plotly.js-dist-min', 'plotly.min.js')]
+]);
 const dataDir = join(rootDir, '.data');
 const backupDir = join(dataDir, 'backups');
 const profileDir = join(rootDir, '.yt-profile');
@@ -4226,11 +4230,16 @@ function sendJson(response, payload, status = 200) {
 }
 
 async function serveStatic(pathname, response) {
-  const decoded = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
-  const filePath = resolve(publicDir, `.${decoded}`);
-  if (!filePath.startsWith(publicDir)) {
-    response.writeHead(403);
-    return response.end('Forbidden');
+  const vendorFilePath = vendorAssets.get(pathname);
+  let filePath = vendorFilePath;
+
+  if (!filePath) {
+    const decoded = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
+    filePath = resolve(publicDir, `.${decoded}`);
+    if (!filePath.startsWith(publicDir)) {
+      response.writeHead(403);
+      return response.end('Forbidden');
+    }
   }
 
   const info = await stat(filePath).catch(() => null);
@@ -4243,7 +4252,11 @@ async function serveStatic(pathname, response) {
   const stream = createReadStream(filePath);
   response.writeHead(200, {
     'content-type': mimeType(extension),
-    'cache-control': extension === '.html' ? 'no-store' : 'no-cache'
+    'cache-control': vendorFilePath
+      ? 'public, max-age=31536000, immutable'
+      : extension === '.html'
+        ? 'no-store'
+        : 'no-cache'
   });
   stream.pipe(response);
 }

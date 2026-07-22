@@ -29,7 +29,9 @@
     "windows:tasks": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/registerWindowsTasks.ps1"
   },
   "dependencies": {
+    "lucide": "1.25.0",
     "playwright": "^1.60.0",
+    "plotly.js-dist-min": "2.35.2",
     "ws": "^8.20.1"
   }
 }
