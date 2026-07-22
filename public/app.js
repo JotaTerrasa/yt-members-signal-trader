@@ -4140,7 +4140,10 @@ function renderReplicaControlPreservingScroll(audit) {
     left: previous.scrollLeft
   } : null;
   elements.replicaControl.innerHTML = renderReplicaAudit(audit);
-  requestAnimationFrame(() => renderReplicaGapWaterfall('replica-gap-waterfall', audit?.summary?.gapBridge));
+  requestAnimationFrame(() => {
+    renderReplicaGapWaterfall('replica-gap-waterfall', audit?.summary?.gapBridge);
+    renderMatchedGapWaterfall('replica-matched-gap-waterfall', audit?.summary?.matchedGapAttribution);
+  });
   if (!scroll) {
     return;
   }
@@ -4445,7 +4448,76 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
   `;
 }
 
-function renderReplicaGapWaterfall(chartId, bridge) {
+function renderMatchedGapAttribution(attribution) {
+  if (!attribution || !Array.isArray(attribution.steps)) {
+    return '';
+  }
+  const steps = Object.fromEntries(attribution.steps.map((step) => [step.key, step]));
+  const status = attribution.reconciled
+    ? 'Explicado al céntimo'
+    : `Residual ${formatMoney(attribution.residual, 'VST')}`;
+  const stopGroup = (attribution.byCloseKind || []).find((group) => group.key === 'stop');
+  const fact = (key, label, detail) => {
+    const step = steps[key] || {};
+    return `
+      <div>
+        <span>${escapeHtml(label)}</span>
+        <strong class="${amountClass(step.value)}">${escapeHtml(formatMoney(step.value || 0, 'VST'))}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </div>
+    `;
+  };
+  const symbols = (attribution.bySymbol || []).map((group) => `
+    <div class="replica-attribution-symbol">
+      <div>
+        <strong>${escapeHtml(group.key)}</strong>
+        <span>${escapeHtml(`${group.rows || 0} ops.`)}</span>
+      </div>
+      <strong class="${amountClass(group.gap)}">${escapeHtml(formatMoney(group.gap || 0, 'VST'))}</strong>
+      <small>${escapeHtml(`Entrada ${formatMoney(group.entryImpact || 0, 'VST')} · Salida ${formatMoney(group.exitImpact || 0, 'VST')}`)}</small>
+    </div>
+  `).join('');
+
+  return `
+    <section class="replica-gap-panel replica-matched-gap-panel" aria-labelledby="replica-matched-gap-title">
+      <div class="replica-gap-heading">
+        <div>
+          <span>Diagnóstico de ejecución</span>
+          <strong id="replica-matched-gap-title">Qué explica la diferencia en operaciones emparejadas</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(attribution.reconciled ? 'positive' : 'negative')}">${escapeHtml(status)}</span>
+      </div>
+      <div id="replica-matched-gap-waterfall" class="replica-gap-chart" role="img" aria-label="Desglose de la diferencia entre operaciones emparejadas"></div>
+      <div class="replica-gap-facts">
+        ${fact('entry_execution', 'Diferencia de entrada', `${attribution.counts?.decomposable || 0} ops. medibles`)}
+        ${fact('exit_execution', 'Diferencia de salida', `${attribution.counts?.decomposable || 0} ops. medibles`)}
+        ${fact('size_and_fills', 'Cantidad y fills', 'Residual tras comparar precios')}
+        <div>
+          <span>Gap en operaciones con stop</span>
+          <strong class="${amountClass(stopGroup?.gap)}">${escapeHtml(formatMoney(stopGroup?.gap || 0, 'VST'))}</strong>
+          <small>${escapeHtml(`${stopGroup?.rows || 0} ops. emparejadas`)}</small>
+        </div>
+      </div>
+      <div class="replica-attribution-symbols">${symbols}</div>
+      <p class="replica-gap-note">La atribución compara precios de la hoja con fills confirmados por BingX antes de comisiones. Entrada y salida se reparten simétricamente para que el resultado no dependa del orden del cálculo.</p>
+    </section>
+  `;
+}
+
+function renderMatchedGapWaterfall(chartId, attribution) {
+  if (!attribution) {
+    return;
+  }
+  renderReplicaGapWaterfall(chartId, {
+    ...attribution,
+    bingxNet: attribution.bingxGross
+  }, {
+    start: 'Réplica emparejada',
+    end: 'BingX bruto emparejado'
+  });
+}
+
+function renderReplicaGapWaterfall(chartId, bridge, labels = {}) {
   const chart = document.getElementById(chartId);
   if (!chart || !bridge || !Array.isArray(bridge.steps)) {
     return;
@@ -4453,7 +4525,7 @@ function renderReplicaGapWaterfall(chartId, bridge) {
   if (!window.Plotly?.react) {
     chart.innerHTML = '<div class="pnl-chart-empty">Cargando puente contable...</div>';
     loadPlotlyLibrary()
-      .then(() => renderReplicaGapWaterfall(chartId, bridge))
+      .then(() => renderReplicaGapWaterfall(chartId, bridge, labels))
       .catch(() => {
         const current = document.getElementById(chartId);
         if (current) {
@@ -4466,16 +4538,16 @@ function renderReplicaGapWaterfall(chartId, bridge) {
   const steps = bridge.steps.filter((step) => (
     Math.abs(Number(step.value || 0)) > 0.0000001 || Number(step.count || 0) > 0
   ));
-  const labels = ['Réplica teórica', ...steps.map((step) => step.label), 'BingX neto'];
+  const axisLabels = [labels.start || 'Réplica teórica', ...steps.map((step) => step.label), labels.end || 'BingX neto'];
   const values = [Number(bridge.replicaPnl || 0), ...steps.map((step) => Number(step.value || 0)), Number(bridge.bingxNet || 0)];
   const measure = ['absolute', ...steps.map(() => 'relative'), 'total'];
   const compact = chart.clientWidth < 640;
   const trace = {
     type: 'waterfall',
     orientation: compact ? 'h' : 'v',
-    ...(compact ? { x: values, y: labels } : { x: labels, y: values }),
+    ...(compact ? { x: values, y: axisLabels } : { x: axisLabels, y: values }),
     measure,
-    customdata: values.map((value, index) => [labels[index], formatMoney(value, 'VST')]),
+    customdata: values.map((value, index) => [axisLabels[index], formatMoney(value, 'VST')]),
     text: values.map((value) => formatMoney(value, 'VST')),
     textposition: compact ? 'none' : 'outside',
     textfont: { color: '#19373a', size: 10 },
@@ -4568,6 +4640,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const signAnalysis = summary.signAnalysis || {};
   const fillQuality = summary.fillQuality || {};
   const gapBridge = summary.gapBridge || null;
+  const matchedGapAttribution = summary.matchedGapAttribution || null;
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
@@ -4604,6 +4677,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
       </div>
       ${renderReplicaGapBridge(gapBridge, referenceCoverage)}
+      ${renderMatchedGapAttribution(matchedGapAttribution)}
       ${unprocessedCloseRows ? `
         <p class="notice replica-audit-notice">
           <strong>Incidencia histórica corregida.</strong>

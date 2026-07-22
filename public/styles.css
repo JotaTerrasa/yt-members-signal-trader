@@ -2864,6 +2864,59 @@ summary.dashboard-section-title {
   line-height: 1.45;
 }
 
+.replica-matched-gap-panel {
+  margin-top: 4px;
+}
+
+.replica-attribution-symbols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.replica-attribution-symbol {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.replica-attribution-symbol:last-child {
+  border-right: 0;
+}
+
+.replica-attribution-symbol > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.replica-attribution-symbol > div strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.replica-attribution-symbol span,
+.replica-attribution-symbol small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.replica-attribution-symbol > strong {
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.replica-attribution-symbol > small {
+  overflow-wrap: anywhere;
+}
+
 .replica-issue-strip {
   display: flex;
   flex-wrap: wrap;
@@ -4951,5 +5004,26 @@ h1 {
   .real-lifecycle-row,
   .incident-item {
     grid-template-columns: 1fr;
+  }
+
+  .replica-gap-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .replica-gap-facts > div:nth-child(even) {
+    border-right: 0;
+  }
+
+  .replica-attribution-symbols {
+    grid-template-columns: 1fr;
+  }
+
+  .replica-attribution-symbol {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .replica-attribution-symbol:last-child {
+    border-bottom: 0;
   }
 }

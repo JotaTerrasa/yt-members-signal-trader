@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -282,6 +282,52 @@ test('el puente contable reconcilia réplica, incidencias, costes y neto BingX',
     funding: -0.5
   });
   assert.equal(bridge.steps.find((step) => step.key === 'fees').count, null);
+});
+
+test('descompone el gap emparejado entre entrada, salida, cantidad y evidencia incompleta', () => {
+  const attribution = buildMatchedGapAttribution([
+    {
+      id: 'BTC|1',
+      symbol: 'BTC-USDT',
+      direction: 'LONG',
+      sheet: { entry: 100, exit: 110 },
+      replica: { pnl: 2, notional: 10, leverage: 2 },
+      vst: { entry: 105, exit: 110, grossPnl: 0.9, closeKind: 'other' }
+    },
+    {
+      id: 'ETH|1',
+      symbol: 'ETH-USDT',
+      direction: 'SHORT',
+      sheet: { entry: 200, exit: 180 },
+      replica: { pnl: 2, notional: 10, leverage: 2 },
+      vst: { entry: 200, exit: 190, grossPnl: 1.1, closeKind: 'stop' }
+    },
+    {
+      id: 'SOL|1',
+      symbol: 'SOL-USDT',
+      direction: 'LONG',
+      sheet: { entry: 50, exit: 55 },
+      replica: { pnl: 1, notional: 10, leverage: 1 },
+      vst: { entry: null, exit: null, grossPnl: -1, closeKind: 'other' }
+    }
+  ]);
+
+  assert.equal(attribution.replicaPnl, 5);
+  assert.equal(attribution.bingxGross, 1);
+  assert.equal(attribution.gap, -4);
+  assert.equal(attribution.residual, 0);
+  assert.equal(attribution.reconciled, true);
+  assert.deepEqual(attribution.counts, { matched: 3, decomposable: 2, incomplete: 1 });
+  assert.deepEqual(Object.fromEntries(attribution.steps.map((step) => [step.key, step.value])), {
+    sheet_accounting: 0,
+    entry_execution: -1.04761905,
+    exit_execution: -1,
+    size_and_fills: 0.04761905,
+    insufficient_evidence: -2
+  });
+  assert.equal(attribution.bySymbol[0].key, 'SOL-USDT');
+  assert.equal(attribution.byCloseKind.find((group) => group.key === 'stop').gap, -0.9);
+  assert.equal(attribution.topRows[0].id, 'BTC|1');
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

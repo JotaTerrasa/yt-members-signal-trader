@@ -85,6 +85,7 @@ const report = {
     signAnalysis: summary.signAnalysis || {},
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
+    matchedGapAttribution: summary.matchedGapAttribution || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -290,6 +291,13 @@ function buildFindings(report) {
       detail: `El puente contable deja un residual de ${money(report.replica.gapBridge.residual)} VST.`
     });
   }
+  if (report.replica?.matchedGapAttribution?.reconciled === false) {
+    findings.push({
+      severity: 'critical',
+      code: 'matched_gap_unreconciled',
+      detail: `El desglose de operaciones emparejadas deja un residual de ${money(report.replica.matchedGapAttribution.residual)} VST.`
+    });
+  }
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
     const missingSheetOperations = report.replica.issueCounts['No ejecutada en VST'];
     findings.push({
@@ -432,6 +440,10 @@ function renderMarkdown(report) {
     '',
     ...renderGapBridgeLines(r.gapBridge),
     '',
+    '## Desglose del gap emparejado',
+    '',
+    ...renderMatchedGapAttributionLines(r.matchedGapAttribution),
+    '',
     '## Cohorte posterior a las mejoras',
     '',
     ...renderCohortLines(report.cohort, report.runtime.signalCoverage),
@@ -479,6 +491,26 @@ function renderGapBridgeLines(bridge) {
   ];
 }
 
+function renderMatchedGapAttributionLines(attribution) {
+  if (!attribution || !Array.isArray(attribution.steps)) {
+    return ['- Sin desglose disponible.'];
+  }
+  const stepLines = attribution.steps
+    .filter((step) => Math.abs(Number(step.value || 0)) > 0.0000001 || Number(step.count || 0) > 0)
+    .map((step) => `- ${step.label}: ${money(step.value)} VST`);
+  const symbolLines = (attribution.bySymbol || [])
+    .map((item) => `- ${item.key}: gap ${money(item.gap)} VST; entrada ${money(item.entryImpact)}; salida ${money(item.exitImpact)}; cantidad/fills ${money(item.sizeAndFillsImpact)}.`);
+  return [
+    `- Operaciones emparejadas / descomponibles: ${attribution.counts?.matched ?? 0} / ${attribution.counts?.decomposable ?? 0}`,
+    `- Réplica teórica emparejada: ${money(attribution.replicaPnl)} VST`,
+    ...stepLines,
+    `- Bruto BingX emparejado: ${money(attribution.bingxGross)} VST`,
+    `- Residual: ${money(attribution.residual)} VST (${attribution.reconciled ? 'reconciliado' : 'revisar'})`,
+    '- Por activo:',
+    ...symbolLines
+  ];
+}
+
 function pickCohortSummary(summary = {}) {
   return {
     sheetRows: summary.sheetRows || 0,
@@ -496,6 +528,7 @@ function pickCohortSummary(summary = {}) {
     signAnalysis: summary.signAnalysis || {},
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
+    matchedGapAttribution: summary.matchedGapAttribution || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,

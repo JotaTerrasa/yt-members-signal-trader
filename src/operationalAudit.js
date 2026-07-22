@@ -459,6 +459,194 @@ export function buildReplicaGapBridge({ rows = [], bingxFees = 0, bingxFunding =
   };
 }
 
+export function buildMatchedGapAttribution(rows = []) {
+  const matchedRows = (Array.isArray(rows) ? rows : []).filter((row) => (
+    Boolean(row?.sheet)
+    && nullableNumber(row?.replica?.pnl) !== null
+    && nullableNumber(row?.vst?.grossPnl) !== null
+  ));
+  const totals = {
+    replicaPnl: 0,
+    bingxGross: 0,
+    sheetAccounting: 0,
+    entryExecution: 0,
+    exitExecution: 0,
+    sizeAndFills: 0,
+    insufficientEvidence: 0
+  };
+  const bySymbol = new Map();
+  const byCloseKind = new Map();
+  const rowAttributions = [];
+  let decomposableRows = 0;
+
+  for (const row of matchedRows) {
+    const replicaPnl = Number(row.replica.pnl);
+    const bingxGross = Number(row.vst.grossPnl);
+    const gap = bingxGross - replicaPnl;
+    totals.replicaPnl += replicaPnl;
+    totals.bingxGross += bingxGross;
+
+    const attribution = matchedRowAttribution(row);
+    if (attribution) {
+      decomposableRows += 1;
+      totals.sheetAccounting += attribution.sheetAccounting;
+      totals.entryExecution += attribution.entryExecution;
+      totals.exitExecution += attribution.exitExecution;
+      totals.sizeAndFills += attribution.sizeAndFills;
+      rowAttributions.push({
+        id: row.id || null,
+        orderNumber: row.orderNumber ?? null,
+        symbol: row.symbol || '',
+        direction: row.direction || '',
+        replicaPnl: roundMoney(replicaPnl),
+        bingxGross: roundMoney(bingxGross),
+        gap: roundMoney(gap),
+        entryImpact: roundMoney(attribution.entryExecution),
+        exitImpact: roundMoney(attribution.exitExecution),
+        sizeAndFillsImpact: roundMoney(attribution.sizeAndFills),
+        sheetEntry: nullableNumber(row.sheet.entry),
+        bingxEntry: nullableNumber(row.vst.entry),
+        sheetExit: nullableNumber(row.sheet.exit),
+        bingxExit: nullableNumber(row.vst.exit),
+        closeKind: String(row.vst.closeKind || 'other')
+      });
+    } else {
+      totals.insufficientEvidence += gap;
+    }
+
+    addMatchedGapGroup(bySymbol, row.symbol || 'Sin activo', {
+      replicaPnl,
+      bingxGross,
+      gap,
+      attribution
+    });
+    addMatchedGapGroup(byCloseKind, String(row.vst.closeKind || 'other'), {
+      replicaPnl,
+      bingxGross,
+      gap,
+      attribution
+    });
+  }
+
+  const incompleteRows = matchedRows.length - decomposableRows;
+  const steps = [
+    bridgeStep('sheet_accounting', 'Contabilidad de la hoja', totals.sheetAccounting, decomposableRows),
+    bridgeStep('entry_execution', 'Diferencia de entrada', totals.entryExecution, decomposableRows),
+    bridgeStep('exit_execution', 'Diferencia de salida', totals.exitExecution, decomposableRows),
+    bridgeStep('size_and_fills', 'Cantidad y fills', totals.sizeAndFills, decomposableRows),
+    bridgeStep('insufficient_evidence', 'Evidencia incompleta', totals.insufficientEvidence, incompleteRows)
+  ];
+  const replicaPnl = roundMoney(totals.replicaPnl);
+  const bingxGross = roundMoney(totals.bingxGross);
+  const reconstructedGross = roundMoney(replicaPnl + sumFinite(steps.map((step) => step.value)));
+  const residual = roundMoney(bingxGross - reconstructedGross);
+
+  return {
+    replicaPnl,
+    bingxGross,
+    gap: roundMoney(bingxGross - replicaPnl),
+    reconstructedGross,
+    residual,
+    reconciled: Math.abs(residual) <= 0.01,
+    counts: {
+      matched: matchedRows.length,
+      decomposable: decomposableRows,
+      incomplete: incompleteRows
+    },
+    steps,
+    bySymbol: matchedGapGroups(bySymbol),
+    byCloseKind: matchedGapGroups(byCloseKind),
+    topRows: rowAttributions
+      .sort((left, right) => Math.abs(right.gap) - Math.abs(left.gap))
+      .slice(0, 8)
+  };
+}
+
+function matchedRowAttribution(row = {}) {
+  const sheetEntry = positiveNumber(row?.sheet?.entry);
+  const sheetExit = positiveNumber(row?.sheet?.exit);
+  const bingxEntry = positiveNumber(row?.vst?.entry);
+  const bingxExit = positiveNumber(row?.vst?.exit);
+  const notional = positiveNumber(row?.replica?.notional);
+  const leverage = positiveNumber(row?.replica?.leverage);
+  const replicaPnl = nullableNumber(row?.replica?.pnl);
+  const bingxGross = nullableNumber(row?.vst?.grossPnl);
+  if ([sheetEntry, sheetExit, bingxEntry, bingxExit, notional, leverage, replicaPnl, bingxGross].some((value) => value === null)) {
+    return null;
+  }
+
+  const context = { notional, leverage, direction: row.direction };
+  const sheetPrices = linearPositionPnl(context, sheetEntry, sheetExit);
+  const bingxEntrySheetExit = linearPositionPnl(context, bingxEntry, sheetExit);
+  const sheetEntryBingxExit = linearPositionPnl(context, sheetEntry, bingxExit);
+  const bingxPrices = linearPositionPnl(context, bingxEntry, bingxExit);
+
+  return {
+    sheetAccounting: sheetPrices - replicaPnl,
+    entryExecution: 0.5 * (
+      (bingxEntrySheetExit - sheetPrices)
+      + (bingxPrices - sheetEntryBingxExit)
+    ),
+    exitExecution: 0.5 * (
+      (sheetEntryBingxExit - sheetPrices)
+      + (bingxPrices - bingxEntrySheetExit)
+    ),
+    sizeAndFills: bingxGross - bingxPrices
+  };
+}
+
+function linearPositionPnl({ notional, leverage, direction }, entry, exit) {
+  const multiplier = String(direction || '').toUpperCase() === 'SHORT' ? -1 : 1;
+  return notional * leverage * multiplier * (exit - entry) / entry;
+}
+
+function addMatchedGapGroup(groups, key, { replicaPnl, bingxGross, gap, attribution }) {
+  if (!groups.has(key)) {
+    groups.set(key, {
+      key,
+      rows: 0,
+      decomposable: 0,
+      replicaPnl: 0,
+      bingxGross: 0,
+      gap: 0,
+      sheetAccountingImpact: 0,
+      entryImpact: 0,
+      exitImpact: 0,
+      sizeAndFillsImpact: 0,
+      incompleteImpact: 0
+    });
+  }
+  const group = groups.get(key);
+  group.rows += 1;
+  group.replicaPnl += replicaPnl;
+  group.bingxGross += bingxGross;
+  group.gap += gap;
+  if (attribution) {
+    group.decomposable += 1;
+    group.sheetAccountingImpact += attribution.sheetAccounting;
+    group.entryImpact += attribution.entryExecution;
+    group.exitImpact += attribution.exitExecution;
+    group.sizeAndFillsImpact += attribution.sizeAndFills;
+  } else {
+    group.incompleteImpact += gap;
+  }
+}
+
+function matchedGapGroups(groups) {
+  return [...groups.values()]
+    .map((group) => Object.fromEntries(Object.entries(group).map(([key, value]) => (
+      typeof value === 'number' && key !== 'rows' && key !== 'decomposable'
+        ? [key, roundMoney(value)]
+        : [key, value]
+    ))))
+    .sort((left, right) => Math.abs(Number(right.gap || 0)) - Math.abs(Number(left.gap || 0)));
+}
+
+function positiveNumber(value) {
+  const number = nullableNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
 function bridgeStep(key, label, value, count) {
   return {
     key,

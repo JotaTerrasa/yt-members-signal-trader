@@ -37,6 +37,10 @@ La auditoría distingue ahora el precio publicado del precio real de ejecución.
 
 El panel incorpora además un puente contable que reconcilia la réplica teórica con el neto observado. En el mismo corte parte de **457,8050 VST**, resta 432,6090 VST por la diferencia de las 132 operaciones emparejadas, resta 64,6145 VST por 19 operaciones no ejecutadas, suma 39,0905 VST de 25 operaciones posteriores a la cobertura de la hoja, suma 2,5445 VST de cuatro extras, resta 67,3342 VST de cinco cierres todavía sin apertura enlazada y resta 179,7983 VST de comisiones y funding. El resultado es **-244,9160 VST**, con residual contable cero. La hoja pública se comprobó directamente: contiene 151 operaciones y termina el 15 de julio; por ello las 25 posteriores se muestran como `Posteriores sin hoja`, no como una contradicción de estrategia.
 
+La bolsa de operaciones emparejadas también se descompone de forma exacta. Sus **393,1905 VST** teóricos pasan a **-39,4185 VST** brutos en BingX: la diferencia de entrada aporta **-188,8446 VST**, la diferencia de salida **-236,0674 VST** y cantidad, redondeos y fills residuales **-7,6970 VST**. La contabilidad publicada de la hoja coincide con el cálculo lineal escalado y no deja diferencia material. La atribución de entrada y salida es simétrica, por lo que ninguna de las dos absorbe artificialmente la interacción entre ambos precios. Este desglose usa las 132 operaciones con precios suficientes y reconcilia con residual cero.
+
+Por activo, el gap emparejado es **-171,6944 VST en ETH**, **-161,5703 VST en SOL**, **-70,4036 VST en BTC** y **-28,9407 VST en SUI**. Esta medición es anterior a comisiones: demuestra que el principal desalineamiento histórico está en los precios de entrada y, sobre todo, de salida; los costes se añaden después como una pérdida separada.
+
 Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. Cuando BingX guardó históricamente un cierre como `exchange_position_closed`, se infiere que fue un stop únicamente si no existe señal de cierre, el PnL es negativo y el precio ejecutado está en el SL o más allá. Con esta medición hay **27 de 35 stops comparables alineados**, tres con deslizamiento y cinco divergentes. Tres divergencias BTC estuvieron precedidas por cierres fallidos debido al error histórico `CLOSE_GUARD_MIN_NET_PNL is not defined`; una divergencia SOL procede del `CUERRE TOTAL` omitido del 5 de julio; y una divergencia ETH ejecutó el stop publicado en 1860 mientras la fila equivalente de la hoja terminó ganadora. Otros ocho stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
 
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
@@ -49,11 +53,15 @@ La línea base original usaba la instantánea de mercado previa al envío y, por
 
 La estimación usa exposición y diferencia de precio. Sirve para medir magnitud, pero no sustituye el PnL oficial de BingX.
 
+El desglose reconciliado frente a los precios finales de la hoja asigna **-188,8446 VST** a la diferencia de entrada en las operaciones emparejadas. Esta cifra no sustituye la métrica de slippage frente al mensaje: responde a una pregunta distinta, cuánto del gap final hoja/BingX queda explicado al cambiar el precio de entrada de la hoja por el fill de BingX.
+
 ### 2. Salidas tardías
 
 La línea base también comparaba la señal de cierre con un precio de marca, no con el precio ejecutado. Con el cierre reconstruido a partir del PnL realizado, 51 de 110 salidas comparables superaron el 0,15% de desviación adversa. El arrastre neto estimado asciende a 171,6368 VST.
 
 Esperar a que el precio volviera a la cifra escrita añadía una apuesta nueva que no formaba parte de la orden de cierre.
+
+El desglose reconciliado asigna **-236,0674 VST** a la diferencia de salida. Incluye tanto el precio ejecutado al recibir un cierre como las posiciones que alcanzaron un stop antes de que la operación equivalente de la hoja registrara otro resultado. Por eso es mayor que la métrica de slippage de cierres explícitos: mide toda la divergencia final de salida en las operaciones emparejadas.
 
 ### 3. Costes
 
