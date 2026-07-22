@@ -462,6 +462,8 @@ El arranque del frontend no usa una barrera `Promise.all`: conecta SSE primero y
 
 La carga de Rendimiento aplica el mismo aislamiento a `/api/historical-pnl`, `/api/bingx/pnl-sources`, `/api/replica-audit` y `/api/bingx/pnl`, con un máximo de 30 segundos por fuente. `Promise.allSettled` permite aplicar cada resultado disponible y conservar el último histórico válido. Por tanto, una caída de Google Sheet no impide actualizar VST/real, y un fallo de BingX no vacía la tabla externa. La tabla informa de la fecha de su última operación y calcula su retraso con un umbral de 24 horas; la hora de descarga queda solo como detalle. El refresco periódico conserva las cachés breves, mientras que el botón `Actualizar` añade `refresh=1` a las cuatro lecturas para omitirlas; el cooldown de BingX sigue vigente y las cargas concurrentes del mismo ledger comparten una única petición. La prueba Chromium fuerza un `503` de histórico, exige que las demás fuentes terminen, monta una hoja sintética para impedir que vuelva el visor `iframe` bloqueable de Google y comprueba el refresco forzado de todas las fuentes.
 
+`scripts/systemAudit.js` solicita también `/api/replica-audit` con `refresh=1`, de modo que el informe diario no hereda una lectura breve anterior del panel. El estado de salud publica cuánto tiempo lleva YouTube sin posts visibles y el umbral de gracia; la auditoría solo eleva ese caso a degradación cuando alcanza los 15 minutos, igual que la alerta de Telegram. Un monitor parado, obsoleto o con error sigue siendo crítico inmediatamente.
+
 ## Ciclo de un item nuevo
 
 1. Scraper extrae posts de YouTube y mensajes de Telegram Web.

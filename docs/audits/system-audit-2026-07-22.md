@@ -1,8 +1,8 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-22T18:55:00.407Z
+Generada: 2026-07-22T19:30:24.824Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T18:55:00.456Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:30:25.287Z
 
 ## Resumen ejecutivo
 
@@ -261,7 +261,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T18:55:00.456Z
 - Recarga Telegram: 30 s
 - Puerta de promoción: Bloqueada por fiabilidad
 - Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes
-- Reloj REST BingX: +648 ms de offset; RTT 209 ms; antigüedad 169.7 s; warn; solo observación
+- Reloj REST BingX: +695 ms de offset; RTT 271 ms; antigüedad 13.0 s; warn; solo observación
 
 ## Interpretación
 

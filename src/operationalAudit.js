@@ -2021,6 +2021,16 @@ export function monitorHealthFinding(health = {}) {
       detail: 'El monitor está parado, obsoleto o sin un estado verificable.'
     };
   }
+  const onlyNoVisiblePosts = Boolean(health.noVisiblePosts) && !health.stale && !health.lastError;
+  const noVisiblePostsSeconds = Number(health.noVisiblePostsSeconds);
+  const noVisiblePostsGraceSeconds = Number(health.noVisiblePostsGraceSeconds);
+  if (onlyNoVisiblePosts
+    && Number.isFinite(noVisiblePostsSeconds)
+    && Number.isFinite(noVisiblePostsGraceSeconds)
+    && noVisiblePostsGraceSeconds > 0
+    && noVisiblePostsSeconds < noVisiblePostsGraceSeconds) {
+    return null;
+  }
   if (level !== 'ok') {
     return {
       severity: 'warn',

@@ -4093,6 +4093,9 @@ function buildHealth() {
   const ageMs = Number.isFinite(lastRunTime) && lastRunTime > 0 ? Date.now() - lastRunTime : null;
   const stale = scraper.running && state.phase === 'live' && ageMs !== null && ageMs > staleMs;
   const noVisiblePosts = scraper.running && state.phase === 'live' && Number(state.visiblePosts || 0) === 0;
+  const noVisiblePostsSeconds = noVisiblePosts && noVisiblePostsStartedAt
+    ? Math.max(0, Math.round((Date.now() - noVisiblePostsStartedAt) / 1000))
+    : 0;
   const lastError = state.lastError || null;
   const level = stale || noVisiblePosts || lastError ? 'warn' : scraper.running ? 'ok' : 'idle';
 
@@ -4105,6 +4108,8 @@ function buildHealth() {
     stale,
     staleAfterSeconds: Math.round(staleMs / 1000),
     noVisiblePosts,
+    noVisiblePostsSeconds,
+    noVisiblePostsGraceSeconds: Math.round(NO_VISIBLE_POSTS_ALERT_GRACE_MS / 1000),
     visiblePosts: Number(state.visiblePosts || 0),
     scraper: scraper.diagnostics,
     lastError,

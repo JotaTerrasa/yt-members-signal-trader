@@ -17,7 +17,7 @@ await Promise.all([mkdir(reportDir, { recursive: true }), mkdir(dataReportDir, {
 const [postsData, eventsData, replicaPayload, operationalPayload, riskPayload, telegramSourcePayload, signalCoveragePayload, promotionGatePayload, eventFile] = await Promise.all([
   readJson(join(dataDir, 'posts.json'), { posts: [] }),
   readJson(join(dataDir, 'trade-events.json'), { events: [] }),
-  fetchJson(`/api/replica-audit?month=${encodeURIComponent(month)}`),
+  fetchJson(`/api/replica-audit?month=${encodeURIComponent(month)}&refresh=1`),
   fetchJson('/api/operational-status'),
   fetchJson('/api/risk'),
   fetchJson('/api/telegram-source'),
@@ -952,6 +952,8 @@ function pickHealth(health = {}) {
     visiblePosts: finite(health.visiblePosts),
     stale: Boolean(health.stale),
     noVisiblePosts: Boolean(health.noVisiblePosts),
+    noVisiblePostsSeconds: finite(health.noVisiblePostsSeconds),
+    noVisiblePostsGraceSeconds: finite(health.noVisiblePostsGraceSeconds),
     consecutiveEmptyReads: finite(health.scraper?.consecutiveEmptyReads),
     recoveryCount: finite(health.scraper?.recoveryCount),
     lastError: health.lastError || null

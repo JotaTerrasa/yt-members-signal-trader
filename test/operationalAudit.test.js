@@ -762,10 +762,31 @@ test('detecta un cierre parseable guardado sin evento de ejecución', () => {
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {
   const transient = monitorHealthFinding({ level: 'warn', running: true, stale: false });
+  const withinGrace = monitorHealthFinding({
+    level: 'warn',
+    running: true,
+    stale: false,
+    noVisiblePosts: true,
+    noVisiblePostsSeconds: 120,
+    noVisiblePostsGraceSeconds: 900,
+    lastError: null
+  });
+  const graceExpired = monitorHealthFinding({
+    level: 'warn',
+    running: true,
+    stale: false,
+    noVisiblePosts: true,
+    noVisiblePostsSeconds: 901,
+    noVisiblePostsGraceSeconds: 900,
+    lastError: null
+  });
   const stopped = monitorHealthFinding({ level: 'warn', running: false, stale: true });
 
   assert.equal(transient.severity, 'warn');
   assert.equal(transient.code, 'monitor_degraded');
+  assert.equal(withinGrace, null);
+  assert.equal(graceExpired.severity, 'warn');
+  assert.equal(graceExpired.code, 'monitor_degraded');
   assert.equal(stopped.severity, 'critical');
   assert.equal(stopped.code, 'monitor_unhealthy');
   assert.equal(monitorHealthFinding({ level: 'ok', running: true, stale: false }), null);
