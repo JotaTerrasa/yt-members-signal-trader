@@ -130,7 +130,8 @@ Reglas:
 - no subas la clave ni archivos `.fmbak` a Git;
 - al inicializarla, el script limita sus permisos al usuario actual en Windows y a modo `0600` en Linux/macOS;
 - guarda una copia de la clave separada del backup;
-- verifica cada backup antes de considerarlo válido;
+- la creación descifra y valida automáticamente cada archivo parcial antes de publicarlo como `.fmbak`;
+- vuelve a ejecutar `verify` después de copiar el backup a otro soporte;
 - restaura primero en `.data/restore-tests/`;
 - para respaldar `.yt-profile/`, detén Chromium/PM2 mediante `scripts/profileBackup.ps1` para que Cookies no quede bloqueado;
 - no excluyas Cookies del backup del perfil: contiene la sesión que permite recuperar el acceso web.

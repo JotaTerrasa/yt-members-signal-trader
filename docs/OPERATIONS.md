@@ -393,6 +393,8 @@ node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
 node scripts/secureBackup.js restore --input ".data/backups/secure/ARCHIVO.fmbak"
 ```
 
+Cada creación se autoverifica antes de publicar el `.fmbak`: el script vuelve a descifrar el archivo parcial, comprueba el contenedor y exige las raíces esperadas. Un fallo elimina solo el parcial incompleto y conserva intactas todas las copias anteriores. `verify` sigue siendo útil para revisar una copia después de moverla o almacenarla fuera del equipo.
+
 La restauración normal usa `.data/restore-tests/`. Restaurar sobre el proyecto exige la confirmación literal `RESTORE_LIVE_DATA` y debe hacerse con PM2 detenido.
 
 Registro reproducible de tareas en Windows:

@@ -469,6 +469,8 @@ npm run backup:secure
 node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
 ```
 
+`npm run backup:secure` cifra primero en un archivo parcial, lo descifra de nuevo, valida el contenedor y sus raíces y solo entonces lo publica con extensión `.fmbak`. Si falla el archivado, el cifrado o la verificación, no queda una copia final ni un archivo parcial. El comando `verify` permite volver a comprobar una copia antigua o transportada.
+
 La restauración, por defecto, se extrae en `.data/restore-tests/` y nunca pisa los datos activos:
 
 ```bash

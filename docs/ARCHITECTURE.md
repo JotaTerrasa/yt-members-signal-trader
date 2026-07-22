@@ -153,6 +153,10 @@ Mantiene la cola local de aperturas y cierres pendientes mediante reemplazo ató
 
 Centraliza el reemplazo atómico utilizado por los almacenes JSON y por el diario de eventos. En Windows reintenta únicamente bloqueos transitorios `EPERM`, `EBUSY` y `EACCES`, con espera exponencial acotada; un error permanente se propaga de inmediato y el temporal se limpia siempre.
 
+### `scripts/secureBackup.js`
+
+Construye el archivo de datos, lo cifra con AES-256-GCM y scrypt en un destino parcial y comprueba inmediatamente que puede autenticarse, descifrarse y listar las raíces esperadas. Solo después realiza el renombrado al `.fmbak` definitivo. Un fallo deja las copias anteriores intactas y limpia tanto el archivo temporal sin cifrar como el parcial cifrado; la restauración ordinaria continúa aislada bajo `.data/restore-tests/`.
+
 ### `src/coverageRecovery.js`
 
 Selecciona huecos recientes de cobertura que pueden recuperarse de forma segura. Solo propone aperturas Demo con motivo `no_execution_event`, dentro de la ventana temporal y con una señal parseada exacta. Los fallos ya explicados, los huecos antiguos y cualquier modo Live quedan fuera.

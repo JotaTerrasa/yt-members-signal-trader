@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -11,21 +11,27 @@ const MAGIC = Buffer.from('FMBAK002');
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
+const modulePath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-const command = String(process.argv[2] || '').toLowerCase();
-const args = parseArgs(process.argv.slice(3));
+if (process.argv[1] && resolve(process.argv[1]) === modulePath) {
+  await main(process.argv.slice(2));
+}
 
-if (command === 'init-key') {
-  await initializeKey(args.keyFile);
-} else if (command === 'create') {
-  await createBackup(args);
-} else if (command === 'verify') {
-  await verifyBackup(args);
-} else if (command === 'restore') {
-  await restoreBackup(args);
-} else {
-  fail('Uso: secureBackup.js init-key|create|verify|restore [opciones]');
+async function main(values) {
+  const command = String(values[0] || '').toLowerCase();
+  const args = parseArgs(values.slice(1));
+  if (command === 'init-key') {
+    await initializeKey(args.keyFile);
+  } else if (command === 'create') {
+    await createBackup(args);
+  } else if (command === 'verify') {
+    await verifyBackup(args);
+  } else if (command === 'restore') {
+    await restoreBackup(args);
+  } else {
+    fail('Uso: secureBackup.js init-key|create|verify|restore [opciones]');
+  }
 }
 
 async function initializeKey(keyFileInput) {
@@ -59,14 +65,18 @@ async function hardenKeyPermissions(keyFile) {
   });
 }
 
-async function createBackup(options) {
+export async function createBackup(options, { root = projectRoot, silent = false } = {}) {
   const keyFile = resolveKeyFile(options.keyFile);
   const passphrase = await readPassphrase(keyFile);
   const includeProfile = Boolean(options.includeProfile);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const output = resolve(options.output || join(projectRoot, '.data', 'backups', 'secure', `futures-magician-${timestamp}.fmbak`));
+  const output = resolve(options.output || join(root, '.data', 'backups', 'secure', `futures-magician-${timestamp}.fmbak`));
+  const partialOutput = `${output}.${process.pid}-${Date.now()}.partial`;
   const temporaryArchive = join(tmpdir(), `futures-magician-${process.pid}-${Date.now()}.tar.gz`);
   await mkdir(dirname(output), { recursive: true });
+  if (await stat(output).catch(() => null)) {
+    fail(`El destino del backup ya existe: ${output}`);
+  }
 
   try {
     const inputs = ['.data', ...(includeProfile ? ['.yt-profile'] : [])];
@@ -82,7 +92,7 @@ async function createBackup(options) {
       '--exclude=.yt-profile/Default/LOCK',
       '--exclude=.yt-profile/Singleton*',
       ...inputs
-    ], { cwd: projectRoot });
+    ], { cwd: root });
     const metadata = {
       version: 2,
       createdAt: new Date().toISOString(),
@@ -91,38 +101,72 @@ async function createBackup(options) {
       cipher: 'aes-256-gcm',
       kdf: 'scrypt'
     };
-    await encryptArchive({ input: temporaryArchive, output, passphrase, metadata });
+    await encryptArchive({ input: temporaryArchive, output: partialOutput, passphrase, metadata });
+    const verification = await inspectBackup({ input: partialOutput, passphrase });
+    assertBackupContents(verification, inputs);
+    await rename(partialOutput, output);
     const info = await stat(output);
-    console.log(JSON.stringify({
+    const result = {
       ok: true,
       output,
       bytes: info.size,
       includeProfile,
-      keyFile
-    }, null, 2));
+      keyFile,
+      verified: true,
+      entries: verification.files.length,
+      roots: verification.roots
+    };
+    if (!silent) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    return result;
   } finally {
     await rm(temporaryArchive, { force: true });
+    await rm(partialOutput, { force: true });
   }
 }
 
-async function verifyBackup(options) {
+export async function verifyBackup(options, { silent = false } = {}) {
   const input = requiredFile(options.input || options._[0], 'Indica el backup con --input.');
   const keyFile = resolveKeyFile(options.keyFile);
   const passphrase = await readPassphrase(keyFile);
+  const verification = await inspectBackup({ input, passphrase });
+  const result = {
+    ok: true,
+    input,
+    metadata: verification.metadata,
+    entries: verification.files.length,
+    roots: verification.roots
+  };
+  if (!silent) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+  return result;
+}
+
+async function inspectBackup({ input, passphrase }) {
   const temporaryArchive = join(tmpdir(), `futures-magician-verify-${process.pid}-${Date.now()}.tar.gz`);
   try {
     const metadata = await decryptArchive({ input, output: temporaryArchive, passphrase });
     const listing = await run('tar', ['-tzf', temporaryArchive], { capture: true });
     const files = listing.split(/\r?\n/).filter(Boolean);
-    console.log(JSON.stringify({
-      ok: true,
-      input,
-      metadata,
-      entries: files.length,
-      roots: [...new Set(files.map((entry) => entry.split('/')[0]).filter(Boolean))]
-    }, null, 2));
+    const roots = [...new Set(files.map((entry) => entry.replace(/^\.\//, '').split('/')[0]).filter(Boolean))];
+    return { metadata, files, roots };
   } finally {
     await rm(temporaryArchive, { force: true });
+  }
+}
+
+function assertBackupContents({ metadata, files, roots }, inputs) {
+  if (metadata?.version !== 2 || metadata?.cipher !== 'aes-256-gcm' || metadata?.kdf !== 'scrypt') {
+    fail('La verificación del backup devolvió metadatos incompatibles.');
+  }
+  if (!files.length) {
+    fail('La verificación del backup no encontró ningún archivo.');
+  }
+  const missingRoots = inputs.filter((input) => !roots.includes(input));
+  if (missingRoots.length) {
+    fail(`La verificación del backup no encontró: ${missingRoots.join(', ')}.`);
   }
 }
 
@@ -165,7 +209,7 @@ async function encryptArchive({ input, output, passphrase, metadata }) {
     inputStream.on('error', failStream);
     cipher.on('error', failStream);
     outputStream.on('error', failStream);
-    outputStream.on('finish', resolvePromise);
+    outputStream.on('close', resolvePromise);
     outputStream.write(header);
     inputStream.pipe(cipher).pipe(outputStream, { end: false });
     cipher.on('end', () => outputStream.end(cipher.getAuthTag()));
