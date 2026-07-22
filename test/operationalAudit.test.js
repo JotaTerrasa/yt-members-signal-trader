@@ -537,6 +537,12 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
     telemetry: {
       preOrderMarketRead: { price: 100.1, roundTripMs: 40 },
       topOfBook: { available: true, bidPrice: 100.09, askPrice: 100.11, spreadPercent: 0.01998, ageMs: 75 },
+      packageObservation: {
+        startedAt: '2026-07-20T08:00:00.000Z',
+        size: 2,
+        slot: 1,
+        startQuote: { available: true, bidPrice: 99.99, askPrice: 100.01, stale: false }
+      },
       orderRequest: { startedAt: '2026-07-20T08:00:01.500Z', roundTripMs: 120 }
     }
   });
@@ -555,6 +561,12 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
     telemetry: {
       preOrderMarketRead: { price: 99.95, roundTripMs: 50 },
       topOfBook: { available: true, bidPrice: 99.94, askPrice: 99.96, spreadPercent: 0.02001, ageMs: 125 },
+      packageObservation: {
+        startedAt: '2026-07-20T12:00:00.000Z',
+        size: 2,
+        slot: 2,
+        startQuote: { available: true, bidPrice: 100.04, askPrice: 100.06, stale: false }
+      },
       orderRequest: { startedAt: '2026-07-20T12:00:01.500Z', roundTripMs: 140 }
     }
   });
@@ -594,6 +606,12 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
   assert.equal(analysis.totals.microstructure.executableToFill.measured, 2);
   assert.equal(analysis.totals.microstructure.orderRequestRoundTripMs.average, 130);
   assert.equal(analysis.totals.microstructure.tickerRoundTripMs.average, 45);
+  assert.equal(analysis.totals.microstructure.packageQueue.startQuoteMeasured, 2);
+  assert.equal(analysis.totals.microstructure.packageQueue.executableMove.measured, 2);
+  assert.equal(analysis.totals.microstructure.packageQueue.waitMs.average, 1500);
+  assert.ok(analysis.totals.microstructure.packageQueue.executableMove.averageAdversePercent > 0.09);
+  assert.ok(analysis.totals.microstructure.packageQueue.executableMove.averageAdversePercent < 0.11);
+  assert.equal(analysis.byPackageSlot.find((group) => group.key === 'slot_2').microstructure.packageQueue.startQuoteMeasured, 1);
   assert.equal(analysis.timezone, 'Europe/Madrid');
   assert.equal(analysis.exchangeTimestampPrecisionSeconds, 1);
 });

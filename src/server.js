@@ -71,6 +71,8 @@ const CLOSE_GUARD_RETRY_MAX_AGE_MS = 3 * 60 * 1000;
 const CLOSE_GUARD_RETRY_MAX_ATTEMPTS = 12;
 const SIGNAL_COVERAGE_CHECK_MS = 60_000;
 const ENTRY_QUOTE_WATCH_MS = 10 * 60 * 1000;
+const ENTRY_QUOTE_HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const ENTRY_QUOTE_HISTORY_MAX_SYMBOLS = 24;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -140,6 +142,8 @@ let lastBackupStatus = {
 };
 const lastPriceBroadcast = new Map();
 const entryQuoteWatchUntil = new Map();
+const persistentEntryQuoteSeenAt = new Map();
+let persistentEntryQuoteSymbolsSeeded = false;
 let entryQuoteWatchTimer = null;
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
@@ -2742,7 +2746,13 @@ function syncPriceSubscriptions(exchangePositionsOrSymbols) {
     exchangeOpenSymbols = new Set(exchangePositionsOrSymbols.map(positionSymbol).filter(Boolean));
   }
   const watchedSymbols = activeEntryQuoteSymbols();
-  priceFeed.setSymbols([...paperStore.openSymbols(), ...exchangeOpenSymbols, ...watchedSymbols]);
+  const recentSignalSymbols = activePersistentEntryQuoteSymbols();
+  priceFeed.setSymbols([
+    ...paperStore.openSymbols(),
+    ...exchangeOpenSymbols,
+    ...recentSignalSymbols,
+    ...watchedSymbols
+  ]);
   state.priceFeed = priceFeed.status();
   scheduleEntryQuoteWatchCleanup();
 }
@@ -2752,10 +2762,58 @@ function watchEntryMarketSymbols(symbols = []) {
   for (const value of symbols) {
     const symbol = positionSymbol(value);
     if (symbol) {
+      rememberPersistentEntryQuoteSymbol(symbol, Date.now());
       entryQuoteWatchUntil.set(symbol, expiresAt);
     }
   }
   syncPriceSubscriptions();
+}
+
+function activePersistentEntryQuoteSymbols() {
+  seedPersistentEntryQuoteSymbols();
+  const cutoff = Date.now() - ENTRY_QUOTE_HISTORY_RETENTION_MS;
+  for (const [symbol, seenAt] of persistentEntryQuoteSeenAt) {
+    if (Number(seenAt) < cutoff) {
+      persistentEntryQuoteSeenAt.delete(symbol);
+    }
+  }
+  return [...persistentEntryQuoteSeenAt.keys()];
+}
+
+function seedPersistentEntryQuoteSymbols() {
+  if (persistentEntryQuoteSymbolsSeeded) {
+    return;
+  }
+  persistentEntryQuoteSymbolsSeeded = true;
+  const cutoff = Date.now() - ENTRY_QUOTE_HISTORY_RETENTION_MS;
+  for (const post of store.list()) {
+    const seenAt = Date.parse(post?.firstSeenAt || '');
+    if (!Number.isFinite(seenAt) || seenAt < cutoff) {
+      continue;
+    }
+    for (const signal of futuresTrader.parseAll(post?.text || '')) {
+      if (signal?.isSignal && !signal.action && signal.symbol) {
+        rememberPersistentEntryQuoteSymbol(signal.symbol, seenAt);
+      }
+    }
+  }
+}
+
+function rememberPersistentEntryQuoteSymbol(value, seenAt = Date.now()) {
+  const symbol = positionSymbol(value);
+  const timestamp = Number(seenAt);
+  if (!symbol || !Number.isFinite(timestamp)) {
+    return;
+  }
+  persistentEntryQuoteSeenAt.set(symbol, Math.max(timestamp, Number(persistentEntryQuoteSeenAt.get(symbol) || 0)));
+  if (persistentEntryQuoteSeenAt.size <= ENTRY_QUOTE_HISTORY_MAX_SYMBOLS) {
+    return;
+  }
+  const oldest = [...persistentEntryQuoteSeenAt.entries()]
+    .sort((left, right) => Number(left[1]) - Number(right[1]));
+  for (const [staleSymbol] of oldest.slice(0, persistentEntryQuoteSeenAt.size - ENTRY_QUOTE_HISTORY_MAX_SYMBOLS)) {
+    persistentEntryQuoteSeenAt.delete(staleSymbol);
+  }
 }
 
 function activeEntryQuoteSymbols() {
@@ -5412,8 +5470,18 @@ function auditEntryTelemetry(telemetry) {
     initialMarketRead: auditTelemetryMarketRead(telemetry.initialMarketRead),
     preOrderMarketRead: auditTelemetryMarketRead(telemetry.preOrderMarketRead),
     topOfBook: auditTelemetryQuote(telemetry.topOfBook),
+    packageObservation: auditEntryPackageObservation(telemetry.packageObservation),
     orderRequest: auditTelemetryRequest(telemetry.orderRequest)
   };
+}
+
+function auditEntryPackageObservation(observation) {
+  return observation && typeof observation === 'object' ? {
+    startedAt: observation.startedAt || null,
+    size: auditRound(observation.size),
+    slot: auditRound(observation.slot),
+    startQuote: auditTelemetryQuote(observation.startQuote)
+  } : null;
 }
 
 function auditCloseTelemetry(closeSignalEvent, symbol) {

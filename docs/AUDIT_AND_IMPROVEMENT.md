@@ -247,9 +247,11 @@ La posición no es una causa aislada: suele coincidir con el activo, ya que BTC 
 
 Para resolver esa última ambigüedad sin alterar la operativa, la aplicación suscribe el canal público `bookTicker` de BingX junto a `lastPrice`. Cada apertura nueva conservará el mejor bid y ask recibido antes del envío, el spread, la antigüedad de la instantánea, el RTT de la lectura de precio y el RTT local de la petición de orden. En LONG se toma el ask como precio ejecutable; en SHORT, el bid.
 
+La siguiente instrumentación separa además la secuencia interna del paquete. Los activos vistos en aperturas de los últimos 30 días se mantienen suscritos, con un límite de 24, y al comenzar a procesar una publicación se conserva una fotografía simultánea del lado ejecutable de todos ellos. Cada señal guarda la hora de inicio, el tamaño del paquete y su posición exacta. La lectura `inicio del paquete → preenvío` mostrará cuánto se esperó y cuánto se movió el precio mientras se atendían las señales anteriores.
+
 La descomposición prospectiva tendrá tres tramos: `señal → lastPrice`, `lastPrice → precio ejecutable` y `precio ejecutable → fill`. Esto permitirá distinguir movimiento previo, spread visible y diferencia posterior a la instantánea. La marca de fill de BingX mantiene precisión de un segundo, mientras que los RTT locales se registran en milisegundos.
 
-Las 38 aperturas ya incluidas en la cohorte vigente son anteriores a esta instrumentación y, por tanto, no tienen bid/ask histórico. El panel muestra inicialmente `0/38` con cobertura de microestructura y empezará a crecer con la siguiente apertura. No se imputan ceros, no se usa el spread actual para rellenar el pasado y ninguna de estas métricas alimenta guards, tamaños, stops, reintentos o cierres.
+Las 38 aperturas ya incluidas en la cohorte vigente son anteriores a esta instrumentación y, por tanto, no tienen bid/ask histórico ni fotografía inicial del paquete. El panel muestra inicialmente `0/38` con cobertura de microestructura y empezará a crecer con la siguiente apertura. No se imputan ceros, no se usa el spread actual para rellenar el pasado y ninguna de estas métricas alimenta guards, tamaños, stops, reintentos o cierres.
 
 La misma captura se aplica prospectivamente a los cierres explícitos. Al cerrar LONG, el bid es el lado ejecutable; al cerrar SHORT, lo es el ask. La auditoría separa `último precio → ejecutable` y `ejecutable → fill`, mide el RTT de la solicitud y conserva resultados por activo. Una posición agregada se cuenta una sola vez por evento y símbolo.
 

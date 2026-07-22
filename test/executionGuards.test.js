@@ -252,6 +252,7 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
   const adjustments = [];
   const orders = [];
   const watchedPackages = [];
+  let marketReads = 0;
   const prices = {
     'BTC-USDT': 64010,
     'ETH-USDT': 1816,
@@ -335,7 +336,10 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
     tradeMinUSDT: 0,
     maxLeverage: 125
   });
-  trader.fetchMarketPrice = async (_client, symbol) => prices[symbol];
+  trader.fetchMarketPrice = async (_client, symbol) => {
+    marketReads += 1;
+    return prices[symbol];
+  };
   trader.validateRisk = async () => ({ ok: true, snapshot: {} });
 
   const [post] = [{
@@ -367,9 +371,15 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
   assert.equal(externalFunding, 360);
   assert.equal(available, 365);
   assert.deepEqual(watchedPackages, [['BTC-USDT', 'ETH-USDT', 'SOL-USDT']]);
+  assert.equal(marketReads, 6);
   assert.ok(results.every((event) => event.executionTelemetry?.mode === 'observational_only'));
+  assert.ok(results.every((event) => event.executionTelemetry?.schemaVersion === 2));
   assert.ok(results.every((event) => event.executionTelemetry?.topOfBook?.available === true));
   assert.ok(results.every((event) => event.executionTelemetry?.orderRequest?.roundTripMs >= 0));
+  assert.deepEqual(results.map((event) => event.executionTelemetry?.packageObservation?.slot), [1, 2, 3]);
+  assert.ok(results.every((event) => event.executionTelemetry?.packageObservation?.size === 3));
+  assert.ok(results.every((event) => event.executionTelemetry?.packageObservation?.startQuote?.available === true));
+  assert.equal(new Set(results.map((event) => event.executionTelemetry?.packageObservation?.startedAt)).size, 1);
 });
 
 test('una modificación de SL en Demo VST usa último precio', async () => {

@@ -486,6 +486,7 @@ export class FuturesTrader {
     for (const post of posts) {
       const signals = parseFuturesSignals(post.text || '').filter((signal) => signal.isSignal);
       const openingSignals = signals.filter(isOpeningSignal);
+      const packageStartedAtMs = Date.now();
       try {
         this.watchMarketSymbols?.(openingSignals.map((signal) => signal.symbol));
       } catch (error) {
@@ -493,7 +494,14 @@ export class FuturesTrader {
       }
       const packageContext = {
         openingSignals,
-        vstReservePromise: null
+        vstReservePromise: null,
+        telemetry: {
+          startedAtMs: packageStartedAtMs,
+          observations: new Map(openingSignals.map((signal, index) => [signal, {
+            slot: index + 1,
+            startQuote: this.captureMarketQuote(signal.symbol)
+          }]))
+        }
       };
       for (const signal of signals) {
         const baseEvent = {
@@ -1149,10 +1157,11 @@ export class FuturesTrader {
       }
     } catch (error) {
       orderRequestCompletedAtMs = Date.now();
-      const executionTelemetry = buildEntryExecutionTelemetry({
+      const executionTelemetry = safeBuildEntryExecutionTelemetry({
         initialMarketRead,
         preOrderMarketRead,
         topOfBook,
+        packageObservation: entryPackageObservation(packageContext, signal),
         orderRequestStartedAtMs,
         orderRequestCompletedAtMs
       });
@@ -1175,10 +1184,11 @@ export class FuturesTrader {
       error.executionTelemetry = executionTelemetry;
       throw error;
     }
-    const executionTelemetry = buildEntryExecutionTelemetry({
+    const executionTelemetry = safeBuildEntryExecutionTelemetry({
       initialMarketRead,
       preOrderMarketRead,
       topOfBook,
+      packageObservation: entryPackageObservation(packageContext, signal),
       orderRequestStartedAtMs,
       orderRequestCompletedAtMs
     });
@@ -1999,20 +2009,76 @@ function buildEntryExecutionTelemetry({
   initialMarketRead,
   preOrderMarketRead,
   topOfBook,
+  packageObservation,
   orderRequestStartedAtMs,
   orderRequestCompletedAtMs
 }) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     mode: 'observational_only',
     initialMarketRead: compactMarketRead(initialMarketRead),
     preOrderMarketRead: compactMarketRead(preOrderMarketRead),
     topOfBook: topOfBook || { available: false, reason: 'quote_unavailable' },
+    packageObservation: compactEntryPackageObservation(packageObservation),
     orderRequest: {
       startedAt: new Date(orderRequestStartedAtMs).toISOString(),
       completedAt: new Date(orderRequestCompletedAtMs).toISOString(),
       roundTripMs: Math.max(0, orderRequestCompletedAtMs - orderRequestStartedAtMs)
     }
+  };
+}
+
+function safeBuildEntryExecutionTelemetry(context) {
+  try {
+    return buildEntryExecutionTelemetry(context);
+  } catch (error) {
+    const startedAtMs = Number(context?.orderRequestStartedAtMs);
+    const completedAtMs = Number(context?.orderRequestCompletedAtMs);
+    return {
+      schemaVersion: 2,
+      mode: 'observational_only',
+      available: false,
+      reason: `telemetry_error:${String(error?.message || error || 'unknown_error')}`,
+      initialMarketRead: null,
+      preOrderMarketRead: null,
+      topOfBook: { available: false, reason: 'telemetry_error' },
+      packageObservation: null,
+      orderRequest: {
+        startedAt: Number.isFinite(startedAtMs) ? new Date(startedAtMs).toISOString() : null,
+        completedAt: Number.isFinite(completedAtMs) ? new Date(completedAtMs).toISOString() : null,
+        roundTripMs: Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+          ? Math.max(0, completedAtMs - startedAtMs)
+          : null
+      }
+    };
+  }
+}
+
+function entryPackageObservation(packageContext, signal) {
+  const telemetry = packageContext?.telemetry;
+  const observation = telemetry?.observations?.get?.(signal);
+  const startedAtMs = Number(telemetry?.startedAtMs);
+  if (!observation || !Number.isFinite(startedAtMs)) {
+    return null;
+  }
+  return {
+    startedAtMs,
+    size: Number(packageContext?.openingSignals?.length || 0),
+    slot: Number(observation.slot || 0),
+    startQuote: observation.startQuote || null
+  };
+}
+
+function compactEntryPackageObservation(observation) {
+  if (!observation) {
+    return null;
+  }
+  const startedAtMs = Number(observation.startedAtMs);
+  return {
+    startedAt: Number.isFinite(startedAtMs) ? new Date(startedAtMs).toISOString() : null,
+    size: telemetryNumber(observation.size),
+    slot: telemetryNumber(observation.slot),
+    startQuote: observation.startQuote || { available: false, reason: 'quote_unavailable' }
   };
 }
 

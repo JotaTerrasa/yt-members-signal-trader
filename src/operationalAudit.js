@@ -1034,11 +1034,24 @@ function entryExecutionPoint(row, eventId) {
   const exchangeFillAt = validTimestamp(row?.vst?.openingFillAt);
   const telemetry = row?.vst?.entryTelemetry || null;
   const topOfBook = telemetry?.topOfBook || null;
+  const packageObservation = telemetry?.packageObservation || null;
+  const packageStartQuote = packageObservation?.startQuote || null;
   const orderRequestStartedAt = validTimestamp(telemetry?.orderRequest?.startedAt);
+  const packageStartedAt = validTimestamp(packageObservation?.startedAt);
   const executableQuote = direction === 'SHORT'
     ? positiveNumber(topOfBook?.bidPrice)
     : positiveNumber(topOfBook?.askPrice);
   const quoteAvailable = Boolean(topOfBook?.available) && !topOfBook?.stale && executableQuote !== null;
+  const packageStartExecutableQuote = direction === 'SHORT'
+    ? positiveNumber(packageStartQuote?.bidPrice)
+    : positiveNumber(packageStartQuote?.askPrice);
+  const packageStartQuoteAvailable = Boolean(packageStartQuote?.available)
+    && !packageStartQuote?.stale
+    && packageStartExecutableQuote !== null;
+  const packageQueueWaitMs = [packageStartedAt, orderRequestStartedAt].every(Number.isFinite)
+    && orderRequestStartedAt >= packageStartedAt
+    ? orderRequestStartedAt - packageStartedAt
+    : null;
   const validQueueTiming = [detectedAt, firstAttemptAt, successfulAttemptAt].every(Number.isFinite)
     && firstAttemptAt >= detectedAt
     && successfulAttemptAt >= firstAttemptAt;
@@ -1095,6 +1108,19 @@ function entryExecutionPoint(row, eventId) {
     executableToFillSignedPercent: quoteAvailable
       ? entrySignedDeviationPercent({ actual: fill, reference: executableQuote, direction })
       : null,
+    packageSlot: positiveInteger(packageObservation?.slot),
+    packageSize: positiveInteger(packageObservation?.size),
+    packageStartedAt: Number.isFinite(packageStartedAt) ? packageStartedAt : null,
+    packageStartQuoteCaptured: packageStartQuoteAvailable,
+    packageStartQuoteStale: Boolean(packageStartQuote?.stale),
+    packageStartExecutableQuote: packageStartQuoteAvailable ? packageStartExecutableQuote : null,
+    packageQueueWaitMs,
+    packageStartToPreOrderAdversePercent: packageStartQuoteAvailable && quoteAvailable
+      ? entryAdverseDeviationPercent({ actual: executableQuote, reference: packageStartExecutableQuote, direction })
+      : null,
+    packageStartToPreOrderSignedPercent: packageStartQuoteAvailable && quoteAvailable
+      ? entrySignedDeviationPercent({ actual: executableQuote, reference: packageStartExecutableQuote, direction })
+      : null,
     tickerRoundTripMs: nullableNumber(telemetry?.preOrderMarketRead?.roundTripMs),
     orderRequestRoundTripMs: nullableNumber(telemetry?.orderRequest?.roundTripMs),
     preparationSeconds,
@@ -1117,6 +1143,8 @@ function entryExecutionEvidenceScore(point = {}) {
     point.quote,
     point.fill,
     point.executableQuote,
+    point.packageStartExecutableQuote,
+    point.packageQueueWaitMs,
     point.orderRequestRoundTripMs,
     point.totalAdversePercent,
     point.attemptToFillSeconds,
@@ -1219,10 +1247,12 @@ function entryStageStats(points, prefix) {
 function summarizeEntryMicrostructure(points = []) {
   const instrumented = points.filter((point) => point.telemetryCaptured).length;
   const topOfBookMeasured = points.filter((point) => point.topOfBookCaptured).length;
+  const packageStartQuoteMeasured = points.filter((point) => point.packageStartQuoteCaptured).length;
   const spread = entryPercentStats(points.map((point) => point.spreadPercent));
   const quoteAge = entryValueStats(points.map((point) => point.quoteAgeMs), { allowNegative: false });
   const tickerRoundTrip = entryValueStats(points.map((point) => point.tickerRoundTripMs), { allowNegative: false });
   const orderRequestRoundTrip = entryValueStats(points.map((point) => point.orderRequestRoundTripMs), { allowNegative: false });
+  const packageQueueWait = entryValueStats(points.map((point) => point.packageQueueWaitMs), { allowNegative: false });
   return {
     instrumented,
     topOfBookMeasured,
@@ -1238,7 +1268,13 @@ function summarizeEntryMicrostructure(points = []) {
     executableToFill: entryTelemetryStageStats(points, 'executableToFill'),
     quoteAgeMs: quoteAge,
     tickerRoundTripMs: tickerRoundTrip,
-    orderRequestRoundTripMs: orderRequestRoundTrip
+    orderRequestRoundTripMs: orderRequestRoundTrip,
+    packageQueue: {
+      startQuoteMeasured: packageStartQuoteMeasured,
+      staleStartQuotes: points.filter((point) => point.packageStartQuoteStale).length,
+      waitMs: packageQueueWait,
+      executableMove: entryTelemetryStageStats(points, 'packageStartToPreOrder')
+    }
   };
 }
 
@@ -1289,6 +1325,10 @@ function groupedEntryExecution(points, selector) {
 function assignEntryPackageSlots(points = []) {
   const packages = new Map();
   for (const point of points) {
+    if (positiveInteger(point.packageSlot)) {
+      point.packageSlotKey = entryPackageSlotKey(point.packageSlot);
+      continue;
+    }
     if (!point.postId) {
       point.packageSlot = null;
       point.packageSlotKey = 'unknown';
@@ -1306,10 +1346,19 @@ function assignEntryPackageSlots(points = []) {
     ));
     items.forEach((point, index) => {
       point.packageSlot = index + 1;
-      point.packageSlotKey = index >= 3 ? 'slot_4_plus' : `slot_${index + 1}`;
+      point.packageSlotKey = entryPackageSlotKey(index + 1);
     });
   }
   return points;
+}
+
+function entryPackageSlotKey(slot) {
+  return Number(slot) >= 4 ? 'slot_4_plus' : `slot_${Number(slot)}`;
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 function entryExecutionPostId(row = {}) {

@@ -3155,6 +3155,10 @@ summary.dashboard-section-title {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.entry-diagnosis-package-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .entry-diagnosis-microstructure > p {
   margin: 0;
   color: var(--muted);

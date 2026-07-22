@@ -811,10 +811,12 @@ function renderEntryDiagnosisLines(diagnosis) {
     `- Proporción descriptiva asociada a la mezcla por posición: ${percent(mix.compositionSharePercent)}. Este desglose no se suma al desglose por activo.`
   ] : [];
   const microstructure = diagnosis.prospectiveMicrostructure || {};
+  const packageQueue = microstructure.packageQueue || {};
   const microstructureLines = [
     `- Cobertura bid/ask prospectiva: ${microstructure.topOfBookMeasured || 0}/${diagnosis.summary.currentOpenings || 0} aperturas; ${microstructure.staleQuotes || 0} instantáneas caducadas.`,
     `- Spread medio observado: ${percent(microstructure.spread?.averagePercent)}; last a precio ejecutable ${percent(microstructure.lastToExecutable?.averageAdversePercent)}; precio ejecutable a fill ${percent(microstructure.executableToFill?.averageAdversePercent)}.`,
-    `- RTT local medio: ticker ${milliseconds(microstructure.tickerRoundTripMs?.average)}; orden ${milliseconds(microstructure.orderRequestRoundTripMs?.average)}; antigüedad mediana de la cotización ${milliseconds(microstructure.quoteAgeMs?.median)}.`
+    `- RTT local medio: ticker ${milliseconds(microstructure.tickerRoundTripMs?.average)}; orden ${milliseconds(microstructure.orderRequestRoundTripMs?.average)}; antigüedad mediana de la cotización ${milliseconds(microstructure.quoteAgeMs?.median)}.`,
+    `- Secuencia del paquete: ${packageQueue.startQuoteMeasured || 0}/${diagnosis.summary.currentOpenings || 0} con cotización inicial; espera media hasta el envío ${milliseconds(packageQueue.waitMs?.average)}; movimiento adverso durante la cola ${percent(packageQueue.executableMove?.averageAdversePercent)}.`
   ];
   return [
     `- Diagnóstico de entrada: ${withFinalPeriod(diagnosis.summary.label)} ${withFinalPeriod(diagnosis.summary.detail)}`.trim(),

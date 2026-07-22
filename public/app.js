@@ -5100,6 +5100,8 @@ function renderEntryDiagnosis(diagnosis) {
   const microstructure = diagnosis.prospectiveMicrostructure || {};
   const microstructureMeasured = Number(microstructure.topOfBookMeasured || 0);
   const microstructureOpenings = Number(summary.currentOpenings || 0);
+  const packageQueue = microstructure.packageQueue || {};
+  const packageQueueMeasured = Number(packageQueue.executableMove?.measured || 0);
   const microstructurePanel = `
     <div class="entry-diagnosis-microstructure">
       <div class="entry-diagnosis-subheading">
@@ -5132,9 +5134,29 @@ function renderEntryDiagnosis(diagnosis) {
           <b>Reloj local preciso</b>
         </div>
       </div>
+      <div class="entry-diagnosis-stages entry-diagnosis-package-grid">
+        <div class="entry-diagnosis-stage">
+          <span>Inicio del paquete</span>
+          <strong>${escapeHtml(`${packageQueue.startQuoteMeasured || 0}/${microstructureOpenings}`)}</strong>
+          <small>Cotizaciones ejecutables conservadas</small>
+          <b>Fotografía simultánea</b>
+        </div>
+        <div class="entry-diagnosis-stage">
+          <span>Espera hasta enviar</span>
+          <strong>${escapeHtml(formatTelemetryMilliseconds(packageQueue.waitMs?.average))}</strong>
+          <small>${escapeHtml(`Mediana ${formatTelemetryMilliseconds(packageQueue.waitMs?.median)}`)}</small>
+          <b>Incluye la secuencia previa</b>
+        </div>
+        <div class="entry-diagnosis-stage">
+          <span>Movimiento durante la cola</span>
+          <strong>${escapeHtml(formatTelemetryPercent(packageQueue.executableMove?.averageAdversePercent))}</strong>
+          <small>${escapeHtml(`${packageQueueMeasured} aperturas comparables`)}</small>
+          <b>Inicio a preenvío</b>
+        </div>
+      </div>
       <p>${escapeHtml(microstructureMeasured
-        ? 'Esta muestra separa spread, movimiento hasta el precio ejecutable y movimiento posterior hasta el fill.'
-        : 'La captura ya está preparada. Los históricos anteriores no contienen bid/ask; la lectura empezará con la próxima apertura.')}</p>
+        ? 'Esta muestra separa la espera secuencial del paquete, el spread y el movimiento posterior hasta el fill.'
+        : 'La captura ya está preparada. Los históricos anteriores no contienen bid/ask ni fotografía inicial del paquete; la lectura empezará con la próxima apertura.')}</p>
     </div>
   `;
 
