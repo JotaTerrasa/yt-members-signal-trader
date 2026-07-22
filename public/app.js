@@ -263,11 +263,16 @@ const LOGS_PAGE_SIZE = 60;
 const LEDGER_PAGE_SIZE = 30;
 const EXTERNAL_SHEET_PAGE_SIZE = 40;
 const REPLICA_AUDIT_PAGE_SIZE = 40;
+const PNL_REALTIME_RENDER_INTERVAL_MS = 250;
+const PNL_FULL_RENDER_INTERVAL_MS = 15 * 1000;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
 const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
 let referenceRefreshTimer = null;
+let pnlRealtimeRenderTimer = null;
+let pnlRealtimeRenderFrame = null;
+let pnlDeferredFullRenderTimer = null;
 
 const appState = {
   state: null,
@@ -1226,7 +1231,7 @@ function connectEvents() {
       upsertPaperTrade(position);
     }
     if (viewIsVisible(elements.pnlView) && (exchangePriceChanged || payload.updatedPaperPositions?.length || payload.closedPaperPositions?.length)) {
-      renderPnl();
+      schedulePnlPriceRender();
     }
   });
 }
@@ -1372,6 +1377,7 @@ function renderPnl() {
   if (!viewIsVisible(elements.pnlView)) {
     return;
   }
+  cancelScheduledPnlPriceRenders();
 
   const configured = Boolean(appState.bingx?.apiKeyConfigured && appState.bingx?.apiSecretConfigured);
   const reference = currentReferenceLedger();
@@ -1395,30 +1401,21 @@ function renderPnl() {
   elements.refreshPnl.disabled = appState.pnlLoading || !configured;
   elements.monthReset.disabled = appState.pnlLoading;
   elements.monthResetStatus.textContent = monthResetStatusText(appState.bingx);
-  renderPnlSourceGrid(sources, selectedSource.key);
+  const performanceSource = selectedPerformanceSource(sources);
+  renderPnlRealtimeSummary({
+    sources,
+    selectedSource,
+    performanceSource,
+    reference,
+    closedPositions,
+    winRate,
+    monthlyRoi
+  });
   renderReplicaHealthPanel(reference);
   renderReliabilityPanel();
   renderCostControl(selectedSource, reference);
   renderProtectedClosePanel();
-  const performanceSource = selectedPerformanceSource(sources);
   renderPerformanceSourceGrid(sources, performanceSource.key);
-  renderPerformanceOverview(performanceSource, reference);
-  elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
-  elements.pnlTotalMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
-  elements.pnlHeroDetail.textContent = sourceHeroDetail(selectedSource);
-  elements.pnlResultLabel.textContent = sourcePrimaryLabel(selectedSource);
-  elements.pnlPaperMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
-  elements.pnlOpenExposure.textContent = formatSourceMoney(selectedSource.exposure, selectedSource);
-  elements.pnlFeesMonth.textContent = formatSourceMoney(selectedSource.fees, selectedSource);
-  elements.pnlFundingMonth.textContent = formatSourceMoney(selectedSource.funding, selectedSource);
-  elements.pnlTestOrders.textContent = String(selectedSource.openPositions || 0);
-  elements.pnlClosedTrades.textContent = String(selectedSource.closedTrades || closedPositions.length);
-  elements.pnlModeLabel.textContent = selectedSource.modeLabel;
-  elements.pnlWinRate.textContent = formatPercent(winRate);
-  elements.pnlMonthlyRoi.textContent = formatPercent(monthlyRoi);
-  elements.pnlMonthlyRoi.className = amountClass(monthlyRoi);
-  elements.pnlNote.textContent = sourceNoteText(selectedSource);
-  renderSheetCapitalSimulator(selectedSource, monthlyRoi);
 
   if (!configured) {
     elements.pnlStatus.textContent = 'Configura BingX para leer el PnL mensual.';
@@ -1474,6 +1471,104 @@ function renderPnl() {
   renderRealAuditTable();
   elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
   window.lucide?.createIcons();
+}
+
+function schedulePnlPriceRender() {
+  if (!viewIsVisible(elements.pnlView)) {
+    return;
+  }
+
+  if (pnlRealtimeRenderTimer === null && pnlRealtimeRenderFrame === null) {
+    pnlRealtimeRenderTimer = window.setTimeout(() => {
+      pnlRealtimeRenderTimer = null;
+      pnlRealtimeRenderFrame = window.requestAnimationFrame(() => {
+        pnlRealtimeRenderFrame = null;
+        renderPnlRealtime();
+      });
+    }, PNL_REALTIME_RENDER_INTERVAL_MS);
+  }
+
+  if (pnlDeferredFullRenderTimer === null) {
+    pnlDeferredFullRenderTimer = window.setTimeout(() => {
+      pnlDeferredFullRenderTimer = null;
+      renderPnl();
+    }, PNL_FULL_RENDER_INTERVAL_MS);
+  }
+}
+
+function cancelScheduledPnlPriceRenders() {
+  if (pnlRealtimeRenderTimer !== null) {
+    window.clearTimeout(pnlRealtimeRenderTimer);
+    pnlRealtimeRenderTimer = null;
+  }
+  if (pnlRealtimeRenderFrame !== null) {
+    window.cancelAnimationFrame(pnlRealtimeRenderFrame);
+    pnlRealtimeRenderFrame = null;
+  }
+  if (pnlDeferredFullRenderTimer !== null) {
+    window.clearTimeout(pnlDeferredFullRenderTimer);
+    pnlDeferredFullRenderTimer = null;
+  }
+}
+
+function renderPnlRealtime() {
+  if (!viewIsVisible(elements.pnlView)) {
+    return;
+  }
+
+  const reference = currentReferenceLedger();
+  const rows = pnlRowsWithReferenceLedger(pnlRowsWithLocalTrades(appState.pnl?.months || []), reference);
+  const openPositions = openTradingPositions();
+  const closedPositions = closedPaperPositions();
+  const sources = pnlSourceCards(reference);
+  const selectedSource = selectedPnlSource(sources);
+  const displayPositions = positionsForPnlSource(selectedSource.key, reference);
+  const displayClosedPositions = displayPositions.filter((position) => position.status === 'closed');
+  const winRate = selectedSource.winRate ?? calculateWinRate(displayClosedPositions);
+  const monthlyRoi = sourceMonthlyRoi(selectedSource);
+  const performanceSource = selectedPerformanceSource(sources);
+
+  renderPnlRealtimeSummary({
+    sources,
+    selectedSource,
+    performanceSource,
+    reference,
+    closedPositions,
+    winRate,
+    monthlyRoi
+  });
+  renderPerformanceTable(performanceTableRows(performanceSource, rows, reference), performanceSource);
+  renderRiskPanel(openPositions, closedPositions);
+  renderOpenPositions();
+}
+
+function renderPnlRealtimeSummary({
+  sources,
+  selectedSource,
+  performanceSource,
+  reference,
+  closedPositions,
+  winRate,
+  monthlyRoi
+}) {
+  renderPnlSourceGrid(sources, selectedSource.key);
+  renderPerformanceOverview(performanceSource, reference);
+  elements.pnlMonthLabel.textContent = `${formatMonth(selectedSource.month || currentMonthKey())} · ${selectedSource.label}`;
+  elements.pnlTotalMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
+  elements.pnlHeroDetail.textContent = sourceHeroDetail(selectedSource);
+  elements.pnlResultLabel.textContent = sourcePrimaryLabel(selectedSource);
+  elements.pnlPaperMonth.textContent = formatSourceMoney(sourcePrimaryValue(selectedSource), selectedSource);
+  elements.pnlOpenExposure.textContent = formatSourceMoney(selectedSource.exposure, selectedSource);
+  elements.pnlFeesMonth.textContent = formatSourceMoney(selectedSource.fees, selectedSource);
+  elements.pnlFundingMonth.textContent = formatSourceMoney(selectedSource.funding, selectedSource);
+  elements.pnlTestOrders.textContent = String(selectedSource.openPositions || 0);
+  elements.pnlClosedTrades.textContent = String(selectedSource.closedTrades || closedPositions.length);
+  elements.pnlModeLabel.textContent = selectedSource.modeLabel;
+  elements.pnlWinRate.textContent = formatPercent(winRate);
+  elements.pnlMonthlyRoi.textContent = formatPercent(monthlyRoi);
+  elements.pnlMonthlyRoi.className = amountClass(monthlyRoi);
+  elements.pnlNote.textContent = sourceNoteText(selectedSource);
+  renderSheetCapitalSimulator(selectedSource, monthlyRoi);
 }
 
 function pnlSourceCards(reference = currentReferenceLedger()) {

@@ -50,6 +50,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
 - Limita el trabajo visual de Posts, Eventos y las tablas extensas de Rendimiento mediante paginación progresiva. Los totales y diagnósticos siguen usando la muestra completa, mientras el canal SSE se mantiene compacto durante el monitor continuo.
+- Agrupa las ráfagas de precios de BingX y actualiza primero posiciones, riesgo y totales. Gráficos, histórico y auditoría se sincronizan después sin reconstruirse con cada tick.
 - Guarda los JSON locales mediante escrituras en cola y reemplazo atómico para no dejar archivos parciales ante reinicios.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
 - Genera backups redactados para soporte y backups cifrados restaurables de los datos locales.
