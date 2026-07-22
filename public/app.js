@@ -4998,6 +4998,7 @@ function renderCohortComparison(comparison) {
         ${renderCohortPeriod('Ahora', comparison.current)}
       </div>
       <div class="cohort-verdicts">${verdicts}</div>
+      ${renderEntryDiagnosis(comparison.entryDiagnosis)}
       <div class="cohort-comparison-table" role="table" aria-label="Comparación de cohortes antes y después">
         ${metrics}
       </div>
@@ -5010,6 +5011,103 @@ function renderCohortComparison(comparison) {
       <p class="replica-gap-note">Bootstrap determinista sobre el PnL neto enlazado por operación. El intervalo cruza cero cuando la diferencia no está demostrada; esta lectura no garantiza rentabilidad futura ni sustituye la cobertura pendiente de la hoja.</p>
     </div>
   `;
+}
+
+function renderEntryDiagnosis(diagnosis) {
+  if (!diagnosis?.summary || !Array.isArray(diagnosis.stages)) {
+    return '';
+  }
+  const summary = diagnosis.summary;
+  const stages = diagnosis.stages.map((stage) => `
+    <div class="entry-diagnosis-stage ${escapeAttribute(cohortAssessmentClass(stage.assessment))}">
+      <span>${escapeHtml(stage.label)}</span>
+      <strong>${escapeHtml(formatCohortPercent(stage.currentAverageAdversePercent))}</strong>
+      <small>${escapeHtml(`Antes ${formatCohortPercent(stage.previousAverageAdversePercent)} · cambio ${formatSignedCohortDelta(stage.deltaAverageAdversePercent)}`)}</small>
+      <b class="${escapeAttribute(cohortAssessmentClass(stage.assessment))}">${escapeHtml(cohortAssessmentLabel(stage.assessment))}</b>
+    </div>
+  `).join('');
+  const symbols = (diagnosis.bySymbol || []).map((group) => `
+    <div class="entry-diagnosis-row" role="row">
+      <div class="entry-diagnosis-name" role="cell"><span>Activo</span><strong>${escapeHtml(group.label || group.key || '-')}</strong></div>
+      <div role="cell"><span>Muestra</span><strong>${escapeHtml(`${group.previousOpenings || 0} → ${group.currentOpenings || 0}`)}</strong></div>
+      <div role="cell"><span>Media antes</span><strong>${escapeHtml(formatCohortPercent(group.previousAverageAdversePercent))}</strong></div>
+      <div role="cell"><span>Media ahora</span><strong>${escapeHtml(formatCohortPercent(group.currentAverageAdversePercent))}</strong></div>
+      <div role="cell"><span>Sobre 0,15%</span><strong>${escapeHtml(formatCohortPercent(group.currentAboveTolerancePercent))}</strong></div>
+      <div role="cell"><span>Lectura</span><strong class="${escapeAttribute(cohortAssessmentClass(group.assessment))}">${escapeHtml(cohortAssessmentLabel(group.assessment))}</strong></div>
+    </div>
+  `).join('');
+  const routes = (diagnosis.byRoute || []).map((group) => `
+    <div class="entry-diagnosis-slice">
+      <span>${escapeHtml(group.label || group.key || '-')}</span>
+      <strong>${escapeHtml(formatCohortPercent(group.currentAverageAdversePercent))}</strong>
+      <small>${escapeHtml(`${group.currentOpenings || 0} aperturas · ${formatCohortPercent(group.currentAboveTolerancePercent)} sobre umbral`)}</small>
+      <b class="${escapeAttribute(cohortAssessmentClass(group.assessment))}">${escapeHtml(cohortAssessmentLabel(group.assessment))}</b>
+    </div>
+  `).join('');
+  const timeWindows = [...(diagnosis.currentByTimeWindow || [])]
+    .sort((left, right) => Number(right.averageAdversePercent || 0) - Number(left.averageAdversePercent || 0))
+    .map((group) => `
+      <div class="entry-diagnosis-slice">
+        <span>${escapeHtml(group.label || group.key || '-')}</span>
+        <strong>${escapeHtml(formatCohortPercent(group.averageAdversePercent))}</strong>
+        <small>${escapeHtml(`${group.openings || 0} aperturas · ${formatCohortPercent(group.aboveTolerancePercent)} sobre umbral`)}</small>
+        <b>${escapeHtml(`${formatLatencySeconds(group.latency?.p95Seconds)} p95`)}</b>
+      </div>
+    `).join('');
+  const latency = (diagnosis.currentByLatency || []).map((group) => `
+    <div class="entry-diagnosis-slice">
+      <span>${escapeHtml(group.label || group.key || '-')}</span>
+      <strong>${escapeHtml(formatCohortPercent(group.averageAdversePercent))}</strong>
+      <small>${escapeHtml(`${group.openings || 0} aperturas · ${formatCohortPercent(group.aboveTolerancePercent)} sobre umbral`)}</small>
+      <b>${escapeHtml(`${group.latency?.retried || 0} con reintento`)}</b>
+    </div>
+  `).join('');
+
+  return `
+    <section class="entry-diagnosis" aria-labelledby="entry-diagnosis-title">
+      <div class="entry-diagnosis-heading">
+        <div>
+          <span>Diagnóstico causal descriptivo</span>
+          <strong id="entry-diagnosis-title">Dónde se deterioran las entradas</strong>
+        </div>
+        <span class="ledger-status warn">${escapeHtml(`${summary.currentAboveTolerance || 0}/${summary.currentOpenings || 0} sobre 0,15%`)}</span>
+      </div>
+      <div class="entry-diagnosis-summary">
+        <strong>${escapeHtml(summary.label || 'Lectura pendiente')}</strong>
+        <span>${escapeHtml(summary.detail || '')}</span>
+      </div>
+      <div class="entry-diagnosis-stages">${stages}</div>
+      <div class="entry-diagnosis-subheading">
+        <strong>Comparación por activo</strong>
+        <span>Media adversa desde la señal hasta el fill</span>
+      </div>
+      <div class="entry-diagnosis-table" role="table" aria-label="Diagnóstico de entrada por activo">${symbols}</div>
+      <div class="entry-diagnosis-subheading">
+        <strong>Ruta de ejecución actual</strong>
+        <span>Una espera larga no implica por sí sola que cause el desvío</span>
+      </div>
+      <div class="entry-diagnosis-slices">${routes}</div>
+      <div class="entry-diagnosis-subheading">
+        <strong>Latencia actual</strong>
+        <span>Agrupada por tiempo desde detección hasta ejecución</span>
+      </div>
+      <div class="entry-diagnosis-slices">${latency}</div>
+      <div class="entry-diagnosis-subheading">
+        <strong>Franja actual</strong>
+        <span>Hora de Madrid</span>
+      </div>
+      <div class="entry-diagnosis-slices">${timeWindows}</div>
+      <p class="replica-gap-note">${escapeHtml(summary.caveat || '')}</p>
+    </section>
+  `;
+}
+
+function formatSignedCohortDelta(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  return `${number > 0 ? '+' : ''}${number.toLocaleString('es-ES', { maximumFractionDigits: Math.abs(number) < 1 ? 4 : 2 })} pp`;
 }
 
 function renderCohortPeriod(label, period = {}) {

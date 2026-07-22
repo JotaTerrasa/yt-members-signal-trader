@@ -17,7 +17,8 @@ function cohort({
   entryAverage = 0.1,
   closeAbove = 8,
   closeAverage = 0.08,
-  closeP95 = 2
+  closeP95 = 2,
+  entryExecutionAnalysis = null
 }) {
   return {
     startedAt,
@@ -44,6 +45,7 @@ function cohort({
       executionLatency: {
         closing: { total: { p95Seconds: closeP95 } }
       },
+      entryExecutionAnalysis,
       executionRouteAnalysis: {
         gap: -matched,
         counts: {
@@ -143,4 +145,70 @@ test('distingue un empeoramiento económico respaldado de un resultado inconclus
 
 test('no construye un contraste sin una cohorte anterior completa', () => {
   assert.equal(buildCohortComparison({ current: cohort({ startedAt: '2026-07-10T00:00:00.000Z' }) }), null);
+});
+
+test('explica dónde se concentra el deterioro de entrada sin culpar automáticamente a los reintentos', () => {
+  const analysis = ({ signalStage, fillStage, symbols, routes, openings, above }) => ({
+    tolerancePercent: 0.15,
+    timezone: 'Europe/Madrid',
+    totals: {
+      openings,
+      measured: openings,
+      aboveTolerance: above,
+      signalToQuote: { measured: openings, averageAdversePercent: signalStage, averageSignedPercent: signalStage },
+      quoteToFill: { measured: openings, averageAdversePercent: fillStage, averageSignedPercent: fillStage }
+    },
+    bySymbol: symbols,
+    byRoute: routes,
+    byLatency: [],
+    byTimeWindow: []
+  });
+  const previousAnalysis = analysis({
+    signalStage: 0.05,
+    fillStage: 0.04,
+    openings: 8,
+    above: 2,
+    symbols: [
+      { key: 'SOL-USDT', label: 'SOL-USDT', openings: 4, measured: 4, averageAdversePercent: 0.1, aboveTolerancePercent: 25, latency: {} },
+      { key: 'BTC-USDT', label: 'BTC-USDT', openings: 4, measured: 4, averageAdversePercent: 0.05, aboveTolerancePercent: 25, latency: {} }
+    ],
+    routes: [
+      { key: 'immediate', label: 'Sin espera de reintento', openings: 6, measured: 6, aboveTolerance: 1, aboveTolerancePercent: 16.67, averageAdversePercent: 0.06, latency: {} },
+      { key: 'retried', label: 'Con espera de reintento', openings: 2, measured: 2, aboveTolerance: 1, aboveTolerancePercent: 50, averageAdversePercent: 0.15, latency: {} }
+    ]
+  });
+  const currentAnalysis = analysis({
+    signalStage: 0.2,
+    fillStage: 0.04,
+    openings: 8,
+    above: 5,
+    symbols: [
+      { key: 'SOL-USDT', label: 'SOL-USDT', openings: 4, measured: 4, averageAdversePercent: 0.25, aboveTolerancePercent: 100, latency: {} },
+      { key: 'BTC-USDT', label: 'BTC-USDT', openings: 4, measured: 4, averageAdversePercent: 0.04, aboveTolerancePercent: 25, latency: {} }
+    ],
+    routes: [
+      { key: 'immediate', label: 'Sin espera de reintento', openings: 7, measured: 7, aboveTolerance: 4, aboveTolerancePercent: 57.14, averageAdversePercent: 0.15, latency: {} },
+      { key: 'retried', label: 'Con espera de reintento', openings: 1, measured: 1, aboveTolerance: 1, aboveTolerancePercent: 100, averageAdversePercent: 0.3, latency: {} }
+    ]
+  });
+  const comparison = buildCohortComparison({
+    previous: cohort({
+      startedAt: '2026-07-01T00:00:00.000Z',
+      endedAt: '2026-07-10T00:00:00.000Z',
+      entryExecutionAnalysis: previousAnalysis
+    }),
+    current: cohort({
+      startedAt: '2026-07-10T00:00:00.000Z',
+      entryExecutionAnalysis: currentAnalysis
+    })
+  });
+
+  assert.equal(comparison.entryDiagnosis.summary.key, 'signalToQuote');
+  assert.equal(comparison.entryDiagnosis.summary.dominantSymbol, 'SOL-USDT');
+  assert.equal(comparison.entryDiagnosis.summary.comparableDeteriorationSymbol, 'SOL-USDT');
+  assert.equal(comparison.entryDiagnosis.summary.immediateAboveTolerance, 4);
+  assert.equal(comparison.entryDiagnosis.summary.retriedAboveTolerance, 1);
+  assert.equal(comparison.entryDiagnosis.stages.find((stage) => stage.key === 'signalToQuote').assessment, 'worse');
+  assert.equal(comparison.entryDiagnosis.bySymbol.find((group) => group.key === 'SOL-USDT').assessment, 'worse');
+  assert.equal(comparison.entryDiagnosis.byRoute.find((group) => group.key === 'retried').assessment, 'insufficient');
 });

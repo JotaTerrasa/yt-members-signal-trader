@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -498,6 +498,68 @@ test('mide reacción y reintentos sin duplicar un mismo cierre', () => {
   assert.equal(summary.closing.events, 1);
   assert.equal(summary.closing.measured, 1);
   assert.equal(summary.closing.total.medianSeconds, 1);
+});
+
+test('localiza la desviación de entrada por fase, activo y reintento sin duplicar aperturas', () => {
+  const row = ({ id, symbol, direction = 'LONG', signal, quote, fill, detectedAt, firstAttemptAt, openingAt }) => ({
+    id,
+    symbol,
+    direction,
+    trace: { openingEventId: id },
+    vst: {
+      signalEntry: signal,
+      preOrderMarket: quote,
+      entry: fill,
+      entrySlippagePercent: null,
+      openingDetectedAt: detectedAt,
+      openingFirstAttemptAt: firstAttemptAt,
+      openingAt
+    }
+  });
+  const btc = row({
+    id: 'btc-1',
+    symbol: 'BTC-USDT',
+    signal: 100,
+    quote: 100.1,
+    fill: 100.2,
+    detectedAt: '2026-07-20T08:00:00.000Z',
+    firstAttemptAt: '2026-07-20T08:00:01.000Z',
+    openingAt: '2026-07-20T08:00:01.000Z'
+  });
+  const eth = row({
+    id: 'eth-1',
+    symbol: 'ETH-USDT',
+    direction: 'SHORT',
+    signal: 100,
+    quote: 99.95,
+    fill: 99.9,
+    detectedAt: '2026-07-20T12:00:00.000Z',
+    firstAttemptAt: '2026-07-20T12:00:01.000Z',
+    openingAt: '2026-07-20T12:00:01.000Z'
+  });
+  const sol = row({
+    id: 'sol-1',
+    symbol: 'SOL-USDT',
+    signal: 100,
+    quote: 100.2,
+    fill: 100.3,
+    detectedAt: '2026-07-20T22:00:00.000Z',
+    firstAttemptAt: '2026-07-20T22:00:01.000Z',
+    openingAt: '2026-07-20T22:01:01.000Z'
+  });
+  const analysis = buildEntryExecutionAnalysis([btc, eth, sol, { ...btc }]);
+
+  assert.equal(analysis.totals.openings, 3);
+  assert.equal(analysis.totals.measured, 3);
+  assert.equal(analysis.totals.aboveTolerance, 2);
+  assert.equal(analysis.byRoute.find((group) => group.key === 'immediate').openings, 2);
+  assert.equal(analysis.byRoute.find((group) => group.key === 'retried').openings, 1);
+  assert.equal(analysis.byLatency.find((group) => group.key === 'from_30_to_120s').openings, 1);
+  assert.equal(analysis.byTimeWindow.find((group) => group.key === 'morning').openings, 1);
+  assert.equal(analysis.byTimeWindow.find((group) => group.key === 'night').openings, 1);
+  assert.equal(analysis.totals.signalToQuote.measured, 3);
+  assert.equal(analysis.totals.quoteToFill.measured, 3);
+  assert.equal(analysis.timezone, 'Europe/Madrid');
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

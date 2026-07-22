@@ -21,7 +21,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -5036,6 +5036,7 @@ function summarizeReplicaAudit({
   const executionRouteAnalysis = buildExecutionRouteAnalysis(rows);
   const executionPriceChain = buildExecutionPriceChainAttribution(rows);
   const executionLatency = summarizeExecutionLatency(rows);
+  const entryExecutionAnalysis = buildEntryExecutionAnalysis(rows);
   const missingReasonCounts = rows
     .filter((row) => row.cause === 'No ejecutada en VST')
     .reduce((totals, row) => {
@@ -5101,6 +5102,7 @@ function summarizeReplicaAudit({
     executionRouteAnalysis,
     executionPriceChain,
     executionLatency,
+    entryExecutionAnalysis,
     missingReasonCounts,
     stopAnalysis,
     unprocessedCloseRows: unprocessedCloseRows.length,

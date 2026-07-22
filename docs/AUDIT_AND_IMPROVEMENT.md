@@ -231,6 +231,14 @@ El corte de referencia del 22 de julio de 2026 contiene 34 cierres en la cohorte
 
 El panel y el informe expresan por ello el veredicto `Mejora técnica; rentabilidad no demostrada`. El bootstrap usa una semilla fija y 4.000 remuestreos para que dos auditorías sobre la misma evidencia produzcan exactamente la misma salida. Es una medida descriptiva de incertidumbre, no una predicción ni una garantía de beneficio.
 
+### Diagnóstico del deterioro de entrada
+
+El diagnóstico añadido al corte del 22 de julio atribuye la desviación adversa sin modificar la operativa. En la cohorte actual hay 38 aperturas medibles y 23 superan el 0,15%. El tramo `señal → cotización previa` pasa del 0,0546% al 0,0643% de media adversa, mientras que `cotización previa → fill` pasa del 0,0718% al 0,0808%. Ambos tramos empeoran y el segundo sigue siendo el de mayor magnitud observada.
+
+SUI presenta la media actual más alta, pero la cohorte anterior solo aporta dos aperturas y no permite contrastar el cambio. SOL es el deterioro comparable más claro. De las 23 aperturas que superan el umbral, 21 se ejecutaron sin espera de reintento y dos después de reintentarse. Por tanto, en esta muestra las esperas de la cola no explican la mayor parte de los desvíos.
+
+La lectura por activo, ruta, latencia y franja horaria es descriptiva. No demuestra causalidad, no justifica bloquear un ticker o una hora y no sustituye una prueba controlada con suficiente muestra. Su finalidad es señalar dónde investigar antes de proponer otra modificación del camino de ejecución.
+
 ## Límites de la mejora
 
 El sistema puede reducir latencia, errores, duplicados, slippage evitable y mediciones incorrectas. No puede garantizar que las señales futuras sean rentables ni reproducir un precio que ya no está disponible.

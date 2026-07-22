@@ -1,3 +1,5 @@
+import { entryAdverseDeviationPercent, entrySignedDeviationPercent } from './executionAuditPrices.js';
+
 const transientClosePatterns = [
   /please try again later/i,
   /(?:system|service).*(?:currently )?busy|currently busy/i,
@@ -788,6 +790,59 @@ export function buildExecutionPriceChainAttribution(rows = []) {
   };
 }
 
+export function buildEntryExecutionAnalysis(rows = [], { tolerancePercent = 0.15 } = {}) {
+  const tolerance = Math.max(0, Number(tolerancePercent) || 0.15);
+  const points = uniqueEntryExecutionPoints(rows);
+  const totals = summarizeEntryExecutionGroup('all', 'Todas las aperturas', points, tolerance);
+  const bySymbol = groupedEntryExecution(points, (point) => point.symbol)
+    .map(([key, items]) => summarizeEntryExecutionGroup(key, key, items, tolerance))
+    .sort(compareEntryExecutionGroups);
+  const routeLabels = {
+    immediate: 'Sin espera de reintento',
+    retried: 'Con espera de reintento',
+    unknown: 'Sin latencia completa'
+  };
+  const routeOrder = ['immediate', 'retried', 'unknown'];
+  const byRouteMap = new Map(groupedEntryExecution(points, (point) => point.route));
+  const byRoute = routeOrder
+    .filter((key) => byRouteMap.has(key))
+    .map((key) => summarizeEntryExecutionGroup(key, routeLabels[key], byRouteMap.get(key), tolerance));
+  const latencyLabels = {
+    under_5s: 'Hasta 5 s',
+    from_5_to_30s: 'De 5 a 30 s',
+    from_30_to_120s: 'De 30 a 120 s',
+    over_120s: 'Más de 120 s',
+    unknown: 'Sin latencia completa'
+  };
+  const latencyOrder = ['under_5s', 'from_5_to_30s', 'from_30_to_120s', 'over_120s', 'unknown'];
+  const latencyMap = new Map(groupedEntryExecution(points, (point) => point.latencyBucket));
+  const byLatency = latencyOrder
+    .filter((key) => latencyMap.has(key))
+    .map((key) => summarizeEntryExecutionGroup(key, latencyLabels[key], latencyMap.get(key), tolerance));
+  const timeLabels = {
+    night: '00:00–05:59',
+    morning: '06:00–11:59',
+    afternoon: '12:00–17:59',
+    evening: '18:00–23:59',
+    unknown: 'Hora desconocida'
+  };
+  const timeOrder = ['night', 'morning', 'afternoon', 'evening', 'unknown'];
+  const timeMap = new Map(groupedEntryExecution(points, (point) => point.timeWindow));
+  const byTimeWindow = timeOrder
+    .filter((key) => timeMap.has(key))
+    .map((key) => summarizeEntryExecutionGroup(key, timeLabels[key], timeMap.get(key), tolerance));
+
+  return {
+    tolerancePercent: roundMoney(tolerance),
+    timezone: 'Europe/Madrid',
+    totals,
+    bySymbol,
+    byRoute,
+    byLatency,
+    byTimeWindow
+  };
+}
+
 export function summarizeExecutionLatency(rows = []) {
   return {
     opening: summarizeLatencyPhase(rows, {
@@ -803,6 +858,206 @@ export function summarizeExecutionLatency(rows = []) {
       completedAt: (row) => row?.vst?.closeSignalAt
     })
   };
+}
+
+function uniqueEntryExecutionPoints(rows = []) {
+  const unique = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const openingAt = row?.vst?.openingAt || null;
+    const eventId = String(
+      row?.trace?.openingEventId
+      || row?.trace?.openingOrderId
+      || (openingAt ? `${row?.symbol || ''}|${openingAt}|${row?.vst?.entry || ''}` : '')
+    ).trim();
+    if (!eventId) {
+      continue;
+    }
+    const candidate = entryExecutionPoint(row, eventId);
+    const existing = unique.get(eventId);
+    if (!existing || entryExecutionEvidenceScore(candidate) > entryExecutionEvidenceScore(existing)) {
+      unique.set(eventId, candidate);
+    }
+  }
+  return [...unique.values()];
+}
+
+function entryExecutionPoint(row, eventId) {
+  const direction = String(row?.direction || '').toUpperCase();
+  const signal = positiveNumber(row?.vst?.signalEntry);
+  const quote = positiveNumber(row?.vst?.preOrderMarket);
+  const fill = positiveNumber(row?.vst?.entry);
+  const detectedAt = validTimestamp(row?.vst?.openingDetectedAt);
+  const firstAttemptAt = validTimestamp(row?.vst?.openingFirstAttemptAt);
+  const completedAt = validTimestamp(row?.vst?.openingAt);
+  const validTiming = [detectedAt, firstAttemptAt, completedAt].every(Number.isFinite)
+    && firstAttemptAt >= detectedAt
+    && completedAt >= firstAttemptAt;
+  const reactionSeconds = validTiming ? (firstAttemptAt - detectedAt) / 1000 : null;
+  const retryWaitSeconds = validTiming ? (completedAt - firstAttemptAt) / 1000 : null;
+  const totalLatencySeconds = validTiming ? (completedAt - detectedAt) / 1000 : null;
+  const attribution = executionPriceChainRowAttribution(row);
+  const entryImpact = attribution
+    ? sumFinite([
+        attribution.values.entry_reference,
+        attribution.values.entry_quote_move,
+        attribution.values.entry_fill,
+        attribution.values.entry_missing_evidence
+      ])
+    : null;
+
+  return {
+    id: eventId,
+    symbol: String(row?.symbol || 'UNKNOWN').toUpperCase(),
+    direction,
+    signal,
+    quote,
+    fill,
+    totalAdversePercent: nullableNumber(row?.vst?.entrySlippagePercent)
+      ?? entryAdverseDeviationPercent({ actual: fill, reference: signal, direction }),
+    totalSignedPercent: entrySignedDeviationPercent({ actual: fill, reference: signal, direction }),
+    signalToQuoteAdversePercent: entryAdverseDeviationPercent({ actual: quote, reference: signal, direction }),
+    signalToQuoteSignedPercent: entrySignedDeviationPercent({ actual: quote, reference: signal, direction }),
+    quoteToFillAdversePercent: entryAdverseDeviationPercent({ actual: fill, reference: quote, direction }),
+    quoteToFillSignedPercent: entrySignedDeviationPercent({ actual: fill, reference: quote, direction }),
+    reactionSeconds,
+    retryWaitSeconds,
+    totalLatencySeconds,
+    route: retryWaitSeconds === null ? 'unknown' : retryWaitSeconds > 0.5 ? 'retried' : 'immediate',
+    latencyBucket: entryLatencyBucket(totalLatencySeconds),
+    timeWindow: entryTimeWindow(row?.vst?.openingDetectedAt || row?.vst?.openingAt),
+    matchedEntryImpact: entryImpact === null ? null : roundMoney(entryImpact)
+  };
+}
+
+function entryExecutionEvidenceScore(point = {}) {
+  return [
+    point.signal,
+    point.quote,
+    point.fill,
+    point.totalAdversePercent,
+    point.totalLatencySeconds,
+    point.matchedEntryImpact
+  ].filter((value) => value !== null && value !== undefined).length;
+}
+
+function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
+  const items = Array.isArray(points) ? points : [];
+  const measured = items.filter((point) => point.totalAdversePercent !== null);
+  const aboveTolerance = measured.filter((point) => point.totalAdversePercent > tolerancePercent).length;
+  const latencyValues = items.map((point) => point.totalLatencySeconds);
+  const matchedImpacts = items.map((point) => point.matchedEntryImpact).filter((value) => value !== null);
+  const signalToQuote = entryStageStats(items, 'signalToQuote');
+  const quoteToFill = entryStageStats(items, 'quoteToFill');
+  const adverse = entryPercentStats(measured.map((point) => point.totalAdversePercent));
+  const latency = entryValueStats(latencyValues, { allowNegative: false });
+  const matchedEntryImpact = sumFinite(matchedImpacts);
+
+  return {
+    key,
+    label,
+    openings: items.length,
+    measured: measured.length,
+    aboveTolerance,
+    aboveTolerancePercent: measured.length ? roundMoney(aboveTolerance / measured.length * 100) : null,
+    averageAdversePercent: adverse.average,
+    medianAdversePercent: adverse.median,
+    p95AdversePercent: adverse.p95,
+    signalToQuote,
+    quoteToFill,
+    latency: {
+      measured: latency.count,
+      retried: items.filter((point) => point.route === 'retried').length,
+      averageSeconds: latency.average,
+      medianSeconds: latency.median,
+      p95Seconds: latency.p95
+    },
+    matchedEconomicRows: matchedImpacts.length,
+    matchedEntryImpact: matchedImpacts.length ? roundMoney(matchedEntryImpact) : null,
+    matchedEntryImpactPerRow: matchedImpacts.length ? roundMoney(matchedEntryImpact / matchedImpacts.length) : null
+  };
+}
+
+function entryStageStats(points, prefix) {
+  const adverse = entryPercentStats(points.map((point) => point[`${prefix}AdversePercent`]));
+  const signed = entryValueStats(points.map((point) => point[`${prefix}SignedPercent`]));
+  return {
+    measured: adverse.count,
+    averageAdversePercent: adverse.average,
+    medianAdversePercent: adverse.median,
+    p95AdversePercent: adverse.p95,
+    averageSignedPercent: signed.average
+  };
+}
+
+function entryPercentStats(values) {
+  return entryValueStats(values, { allowNegative: false });
+}
+
+function entryValueStats(values, { allowNegative = true } = {}) {
+  const sorted = (values || [])
+    .map(nullableNumber)
+    .filter((value) => value !== null && (allowNegative || value >= 0))
+    .sort((left, right) => left - right);
+  if (!sorted.length) {
+    return { count: 0, average: null, median: null, p95: null };
+  }
+  const average = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
+  return {
+    count: sorted.length,
+    average: roundMoney(average),
+    median: roundMoney(sorted[Math.floor((sorted.length - 1) * 0.5)]),
+    p95: roundMoney(sorted[Math.floor((sorted.length - 1) * 0.95)])
+  };
+}
+
+function groupedEntryExecution(points, selector) {
+  const groups = new Map();
+  for (const point of points || []) {
+    const key = selector(point) || 'unknown';
+    const items = groups.get(key) || [];
+    items.push(point);
+    groups.set(key, items);
+  }
+  return [...groups.entries()];
+}
+
+function compareEntryExecutionGroups(left, right) {
+  return Number(right.averageAdversePercent ?? -1) - Number(left.averageAdversePercent ?? -1)
+    || Number(right.aboveTolerancePercent ?? -1) - Number(left.aboveTolerancePercent ?? -1)
+    || right.openings - left.openings
+    || left.key.localeCompare(right.key);
+}
+
+function validTimestamp(value) {
+  const timestamp = Date.parse(value || '');
+  return Number.isFinite(timestamp) ? timestamp : NaN;
+}
+
+function entryLatencyBucket(seconds) {
+  const value = nullableNumber(seconds);
+  if (value === null || value < 0) return 'unknown';
+  if (value <= 5) return 'under_5s';
+  if (value <= 30) return 'from_5_to_30s';
+  if (value <= 120) return 'from_30_to_120s';
+  return 'over_120s';
+}
+
+function entryTimeWindow(value) {
+  const timestamp = validTimestamp(value);
+  if (!Number.isFinite(timestamp)) {
+    return 'unknown';
+  }
+  const hourPart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Madrid',
+    hour: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date(timestamp)).find((part) => part.type === 'hour');
+  const hour = Number(hourPart?.value);
+  if (!Number.isFinite(hour)) return 'unknown';
+  if (hour < 6) return 'night';
+  if (hour < 12) return 'morning';
+  if (hour < 18) return 'afternoon';
+  return 'evening';
 }
 
 function executionPriceChainRowAttribution(row = {}) {

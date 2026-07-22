@@ -468,6 +468,13 @@ function buildFindings(report) {
         detail: `El intervalo exploratorio del cambio neto va de ${money(comparison.statistics.ci95Low)} a ${money(comparison.statistics.ci95High)} VST por cierre y cruza cero.`
       });
     }
+    if (comparison.entryDiagnosis?.summary) {
+      findings.push({
+        severity: 'info',
+        code: 'entry_execution_attribution',
+        detail: `${withFinalPeriod(comparison.entryDiagnosis.summary.label)} ${withFinalPeriod(comparison.entryDiagnosis.summary.detail)}`.trim()
+      });
+    }
   }
   if (report.replica && Math.abs(report.replica.fees) > 0 && !report.replica.commissionRebateDetected) {
     findings.push({ severity: 'info', code: 'rebate_not_detected', detail: 'BingX no acredita ninguna devolución de comisiones en el histórico consultado.' });
@@ -768,10 +775,44 @@ function renderCohortComparisonLines(comparison) {
     ...verdictLines,
     '- Métricas normalizadas:',
     ...metricLines,
+    ...renderEntryDiagnosisLines(comparison.entryDiagnosis),
     `- Media neta enlazada: antes ${money(statistics.previous?.mean)} VST; ahora ${money(statistics.current?.mean)} VST; diferencia ${money(statistics.meanDifference)} VST por cierre.`,
     `- Bootstrap determinista (${statistics.iterations || 0} iteraciones): intervalo del 95% ${money(statistics.ci95Low)} a ${money(statistics.ci95High)} VST; probabilidad exploratoria de mejora ${percent(statistics.probabilityCurrentHigherPercent)}; lectura ${cohortAssessmentLabel(statistics.conclusion)}.`,
     '- Límite: el contraste describe esta muestra. La cobertura parcial y un intervalo que cruce cero impiden afirmar una mejora económica o garantizar rentabilidad futura.'
   ];
+}
+
+function renderEntryDiagnosisLines(diagnosis) {
+  if (!diagnosis?.summary) {
+    return ['- Diagnóstico de entrada: sin telemetría suficiente.'];
+  }
+  const stageLines = (diagnosis.stages || []).map((stage) => (
+    `- Fase ${stage.label}: antes ${percent(stage.previousAverageAdversePercent)}; ahora ${percent(stage.currentAverageAdversePercent)}; cambio ${signedPercentPoints(stage.deltaAverageAdversePercent)}; ${cohortAssessmentLabel(stage.assessment)}.`
+  ));
+  const symbolLines = (diagnosis.bySymbol || []).map((group) => (
+    `- ${group.label}: ${group.previousOpenings || 0} → ${group.currentOpenings || 0} aperturas; media ${percent(group.previousAverageAdversePercent)} → ${percent(group.currentAverageAdversePercent)}; ${percent(group.currentAboveTolerancePercent)} sobre 0,15%; ${cohortAssessmentLabel(group.assessment)}.`
+  ));
+  const routeLines = (diagnosis.byRoute || []).map((group) => (
+    `- ${group.label}: ${group.currentOpenings || 0} aperturas actuales; media ${percent(group.currentAverageAdversePercent)}; ${percent(group.currentAboveTolerancePercent)} sobre 0,15%; ${cohortAssessmentLabel(group.assessment)}.`
+  ));
+  return [
+    `- Diagnóstico de entrada: ${withFinalPeriod(diagnosis.summary.label)} ${withFinalPeriod(diagnosis.summary.detail)}`.trim(),
+    '- Descomposición por fase:',
+    ...stageLines,
+    '- Comparación por activo:',
+    ...symbolLines,
+    '- Comparación por ruta:',
+    ...routeLines,
+    `- Límite del diagnóstico: ${withFinalPeriod(diagnosis.summary.caveat || '')}`
+  ];
+}
+
+function signedPercentPoints(value) {
+  if (!Number.isFinite(Number(value))) {
+    return '-';
+  }
+  const number = Number(value);
+  return `${number > 0 ? '+' : ''}${number.toFixed(Math.abs(number) < 1 ? 4 : 2)} pp`;
 }
 
 function cohortMetricValue(metric, value) {

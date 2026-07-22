@@ -475,6 +475,8 @@ La auditoría incluye una cohorte posterior a las mejoras, las tarifas maker/tak
 
 El bloque `Efecto observado de las mejoras` compara la cohorte vigente con la inmediatamente anterior. Normaliza incidencias, desviaciones, latencia, costes y PnL por cierre para evitar que dos periodos de tamaños distintos parezcan comparables por sus totales. También muestra la cobertura de la hoja y de los precios ejecutados exactos. Un bootstrap determinista aporta un intervalo exploratorio del cambio medio: si cruza cero, la interfaz declara la mejora económica como no demostrada aunque hayan mejorado la fiabilidad o los cierres.
 
+Dentro de ese bloque, `Dónde se deterioran las entradas` descompone el desplazamiento adverso entre `señal → cotización previa` y `cotización previa → fill`. Compara además activos, aperturas inmediatas y reintentadas, bandas de latencia y franjas horarias de Madrid. Los grupos con menos de tres observaciones comparables se marcan como muestra insuficiente; una asociación descriptiva nunca se convierte automáticamente en una guarda de ejecución.
+
 La comparación es de solo lectura. No interviene en el parser, las validaciones, los reintentos, los stops, el tamaño de las órdenes ni los cierres. La hoja puede quedar temporalmente por detrás de BingX; en ese caso las métricas de alineación se marcan como parciales y no se extrapolan al resto de la cohorte.
 
 El comparador reconstruye además la cadena `hoja → señal/objetivo → cotización previa → fill` y la representa con Plotly. La latencia se divide entre reacción inicial y espera por reintentos, de modo que un movimiento previo, un retry y una diferencia entre cotización y fill no se mezclen bajo una única etiqueta de slippage.

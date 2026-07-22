@@ -173,6 +173,7 @@ export function buildCohortComparison({ current = null, previous = null } = {}) 
   const statistics = linkedNetBootstrap({ current, previous });
   const status = comparisonStatus({ currentPeriod, referenceIsPartial });
   const verdicts = comparisonVerdicts({ metrics, statistics, currentPeriod, previousPeriod, referenceIsPartial });
+  const entryDiagnosis = buildEntryDiagnosis({ current, previous });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -182,6 +183,7 @@ export function buildCohortComparison({ current = null, previous = null } = {}) 
     verdicts,
     metrics,
     statistics,
+    entryDiagnosis,
     overall: overallComparisonVerdict({ statistics, currentPeriod, verdicts })
   };
 }
@@ -211,6 +213,194 @@ function cohortPeriodSnapshot(cohort) {
     funding: round(summary.bingxFunding),
     net: round(summary.bingxNet)
   };
+}
+
+function buildEntryDiagnosis({ current, previous }) {
+  const currentAnalysis = current?.summary?.entryExecutionAnalysis;
+  const previousAnalysis = previous?.summary?.entryExecutionAnalysis;
+  if (!currentAnalysis?.totals || !previousAnalysis?.totals) {
+    return null;
+  }
+
+  const stages = [
+    compareEntryStage('signalToQuote', 'Señal a cotización', previousAnalysis.totals, currentAnalysis.totals),
+    compareEntryStage('quoteToFill', 'Cotización a fill', previousAnalysis.totals, currentAnalysis.totals)
+  ];
+  const bySymbol = compareEntryGroups(previousAnalysis.bySymbol, currentAnalysis.bySymbol, { minimumSamples: 3 });
+  const byRoute = compareEntryGroups(previousAnalysis.byRoute, currentAnalysis.byRoute, { minimumSamples: 3 });
+  const currentTotal = currentAnalysis.totals;
+  const immediate = entryGroup(currentAnalysis.byRoute, 'immediate');
+  const retried = entryGroup(currentAnalysis.byRoute, 'retried');
+  const dominantStage = [...stages]
+    .filter((stage) => finiteNumber(stage.currentAverageAdversePercent) !== null)
+    .sort((left, right) => Number(right.currentAverageAdversePercent) - Number(left.currentAverageAdversePercent))[0] || null;
+  const dominantSymbol = [...(currentAnalysis.bySymbol || [])]
+    .filter((group) => Number(group.openings || 0) >= 3 && finiteNumber(group.averageAdversePercent) !== null)
+    .sort((left, right) => Number(right.averageAdversePercent) - Number(left.averageAdversePercent))[0] || null;
+  const comparableDeterioration = [...bySymbol]
+    .filter((group) => group.assessment === 'worse')
+    .sort((left, right) => (
+      Number(right.deltaAboveTolerancePercent || 0) - Number(left.deltaAboveTolerancePercent || 0)
+      || Number(right.deltaAverageAdversePercent || 0) - Number(left.deltaAverageAdversePercent || 0)
+    ))[0] || null;
+  const totalAbove = Number(currentTotal.aboveTolerance || 0);
+  const retriedAbove = Number(retried?.aboveTolerance || 0);
+  const immediateAbove = Number(immediate?.aboveTolerance || 0);
+  const retrySharePercent = totalAbove > 0 ? round(retriedAbove / totalAbove * 100) : null;
+  const stageSpread = stages.length === 2
+    ? Math.abs(Number(stages[0].currentAverageAdversePercent || 0) - Number(stages[1].currentAverageAdversePercent || 0))
+    : 0;
+  const stageKey = stageSpread <= 0.01 ? 'mixed' : dominantStage?.key || 'insufficient';
+  const stageLabel = stageKey === 'signalToQuote'
+    ? 'El mayor arrastre aparece antes de enviar la orden'
+    : stageKey === 'quoteToFill'
+      ? 'El mayor arrastre aparece entre la cotización y el fill'
+      : stageKey === 'mixed'
+        ? 'El arrastre está repartido entre las dos fases de entrada'
+        : 'Faltan datos para localizar el arrastre de entrada';
+  const retryDetail = totalAbove > 0
+    ? `${immediateAbove}/${totalAbove} entradas sobre el umbral se ejecutaron sin espera de reintento; ${retriedAbove}/${totalAbove}, tras reintento.`
+    : 'No hay entradas actuales sobre el umbral configurado.';
+  const symbolDetail = dominantSymbol
+    ? `${dominantSymbol.label} registra la media actual más alta entre los activos con al menos tres aperturas: ${formatMetricNumber(dominantSymbol.averageAdversePercent, 4)}%.`
+    : 'Ningún activo alcanza todavía tres aperturas medibles en la cohorte actual.';
+  const comparableDetail = comparableDeterioration
+    ? `El deterioro comparable más claro está en ${comparableDeterioration.label}: ${formatMetricNumber(comparableDeterioration.previousAboveTolerancePercent, 1)}% → ${formatMetricNumber(comparableDeterioration.currentAboveTolerancePercent, 1)}% sobre el umbral.`
+    : 'Ningún activo tiene aún una comparación antes/después concluyente.';
+
+  return {
+    tolerancePercent: currentAnalysis.tolerancePercent,
+    timezone: currentAnalysis.timezone || 'Europe/Madrid',
+    summary: {
+      key: stageKey,
+      label: stageLabel,
+      detail: `${symbolDetail} ${comparableDetail} ${retryDetail}`,
+      caveat: 'Es una asociación descriptiva. No demuestra causalidad ni justifica cambiar la ejecución sin una muestra posterior controlada.',
+      currentOpenings: Number(currentTotal.openings || 0),
+      currentAboveTolerance: totalAbove,
+      immediateAboveTolerance: immediateAbove,
+      retriedAboveTolerance: retriedAbove,
+      retrySharePercent,
+      dominantSymbol: dominantSymbol?.key || null,
+      comparableDeteriorationSymbol: comparableDeterioration?.key || null,
+      dominantStage: dominantStage?.key || null
+    },
+    stages,
+    bySymbol,
+    byRoute,
+    currentByLatency: currentAnalysis.byLatency || [],
+    currentByTimeWindow: currentAnalysis.byTimeWindow || []
+  };
+}
+
+function compareEntryStage(key, label, previousTotals, currentTotals) {
+  const previous = previousTotals?.[key] || {};
+  const current = currentTotals?.[key] || {};
+  const previousAverage = finiteNumber(previous.averageAdversePercent);
+  const currentAverage = finiteNumber(current.averageAdversePercent);
+  return {
+    key,
+    label,
+    previousMeasured: Number(previous.measured || 0),
+    currentMeasured: Number(current.measured || 0),
+    previousAverageAdversePercent: round(previousAverage),
+    currentAverageAdversePercent: round(currentAverage),
+    previousAverageSignedPercent: round(previous.averageSignedPercent),
+    currentAverageSignedPercent: round(current.averageSignedPercent),
+    deltaAverageAdversePercent: previousAverage === null || currentAverage === null
+      ? null
+      : round(currentAverage - previousAverage),
+    assessment: entryDeltaAssessment({
+      previousAverage,
+      currentAverage,
+      previousSamples: Number(previous.measured || 0),
+      currentSamples: Number(current.measured || 0),
+      minimumSamples: 3,
+      tolerance: 0.005
+    })
+  };
+}
+
+function compareEntryGroups(previousGroups = [], currentGroups = [], { minimumSamples = 3 } = {}) {
+  const previousMap = new Map((previousGroups || []).map((group) => [group.key, group]));
+  const currentMap = new Map((currentGroups || []).map((group) => [group.key, group]));
+  const keys = [...new Set([...previousMap.keys(), ...currentMap.keys()])];
+  return keys.map((key) => {
+    const previous = previousMap.get(key) || {};
+    const current = currentMap.get(key) || {};
+    const previousAverage = finiteNumber(previous.averageAdversePercent);
+    const currentAverage = finiteNumber(current.averageAdversePercent);
+    const previousAbove = finiteNumber(previous.aboveTolerancePercent);
+    const currentAbove = finiteNumber(current.aboveTolerancePercent);
+    const averageAssessment = entryDeltaAssessment({
+      previousAverage,
+      currentAverage,
+      previousSamples: Number(previous.measured || 0),
+      currentSamples: Number(current.measured || 0),
+      minimumSamples,
+      tolerance: 0.005
+    });
+    const rateAssessment = entryDeltaAssessment({
+      previousAverage: previousAbove,
+      currentAverage: currentAbove,
+      previousSamples: Number(previous.measured || 0),
+      currentSamples: Number(current.measured || 0),
+      minimumSamples,
+      tolerance: 5
+    });
+    return {
+      key,
+      label: current.label || previous.label || key,
+      previousOpenings: Number(previous.openings || 0),
+      currentOpenings: Number(current.openings || 0),
+      previousAverageAdversePercent: round(previousAverage),
+      currentAverageAdversePercent: round(currentAverage),
+      deltaAverageAdversePercent: previousAverage === null || currentAverage === null
+        ? null
+        : round(currentAverage - previousAverage),
+      previousAboveTolerancePercent: round(previousAbove),
+      currentAboveTolerancePercent: round(currentAbove),
+      deltaAboveTolerancePercent: previousAbove === null || currentAbove === null
+        ? null
+        : round(currentAbove - previousAbove),
+      currentLatencyP95Seconds: round(current.latency?.p95Seconds),
+      currentMatchedEntryImpactPerRow: round(current.matchedEntryImpactPerRow),
+      assessment: combineEntryAssessments(averageAssessment, rateAssessment)
+    };
+  }).sort((left, right) => (
+    Number(right.currentAverageAdversePercent ?? -1) - Number(left.currentAverageAdversePercent ?? -1)
+    || right.currentOpenings - left.currentOpenings
+    || left.key.localeCompare(right.key)
+  ));
+}
+
+function entryDeltaAssessment({
+  previousAverage,
+  currentAverage,
+  previousSamples,
+  currentSamples,
+  minimumSamples,
+  tolerance
+}) {
+  if (previousAverage === null || currentAverage === null
+    || previousSamples < minimumSamples || currentSamples < minimumSamples) {
+    return 'insufficient';
+  }
+  const delta = currentAverage - previousAverage;
+  if (Math.abs(delta) <= tolerance) return 'stable';
+  return delta < 0 ? 'improved' : 'worse';
+}
+
+function combineEntryAssessments(left, right) {
+  if (left === 'insufficient' || right === 'insufficient') return 'insufficient';
+  if (left === right) return left;
+  if (left === 'stable') return right;
+  if (right === 'stable') return left;
+  return 'mixed';
+}
+
+function entryGroup(groups = [], key = '') {
+  return (groups || []).find((group) => group.key === key) || null;
 }
 
 function comparisonMetric({
