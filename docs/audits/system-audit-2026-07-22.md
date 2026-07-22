@@ -1,8 +1,8 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-22T19:47:05.504Z
+Generada: 2026-07-22T20:30:04.765Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T20:30:05.193Z
 
 ## Resumen ejecutivo
 
@@ -16,6 +16,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - **HIGH · sheet_operations_missing:** 18 operaciones de la hoja no tienen apertura VST emparejada. Motivos: 5 stop inválido, 9 filtro de costes, 3 margen VST insuficiente, 1 desviación de entrada.
 - **HIGH · historical_close_unprocessed:** 1 publicación histórica de cierre no generó evento y afectó a 3 posiciones. La errata CUERRE ya está cubierta por el parser actual.
 - **HIGH · reference_stop_divergence:** 8 stops cerraron con signo contrario a la hoja; 33 de 47 stops comparables sí quedaron alineados, 3 divergencias estuvieron precedidas por cierres fallidos por el fallo histórico del guard y esas 5 posiciones terminaron agregadas; 3 divergencias procedieron de cierres no procesados.
+- **INFO · sheet_reference_provisional:** La última jornada de la hoja conserva 3 filas abiertas. 3 aperturas VST quedan pendientes de referencia y no se tratan como extras hasta que se publiquen los cierres.
 - **HIGH · post_correction_miss:** 1 apertura faltó tras procesar una versión anterior del post. La cohorte conserva el fallo histórico; las correcciones recientes ya se recuperan por la ruta idempotente.
 - **INFO · cohort_reliability_improved:** La cohorte actual reduce las incidencias técnicas observadas de 4 a 0 operaciones.
 - **HIGH · cohort_entry_execution_worse:** La ejecución de entrada empeora frente a la cohorte anterior: 61,4% superan el 0,15% adverso.
@@ -66,9 +67,11 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - Cobertura de eventos locales: 98.24%
 - Cierres sin apertura enlazada: 0
 - Última operación disponible en la hoja: 2026-07-22T12:00:00.000Z
-- Cobertura temporal asumida hasta: 2026-07-22T23:59:59.999Z
+- Cobertura fiable para comparar hasta: 2026-07-21T23:59:59.999Z
+- Cobertura permitida para emparejar hasta: 2026-07-22T23:59:59.999Z
+- Última jornada provisional / filas abiertas: sí / 3
 - Última apertura VST: 2026-07-22T17:10:43.595Z
-- Aperturas VST posteriores sin referencia: 0
+- Aperturas VST posteriores sin referencia: 3
 - Motivos de aperturas ausentes: 5 stop inválido, 9 filtro de costes, 3 margen VST insuficiente, 1 desviación de entrada
 - Publicaciones históricas de cierre sin evento: 1
 - Posiciones afectadas por cierres no procesados: 3
@@ -83,7 +86,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - Stops divergentes por el fallo histórico del guard: 3
 - Stops divergentes tras un cierre no procesado: 3
 - Stops divergentes en posiciones agregadas: 5
-- Clasificación: {"Alineada":12,"Entrada desviada":51,"Stop antes del cierre":2,"Salida desviada":18,"Signo distinto de mercado":7,"No ejecutada en VST":18,"Diferencia de ejecución":31,"Fees dominan":9,"Stop alineado":11,"Ganancia absorbida por costes":6,"Stop con deslizamiento":6,"Cierre no procesado":3,"Cierre fallido antes del stop":3,"Resultado pendiente en hoja":3,"Extra en VST":8}
+- Clasificación: {"Alineada":12,"Entrada desviada":51,"Stop antes del cierre":2,"Salida desviada":18,"Signo distinto de mercado":7,"No ejecutada en VST":18,"Diferencia de ejecución":31,"Fees dominan":9,"Stop alineado":11,"Ganancia absorbida por costes":6,"Stop con deslizamiento":6,"Cierre no procesado":3,"Cierre fallido antes del stop":3,"Resultado pendiente en hoja":3,"Extra en VST":5,"Fuera de cobertura de la hoja":3}
 
 ## Puente contable
 
@@ -91,7 +94,8 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - Emparejadas vs hoja (159 operaciones): -558.1973 VST
 - No ejecutadas (18 operaciones): -52.5824 VST
 - Resultado pendiente en hoja (3 operaciones): 14.4951 VST
-- Extras en cobertura (8 operaciones): -22.7142 VST
+- Posteriores sin hoja (3 operaciones): -28.2720 VST
+- Extras en cobertura (5 operaciones): 5.5578 VST
 - Comisiones: -174.9805 VST
 - Funding: -4.8178 VST
 - Bruto BingX reconstruido: -78.8946 VST
@@ -159,8 +163,9 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - Inicio: 2026-07-15T07:05:17.987Z
 - Muestra: Muestra preliminar (43 cierres)
 - Aperturas / cierres: 44 / 43
-- Filas comparables / VST posteriores sin referencia: 44 / 0
+- Filas comparables / VST posteriores sin referencia: 41 / 3
 - Última operación disponible en la hoja: 2026-07-22T12:00:00.000Z
+- Última jornada provisional / filas abiertas: sí / 3
 - Neto observado: -90.3774 VST
 - Comisiones: -45.5311 VST
 - Paquetes completos: 15 de 16
@@ -173,7 +178,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - Stops comparables alineados / divergentes: 7 / 0
 - Divergencias precedidas por cierres fallidos: 0
 - Fallos heurísticos de parseo: 0
-- Clasificación: {"Entrada desviada":14,"Fees dominan":3,"Stop alineado":2,"Stop con deslizamiento":3,"Diferencia de ejecución":7,"Signo distinto de mercado":2,"Alineada":4,"Resultado pendiente en hoja":3,"Extra en VST":6}
+- Clasificación: {"Entrada desviada":14,"Fees dominan":3,"Stop alineado":2,"Stop con deslizamiento":3,"Diferencia de ejecución":7,"Signo distinto de mercado":2,"Alineada":4,"Resultado pendiente en hoja":3,"Extra en VST":3,"Fuera de cobertura de la hoja":3}
 
 ## Contraste antes y después
 
@@ -259,7 +264,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T19:47:05.929Z
 - Recarga Telegram: 30 s
 - Puerta de promoción: Bloqueada por fiabilidad
 - Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes
-- Reloj REST BingX: +709 ms de offset; RTT 296 ms; antigüedad 53.1 s; warn; solo observación
+- Reloj REST BingX: +804 ms de offset; RTT 427 ms; antigüedad 20.2 s; warn; solo observación
 
 ## Interpretación
 

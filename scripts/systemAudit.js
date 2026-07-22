@@ -410,6 +410,14 @@ function buildFindings(report) {
       detail: `${referenceCoverage.outsideCoverageRows || 0} aperturas VST son posteriores al último día disponible en la hoja (cobertura hasta ${referenceCoverage.coverageThroughAt || referenceCoverage.latestSheetAt || 'sin fecha'}). No se clasifican como extras mientras falte esa referencia.`
     });
   }
+  if (report.replica?.referenceCoverage?.provisionalLatestDay) {
+    const referenceCoverage = report.replica.referenceCoverage;
+    findings.push({
+      severity: 'info',
+      code: 'sheet_reference_provisional',
+      detail: `La última jornada de la hoja conserva ${referenceCoverage.openReferenceRows || 0} filas abiertas. ${referenceCoverage.outsideCoverageRows || 0} aperturas VST quedan pendientes de referencia y no se tratan como extras hasta que se publiquen los cierres.`
+    });
+  }
   if (report.runtime.signalCoverage?.summary?.missingOpenings) {
     const missingOpenings = report.runtime.signalCoverage.summary.missingOpenings;
     const correctedAfterEvent = Number(report.runtime.signalCoverage.summary.correctedAfterEventMissingOpenings || 0);
@@ -546,7 +554,9 @@ function renderMarkdown(report) {
     `- Cobertura de eventos locales: ${percent(r.orderHistoryEvidence?.localEventCoveragePercent)}`,
     `- Cierres sin apertura enlazada: ${r.orderHistoryEvidence?.unlinkedCloseRows ?? 0}`,
     `- Última operación disponible en la hoja: ${r.referenceCoverage?.latestSheetAt || 'sin fecha'}`,
-    `- Cobertura temporal asumida hasta: ${r.referenceCoverage?.coverageThroughAt || 'sin fecha'}`,
+    `- Cobertura fiable para comparar hasta: ${r.referenceCoverage?.coverageThroughAt || 'sin fecha'}`,
+    `- Cobertura permitida para emparejar hasta: ${r.referenceCoverage?.matchingThroughAt || r.referenceCoverage?.coverageThroughAt || 'sin fecha'}`,
+    `- Última jornada provisional / filas abiertas: ${r.referenceCoverage?.provisionalLatestDay ? 'sí' : 'no'} / ${r.referenceCoverage?.openReferenceRows ?? 0}`,
     `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
     `- Aperturas VST posteriores sin referencia: ${r.referenceCoverage?.outsideCoverageRows ?? 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
@@ -740,6 +750,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Aperturas / cierres: ${summary.openings || 0} / ${summary.closes || 0}`,
     `- Filas comparables / VST posteriores sin referencia: ${summary.referenceCoverage?.comparableRows || 0} / ${summary.referenceCoverage?.outsideCoverageRows || 0}`,
     `- Última operación disponible en la hoja: ${summary.referenceCoverage?.latestSheetAt || 'sin fecha'}`,
+    `- Última jornada provisional / filas abiertas: ${summary.referenceCoverage?.provisionalLatestDay ? 'sí' : 'no'} / ${summary.referenceCoverage?.openReferenceRows ?? 0}`,
     `- Neto observado: ${money(summary.net)} VST`,
     `- Comisiones: ${money(summary.fees)} VST`,
     `- Paquetes completos: ${packages.completePackages || 0} de ${packages.packages || 0}`,

@@ -316,6 +316,7 @@ const appState = {
   ledgerVisibleLimit: LEDGER_PAGE_SIZE,
   externalSheetVisibleLimit: EXTERNAL_SHEET_PAGE_SIZE,
   replicaAuditVisibleLimit: REPLICA_AUDIT_PAGE_SIZE,
+  alignmentAnchorSettled: false,
   externalSheetRenderKey: '',
   externalSheetLoading: false,
   externalSheetError: '',
@@ -2106,6 +2107,8 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
     ? 'warn'
     : coverage.stale
     ? 'warn'
+    : coverage.provisionalLatestDay
+      ? 'warn'
     : missingRows || marketMismatch || net < 0
       ? 'negative'
       : 'positive';
@@ -2113,6 +2116,8 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
     ? 'Actualización parcial'
     : coverage.stale
     ? 'Hoja desactualizada'
+    : coverage.provisionalLatestDay
+      ? 'Jornada provisional'
     : missingRows || marketMismatch || net < 0
       ? 'Desalineación abierta'
       : 'Alineación controlada';
@@ -2124,6 +2129,8 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
     ? `Se conserva el último dato válido mientras se reintenta la lectura: ${friendlyBingxError(refreshWarning)}`
     : coverage.stale
     ? `La hoja llega hasta ${latestSheet} y acumula ${lag} de retraso. ${outsideCoverage} operaciones VST posteriores todavía no pueden compararse.`
+    : coverage.provisionalLatestDay
+      ? `La última jornada mantiene ${Number(coverage.openReferenceRows || 0)} filas abiertas. ${outsideCoverage} operaciones VST quedan fuera del resultado hasta que la hoja publique sus cierres.`
     : missingRows
       ? `${missingRows} operaciones de la hoja no tienen una apertura VST emparejada.`
       : net < 0
@@ -4881,20 +4888,45 @@ function renderOfficialSheetVstAlignment(audit) {
   const comparableRows = Math.max(0, rows.length - outsideCoverageCount);
   const reviewCount = Math.max(0, comparableRows - alignedCount);
   const sheetCoverageDetail = referenceCoverage.latestSheetAt
-    ? `Hoja actualizada hasta ${formatDateTime(referenceCoverage.latestSheetAt)}`
+    ? referenceCoverage.provisionalLatestDay
+      ? `Jornada provisional: ${formatDateTime(referenceCoverage.latestSheetAt)} · ${Number(referenceCoverage.openReferenceRows || 0)} abiertas`
+      : `Hoja actualizada hasta ${formatDateTime(referenceCoverage.latestSheetAt)}`
     : `${sheetRows.length} operaciones`;
 
   elements.alignmentStatus.textContent = referenceCoverage.stale
     ? `${formatMonth(audit.month)} - hoja hasta ${formatDateTime(referenceCoverage.latestSheetAt)}`
+    : referenceCoverage.provisionalLatestDay
+      ? `${formatMonth(audit.month)} - última jornada provisional`
     : `${formatMonth(audit.month)} - ${pairedCount}/${sheetCount} emparejadas`;
   elements.alignmentSummary.innerHTML = [
     renderAlignmentMetric('Google Sheet', formatPercent(sheetWinRate), sheetCoverageDetail, amountClass((sheetWinRate ?? 50) - 50)),
     renderAlignmentMetric('BingX comparable', formatPercent(vstWinRate), `${vstRows.length} resultados con referencia`, amountClass((vstWinRate ?? 50) - 50)),
     renderAlignmentMetric('Emparejadas', `${pairedCount}/${sheetCount}`, `${missingCount} no ejecutadas`, missingCount ? 'amount negative' : 'amount positive'),
-    renderAlignmentMetric('Sin referencia', String(outsideCoverageCount), outsideCoverageCount ? 'Operaciones VST posteriores a la hoja' : 'Cobertura temporal completa', outsideCoverageCount ? 'warn' : 'amount positive'),
+    renderAlignmentMetric('Sin referencia', String(outsideCoverageCount), outsideCoverageCount
+      ? referenceCoverage.provisionalLatestDay
+        ? 'Pendientes de cierre o publicación en la hoja'
+        : 'Operaciones VST posteriores a la hoja'
+      : 'Cobertura temporal completa', outsideCoverageCount ? 'warn' : 'amount positive'),
     renderAlignmentMetric('Alineadas', String(alignedCount), `${reviewCount} requieren revisión`, reviewCount ? 'warn' : 'amount positive')
   ].join('');
   renderReplicaControlPreservingScroll(audit);
+  settleAlignmentAnchor();
+}
+
+function settleAlignmentAnchor() {
+  if (appState.alignmentAnchorSettled
+    || appState.pnlLoading
+    || window.location.hash !== '#sheet-vst-alignment') {
+    return;
+  }
+  const panel = document.querySelector('#sheet-vst-alignment');
+  if (!panel) {
+    return;
+  }
+  appState.alignmentAnchorSettled = true;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => panel.scrollIntoView({ block: 'start', behavior: 'auto' }));
+  });
 }
 
 function renderReplicaControlPreservingScroll(audit) {
@@ -5172,8 +5204,10 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
   const status = bridge.reconciled
     ? 'Cuadra al céntimo'
     : `Residual ${formatMoney(bridge.residual, 'VST')}`;
-  const coverageNote = referenceCoverage.stale
-    ? `${outsideCoverage} operaciones posteriores a la hoja se muestran como resultado sin referencia y no como diferencia de estrategia.`
+  const coverageNote = referenceCoverage.provisionalLatestDay
+    ? `${outsideCoverage} operaciones VST de la jornada provisional se mantienen fuera de la comparación hasta que la hoja publique sus cierres.`
+    : referenceCoverage.stale
+      ? `${outsideCoverage} operaciones posteriores a la hoja se muestran como resultado sin referencia y no como diferencia de estrategia.`
     : pendingReference
       ? `${pendingReference} operaciones ya aparecen en la hoja, pero siguen abiertas y no entrarán en la comparación económica hasta publicar PnL.`
       : 'La hoja cubre toda la ventana temporal utilizada por el puente.';
@@ -5610,8 +5644,21 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const unprocessedCloseRows = Number(summary.unprocessedCloseRows || 0);
   const unprocessedClosePosts = Number(summary.unprocessedClosePosts || 0);
   const coverageDetail = referenceCoverage.latestSheetAt
-    ? `Última operación: ${formatDateTime(referenceCoverage.latestSheetAt)}`
+    ? referenceCoverage.provisionalLatestDay
+      ? `Última jornada provisional: ${formatDateTime(referenceCoverage.latestSheetAt)}`
+      : `Última operación: ${formatDateTime(referenceCoverage.latestSheetAt)}`
     : 'Sin fecha de referencia';
+  const coverageLabel = referenceCoverage.stale
+    ? 'Desactualizada'
+    : referenceCoverage.provisionalLatestDay
+      ? 'Jornada provisional'
+      : 'Al día';
+  const coverageClass = referenceCoverage.stale || referenceCoverage.provisionalLatestDay
+    ? 'warn'
+    : 'amount positive';
+  const coverageTail = referenceCoverage.provisionalLatestDay
+    ? `${referenceCoverage.openReferenceRows || 0} filas abiertas · ${referenceCoverage.outsideCoverageRows || 0} VST pendientes`
+    : `${referenceCoverage.outsideCoverageRows || 0} VST posteriores`;
 
   return `
     <div class="replica-audit">
@@ -5632,7 +5679,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Devolución detectada', formatMoney(actualRebate, 'VST'), summary.commissionRebateDetected ? 'Ingreso acreditado por BingX' : 'Sin ingreso de devolución en BingX', amountClass(actualRebate))}
         ${renderReplicaMetric('Tarifa real', formatCommissionRates(summary), 'Tarifa consultada en BingX', '')}
         ${renderReplicaMetric('Diferencia neta', formatMoney(summary.netGap, 'VST'), 'BingX neto frente a réplica teórica', amountClass(summary.netGap))}
-        ${renderReplicaMetric('Cobertura de la hoja', referenceCoverage.stale ? 'Desactualizada' : 'Al día', `${coverageDetail} · ${referenceCoverage.outsideCoverageRows || 0} VST posteriores`, referenceCoverage.stale ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Cobertura de la hoja', coverageLabel, `${coverageDetail} · ${coverageTail}`, coverageClass)}
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Signos divergentes', `${Number(signAnalysis.marketMismatch || 0)} mercado`, `${Number(signAnalysis.costFlip || 0)} absorbidos por costes`, Number(signAnalysis.marketMismatch || 0) ? 'amount negative' : 'amount positive')}
@@ -5695,6 +5742,9 @@ function renderImprovementCohort(cohort, cohortHistory = [], comparison = null) 
   const coverageSummary = coverage.summary || {};
   const latestPackage = coverage.latestPackage || null;
   const archivedCount = Array.isArray(cohortHistory) ? cohortHistory.length : 0;
+  const cohortCoverageDetail = referenceCoverage.provisionalLatestDay
+    ? `${referenceCoverage.outsideCoverageRows || 0} VST pendientes de cierre en la hoja`
+    : `${referenceCoverage.outsideCoverageRows || 0} VST posteriores sin referencia`;
   return `
     <section class="replica-cohort">
       <div class="replica-box-title">
@@ -5711,7 +5761,7 @@ function renderImprovementCohort(cohort, cohortHistory = [], comparison = null) 
         ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), 'Referencia tras fees taker estimadas', amountClass(summary.replicaEstimatedMarketNet))}
         ${renderReplicaMetric('Comisiones + funding', formatMoney(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0), 'VST'), 'Coste observado', amountClass(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0)))}
         ${renderReplicaMetric('Neto', formatMoney(summary.bingxNet, 'VST'), 'Resultado observado', amountClass(summary.bingxNet))}
-        ${renderReplicaMetric('Cobertura hoja', `${referenceCoverage.comparableRows || 0} comparables`, `${referenceCoverage.outsideCoverageRows || 0} VST posteriores sin referencia`, referenceCoverage.stale ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Cobertura hoja', `${referenceCoverage.comparableRows || 0} comparables`, cohortCoverageDetail, referenceCoverage.stale || referenceCoverage.provisionalLatestDay ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Paquetes completos', String(coverageSummary.completePackages || 0), `${coverageSummary.incompletePackages || 0} incompletos`, coverageSummary.incompletePackages ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Correcciones tardías', String(coverageSummary.correctedAfterEventMissingOpenings || 0), coverageSummary.correctedAfterEventMissingOpenings ? 'Fallo histórico explicado; la recuperación actual ya está activa' : 'Ningún faltante causado por una edición posterior', coverageSummary.correctedAfterEventMissingOpenings ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : 'Esperando', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin señales nuevas', latestPackage?.status === 'complete' ? 'amount positive' : latestPackage?.status === 'incomplete' ? 'amount negative' : 'warn')}

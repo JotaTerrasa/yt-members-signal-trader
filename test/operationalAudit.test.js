@@ -149,6 +149,44 @@ test('extiende la cobertura de una fecha de hoja hasta el final de ese dia UTC',
   );
 });
 
+test('deja la ultima jornada abierta como cobertura provisional sin perder sus emparejamientos', () => {
+  const result = annotateReplicaReferenceCoverage([
+    {
+      id: 'historical-extra',
+      cause: 'Extra en VST',
+      vst: { openingAt: '2026-07-14T20:00:00.000Z' }
+    },
+    {
+      id: 'pending-reference',
+      cause: 'Resultado pendiente en hoja',
+      sheet: { status: 'open' },
+      vst: { openingAt: '2026-07-15T18:00:00.000Z' }
+    },
+    {
+      id: 'provisional-extra',
+      cause: 'Extra en VST',
+      vst: { openingAt: '2026-07-15T20:00:00.000Z' }
+    }
+  ], [
+    { openedAt: '2026-07-14T12:00:00.000Z', status: 'closed' },
+    { openedAt: '2026-07-15T12:00:00.000Z', status: 'open' }
+  ]);
+
+  assert.equal(result.rows[0].cause, 'Extra en VST');
+  assert.equal(result.rows[1].cause, 'Resultado pendiente en hoja');
+  assert.equal(result.rows[2].cause, 'Fuera de cobertura de la hoja');
+  assert.match(result.rows[2].detail, /jornada de la hoja sigue abierta/i);
+  assert.equal(result.coverage.latestSheetAt, '2026-07-15T12:00:00.000Z');
+  assert.equal(result.coverage.coverageThroughAt, '2026-07-14T23:59:59.999Z');
+  assert.equal(result.coverage.matchingThroughAt, '2026-07-15T23:59:59.999Z');
+  assert.equal(result.coverage.provisionalLatestDay, true);
+  assert.equal(result.coverage.openReferenceRows, 1);
+  assert.equal(result.coverage.lagHours, 0);
+  assert.equal(result.coverage.stale, false);
+  assert.equal(result.coverage.outsideCoverageRows, 1);
+  assert.equal(result.coverage.comparableRows, 2);
+});
+
 test('conserva solo el fallo terminal de una apertura que nunca se ejecuto', () => {
   const signal = {
     symbol: 'SOL-USDT',

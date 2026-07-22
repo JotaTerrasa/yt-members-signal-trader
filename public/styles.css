@@ -2553,6 +2553,7 @@ summary.dashboard-section-title {
   display: grid;
   gap: 10px;
   margin: 0 0 14px;
+  scroll-margin-top: 96px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;

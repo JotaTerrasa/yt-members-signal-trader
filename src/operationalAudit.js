@@ -160,7 +160,9 @@ export function cohortAuditRowHasOrigin(row = {}) {
 
 export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { staleAfterHours = 24 } = {}) {
   const latestSheetTime = latestTimestamp(sheetRows.flatMap((row) => [row?.openedAt, row?.closedAt]));
-  const coverageEndTime = referenceCoverageEndTime(sheetRows);
+  const comparisonCoverage = referenceComparisonCoverage(sheetRows);
+  const coverageEndTime = comparisonCoverage.coverageEndTime;
+  const freshnessEndTime = comparisonCoverage.matchingEndTime;
   const latestVstTime = latestTimestamp(rows.map((row) => row?.vst?.openingAt));
   let outsideCoverageRows = 0;
   const annotatedRows = rows.map((row) => {
@@ -175,12 +177,14 @@ export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { st
     return {
       ...row,
       cause: 'Fuera de cobertura de la hoja',
-      detail: 'La apertura VST es posterior a la última operación disponible en la hoja y todavía no puede compararse.',
+      detail: comparisonCoverage.provisionalLatestDay
+        ? 'La última jornada de la hoja sigue abierta; esta apertura VST queda pendiente hasta que se publique su resultado.'
+        : 'La apertura VST es posterior a la última operación disponible en la hoja y todavía no puede compararse.',
       severity: 'warn'
     };
   });
-  const lagHours = Number.isFinite(coverageEndTime) && Number.isFinite(latestVstTime) && latestVstTime > coverageEndTime
-    ? roundMoney((latestVstTime - coverageEndTime) / 3_600_000)
+  const lagHours = Number.isFinite(freshnessEndTime) && Number.isFinite(latestVstTime) && latestVstTime > freshnessEndTime
+    ? roundMoney((latestVstTime - freshnessEndTime) / 3_600_000)
     : 0;
 
   return {
@@ -188,10 +192,13 @@ export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { st
     coverage: {
       latestSheetAt: Number.isFinite(latestSheetTime) ? new Date(latestSheetTime).toISOString() : null,
       coverageThroughAt: Number.isFinite(coverageEndTime) ? new Date(coverageEndTime).toISOString() : null,
+      matchingThroughAt: Number.isFinite(freshnessEndTime) ? new Date(freshnessEndTime).toISOString() : null,
       latestVstAt: Number.isFinite(latestVstTime) ? new Date(latestVstTime).toISOString() : null,
       lagHours,
       staleAfterHours,
       stale: outsideCoverageRows > 0 && lagHours > staleAfterHours,
+      provisionalLatestDay: comparisonCoverage.provisionalLatestDay,
+      openReferenceRows: comparisonCoverage.openReferenceRows,
       outsideCoverageRows,
       comparableRows: Math.max(0, annotatedRows.length - outsideCoverageRows)
     }
@@ -205,6 +212,35 @@ export function referenceCoverageEndTime(sheetRows = []) {
   }
   const date = new Date(latestSheetTime);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1) - 1;
+}
+
+export function referenceComparisonCoverage(sheetRows = []) {
+  const matchingEndTime = referenceCoverageEndTime(sheetRows);
+  if (!Number.isFinite(matchingEndTime)) {
+    return {
+      matchingEndTime: NaN,
+      coverageEndTime: NaN,
+      provisionalLatestDay: false,
+      openReferenceRows: 0
+    };
+  }
+
+  const latestDayStart = matchingEndTime - 86_400_000 + 1;
+  const openReferenceRows = sheetRows.filter((row) => {
+    if (String(row?.status || '').toLowerCase() !== 'open') {
+      return false;
+    }
+    const rowTime = latestTimestamp([row?.openedAt, row?.closedAt]);
+    return Number.isFinite(rowTime) && rowTime >= latestDayStart && rowTime <= matchingEndTime;
+  }).length;
+  const provisionalLatestDay = openReferenceRows > 0;
+
+  return {
+    matchingEndTime,
+    coverageEndTime: provisionalLatestDay ? latestDayStart - 1 : matchingEndTime,
+    provisionalLatestDay,
+    openReferenceRows
+  };
 }
 
 export function buildOpeningFailureAttempts(events = []) {
