@@ -37,9 +37,14 @@ export function resolveCloseFill({
   opening = {},
   closeEvent = {},
   closeSignalEvent = {},
+  closeOrderEvidence = null,
   realized = null,
   realizedSource = null
 } = {}) {
+  const historyFill = candidate(closeOrderEvidence?.avgPrice, 'exchange_order_history');
+  if (historyFill) {
+    return historyFill;
+  }
   const reported = resolveFirst([
     candidate(closeEvent?.exchangePosition?.closePrice, 'exchange_fill'),
     candidate(closeEvent?.closePrice, 'exchange_fill')

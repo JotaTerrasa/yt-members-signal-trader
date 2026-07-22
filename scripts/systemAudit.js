@@ -88,6 +88,8 @@ const report = {
     matchedGapAttribution: summary.matchedGapAttribution || null,
     executionPriceChain: summary.executionPriceChain || null,
     executionLatency: summary.executionLatency || null,
+    orderHistoryEvidence: summary.orderHistoryEvidence || null,
+    orderHistorySource: replica.source?.orderHistory || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -307,6 +309,50 @@ function buildFindings(report) {
       detail: `La cadena señal-cotización-fill deja un residual de ${money(report.replica.executionPriceChain.residual)} VST.`
     });
   }
+  if (report.replica) {
+    const source = report.replica.orderHistorySource || {};
+    const evidence = report.replica.orderHistoryEvidence || {};
+    if (!source.available) {
+      findings.push({
+        severity: 'high',
+        code: 'order_history_unavailable',
+        detail: 'BingX no entregó el histórico de órdenes; la auditoría usa el fallback de eventos e ingresos.'
+      });
+    } else if (source.stale) {
+      findings.push({
+        severity: 'high',
+        code: 'order_history_stale',
+        detail: 'La auditoría usa una copia anterior del histórico de órdenes porque el refresco de BingX falló.'
+      });
+    } else if (!evidence.available) {
+      findings.push({
+        severity: 'critical',
+        code: 'order_history_not_reconciled',
+        detail: 'BingX entregó órdenes, pero no alcanzaron la cobertura mínima para reconstruir los ciclos; se activó el fallback.'
+      });
+    }
+    if (Number(evidence.unlinkedCloseRows || 0) > 0) {
+      findings.push({
+        severity: 'critical',
+        code: 'unlinked_exchange_closes',
+        detail: `${evidence.unlinkedCloseRows} cierres de BingX siguen sin apertura enlazada.`
+      });
+    }
+    if (Number(evidence.closedRows || 0) > Number(evidence.exactCloseRows || 0)) {
+      findings.push({
+        severity: 'high',
+        code: 'close_fill_evidence_incomplete',
+        detail: `${Number(evidence.closedRows || 0) - Number(evidence.exactCloseRows || 0)} ciclos cerrados no tienen avgPrice exacto del histórico de órdenes.`
+      });
+    }
+    if (Number(evidence.recoveredOpenings || 0) > 0) {
+      findings.push({
+        severity: 'info',
+        code: 'openings_recovered_from_exchange',
+        detail: `${evidence.recoveredOpenings} aperturas ausentes en los eventos locales fueron recuperadas desde BingX.`
+      });
+    }
+  }
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
     const missingSheetOperations = report.replica.issueCounts['No ejecutada en VST'];
     findings.push({
@@ -425,6 +471,13 @@ function renderMarkdown(report) {
     `- Devolución estimada (${r.estimatedCommissionRebatePercent ?? 0}%): ${money(r.estimatedCommissionRebate)} VST`,
     `- Neto hipotético tras devolución estimada: ${money(r.netAfterEstimatedRebate)} VST`,
     `- Ciclos con entradas agregadas: ${r.aggregatedCycles ?? 0} (${r.aggregatedRows ?? 0} filas)`,
+    `- Histórico exacto de órdenes: ${r.orderHistorySource?.available ? (r.orderHistorySource.stale ? 'disponible en caché' : 'disponible') : 'no disponible'}`,
+    `- Órdenes históricas leídas: ${r.orderHistorySource?.records ?? 0}`,
+    `- Cierres con fill exacto: ${r.orderHistoryEvidence?.exactCloseRows ?? 0} de ${r.orderHistoryEvidence?.closedRows ?? 0}`,
+    `- Órdenes de cierre / posiciones reconstruidas: ${r.orderHistoryEvidence?.closeOrders ?? 0} / ${r.orderHistoryEvidence?.positions ?? 0}`,
+    `- Aperturas recuperadas desde BingX: ${r.orderHistoryEvidence?.recoveredOpenings ?? 0}`,
+    `- Cobertura de eventos locales: ${percent(r.orderHistoryEvidence?.localEventCoveragePercent)}`,
+    `- Cierres sin apertura enlazada: ${r.orderHistoryEvidence?.unlinkedCloseRows ?? 0}`,
     `- Última operación disponible en la hoja: ${r.referenceCoverage?.latestSheetAt || 'sin fecha'}`,
     `- Cobertura temporal asumida hasta: ${r.referenceCoverage?.coverageThroughAt || 'sin fecha'}`,
     `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
@@ -564,6 +617,7 @@ function pickCohortSummary(summary = {}) {
     matchedGapAttribution: summary.matchedGapAttribution || null,
     executionPriceChain: summary.executionPriceChain || null,
     executionLatency: summary.executionLatency || null,
+    orderHistoryEvidence: summary.orderHistoryEvidence || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,

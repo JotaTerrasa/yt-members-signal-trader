@@ -4505,7 +4505,49 @@ function renderMatchedGapAttribution(attribution) {
   `;
 }
 
-function renderExecutionPriceChain(chain, latency) {
+function renderOrderHistoryEvidence(evidence = {}, source = {}) {
+  const sourceAvailable = Boolean(source?.available);
+  const auditBacked = Boolean(evidence?.available);
+  const stale = Boolean(source?.stale);
+  const exactCoverage = Number(evidence?.exactCloseCoveragePercent);
+  const status = !sourceAvailable
+    ? { label: 'Fallback activo', className: 'warn' }
+    : stale
+      ? { label: 'Histórico en caché', className: 'warn' }
+      : auditBacked
+        ? { label: 'Histórico exacto', className: 'positive' }
+        : { label: 'Fallback de eventos', className: 'negative' };
+  const coverageLabel = Number.isFinite(exactCoverage)
+    ? formatPercent(exactCoverage)
+    : '-';
+  const sourceNote = sourceAvailable
+    ? `${Number(source.records || 0)} órdenes históricas leídas de BingX${source.fetchedAt ? ` · actualización ${formatDateTime(source.fetchedAt)}` : ''}.`
+    : `BingX no ha entregado el histórico de órdenes${source.error ? `: ${source.error}` : '.'}`;
+  const auditNote = auditBacked
+    ? 'Las entradas, cierres parciales y precios medios se reconstruyen con orderId y positionID exactos. Los eventos locales solo completan el contexto de la señal.'
+    : 'La auditoría conserva el cálculo anterior con eventos e ingresos. Se identifica como fallback para no presentarlo como fill exacto.';
+
+  return `
+    <div class="execution-evidence" aria-label="Calidad de la evidencia de BingX">
+      <div class="execution-evidence-heading">
+        <div>
+          <span>Evidencia de exchange</span>
+          <strong>Órdenes y fills de BingX</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(status.className)}">${escapeHtml(status.label)}</span>
+      </div>
+      <div class="execution-evidence-facts">
+        <div><span>Cierres con fill exacto</span><strong>${escapeHtml(`${Number(evidence.exactCloseRows || 0)}/${Number(evidence.closedRows || 0)}`)}</strong><small>${escapeHtml(`${coverageLabel} de cobertura`)}</small></div>
+        <div><span>Órdenes de cierre</span><strong>${escapeHtml(String(Number(evidence.closeOrders || 0)))}</strong><small>${escapeHtml(`${Number(evidence.positions || 0)} posiciones`)}</small></div>
+        <div><span>Aperturas recuperadas</span><strong class="${escapeAttribute(Number(evidence.recoveredOpenings || 0) ? 'warn' : 'amount positive')}">${escapeHtml(String(Number(evidence.recoveredOpenings || 0)))}</strong><small>${escapeHtml(`${formatOptionalPercent(evidence.localEventCoveragePercent)} con evento local`)}</small></div>
+        <div><span>Cierres sin enlazar</span><strong class="${escapeAttribute(Number(evidence.unlinkedCloseRows || 0) ? 'amount negative' : 'amount positive')}">${escapeHtml(String(Number(evidence.unlinkedCloseRows || 0)))}</strong><small>${escapeHtml(`${Number(evidence.partialCloseRows || 0)} aperturas con varios cierres`)}</small></div>
+      </div>
+      <p class="replica-gap-note">${escapeHtml(`${sourceNote} ${auditNote}`)}</p>
+    </div>
+  `;
+}
+
+function renderExecutionPriceChain(chain, latency, orderHistoryEvidence, orderHistorySource) {
   if (!chain || !Array.isArray(chain.steps)) {
     return '';
   }
@@ -4554,6 +4596,7 @@ function renderExecutionPriceChain(chain, latency) {
         </div>
         <span class="ledger-status ${escapeAttribute(chain.reconciled ? 'positive' : 'negative')}">${escapeHtml(status)}</span>
       </div>
+      ${renderOrderHistoryEvidence(orderHistoryEvidence, orderHistorySource)}
       <div id="execution-price-chain-waterfall" class="replica-gap-chart" role="img" aria-label="Desglose entre señal, cotización previa y fill de BingX"></div>
       <div class="replica-gap-facts">
         ${fact('Movimiento antes de enviar', beforeSend, 'Señal/objetivo a cotización previa')}
@@ -4722,6 +4765,8 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const matchedGapAttribution = summary.matchedGapAttribution || null;
   const executionPriceChain = summary.executionPriceChain || null;
   const executionLatency = summary.executionLatency || null;
+  const orderHistoryEvidence = summary.orderHistoryEvidence || {};
+  const orderHistorySource = audit.source?.orderHistory || {};
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
@@ -4759,7 +4804,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
       </div>
       ${renderReplicaGapBridge(gapBridge, referenceCoverage)}
       ${renderMatchedGapAttribution(matchedGapAttribution)}
-      ${renderExecutionPriceChain(executionPriceChain, executionLatency)}
+      ${renderExecutionPriceChain(executionPriceChain, executionLatency, orderHistoryEvidence, orderHistorySource)}
       ${unprocessedCloseRows ? `
         <p class="notice replica-audit-notice">
           <strong>Incidencia histórica corregida.</strong>

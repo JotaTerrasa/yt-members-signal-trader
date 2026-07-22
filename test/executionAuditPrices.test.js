@@ -47,6 +47,23 @@ test('reconstruye el fill de cierre SHORT en el sentido correcto', () => {
   assert.deepEqual(fill, { price: 97, source: 'derived_position_pnl' });
 });
 
+test('prioriza el fill exacto del historico de ordenes sobre una reconstruccion por PnL', () => {
+  const fill = resolveCloseFill({
+    opening: { signal: { direction: 'LONG' } },
+    closeOrderEvidence: { avgPrice: 63475.6 },
+    closeEvent: {
+      exchangePosition: {
+        direction: 'LONG',
+        entryPrice: 64047.4,
+        quantity: 0.0175
+      }
+    },
+    realizedSource: { income: -10.5532 }
+  });
+
+  assert.deepEqual(fill, { price: 63475.6, source: 'exchange_order_history' });
+});
+
 test('mide el deslizamiento adverso según fase y dirección', () => {
   assert.equal(entryAdverseDeviationPercent({ actual: 101, reference: 100, direction: 'LONG' }), 1);
   assert.equal(entryAdverseDeviationPercent({ actual: 99, reference: 100, direction: 'SHORT' }), 1);

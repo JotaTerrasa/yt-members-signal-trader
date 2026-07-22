@@ -234,7 +234,11 @@ Reconstruye el ciclo operativo completo:
 - empareja cada fila de la hoja con la apertura más probable del mismo activo;
 - enlaza PnL, comisión de apertura, comisión de cierre y funding;
 - tolera operaciones ausentes sin desplazar todas las posteriores;
-- reparte un cierre de BingX entre varias entradas cuando el exchange las agregó en una posición.
+- usa el histórico de órdenes como fuente primaria cuando cubre al menos el 80% de los eventos locales;
+- recupera aperturas ejecutadas en BingX que no sobrevivieron en el diario local;
+- enlaza `orderId`, `positionID`, cantidad ejecutada, `avgPrice` y `REALIZED_PNL` sin redondear identificadores;
+- reparte uno o varios cierres de BingX entre las entradas de una posición agregada;
+- vuelve al emparejamiento por eventos e ingresos si el histórico exacto no alcanza cobertura suficiente.
 
 ### `src/operationalAudit.js`
 
@@ -250,6 +254,7 @@ Cliente REST firmado con HMAC para BingX:
 - ticker;
 - positions;
 - órdenes abiertas;
+- histórico de órdenes;
 - margin type;
 - leverage;
 - place order;
@@ -257,7 +262,7 @@ Cliente REST firmado con HMAC para BingX:
 - close position;
 - VST.
 
-Los IDs largos de orden se parsean como string para evitar redondeo de JavaScript.
+Los IDs largos de orden, posición, operación y órdenes relacionadas se parsean como string antes de llamar a `JSON.parse`, evitando el redondeo silencioso de JavaScript.
 
 Entornos:
 
@@ -392,6 +397,8 @@ GET /api/price-feed
 `GET /api/replica-audit` devuelve, además del detalle por operación, `summary.gapBridge`. Este bloque forma una identidad contable desde la réplica teórica hasta el neto BingX y conserva por separado las operaciones posteriores a la cobertura de la hoja. `summary.matchedGapAttribution` abre a su vez el tramo de operaciones emparejadas en contabilidad de referencia, diferencia de entrada, diferencia de salida, cantidad/fills y evidencia incompleta.
 
 `summary.executionPriceChain` profundiza un nivel más: usa la referencia parseada, la cotización inmediatamente anterior al envío y el fill confirmado para reconstruir cada cambio de precio. En cierres por stop emplea el stop configurado como objetivo y la posición observada al reconciliar; si falta una traza intermedia, conserva ese impacto en una categoría explícita. `summary.executionLatency` enlaza los eventos con `firstSeenAt` y separa reacción inicial de espera por reintentos. Los tres puentes se representan como waterfalls de Plotly y son exclusivamente analíticos: no intervienen en el parser, los guards ni la ejecución de señales.
+
+La misma respuesta incluye `source.orderHistory` y `summary.orderHistoryEvidence`. El primer bloque describe la lectura firmada de BingX; el segundo demuestra cuántos ciclos usan fills exactos, cuántas aperturas se recuperaron desde el exchange y si queda algún cierre sin apertura. El frontend identifica visualmente el histórico vigente, una copia obsoleta o el fallback. Esta ruta es de solo lectura y no participa en la creación, modificación ni cierre de órdenes.
 
 ## Eventos SSE
 

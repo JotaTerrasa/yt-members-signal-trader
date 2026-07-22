@@ -5,6 +5,10 @@ const MAX_MATCH_ENTRY_DIFF_PERCENT = 4;
 const MAX_FAILURE_MATCH_ENTRY_DIFF_PERCENT = 0.1;
 const CLOSE_EVENT_MATCH_WINDOW_MS = 5 * 60 * 1000;
 const FEE_MATCH_WINDOW_MS = 5 * 60 * 1000;
+const ORDER_INCOME_MATCH_WINDOW_MS = 3 * 1000;
+const ORDER_PROFIT_MATCH_TOLERANCE = 0.001;
+const ORDER_HISTORY_MIN_EVENT_COVERAGE = 0.8;
+const QUANTITY_TOLERANCE = 0.00000001;
 
 export function alignReplicaAuditRecords({
   sheetRows = [],
@@ -15,6 +19,7 @@ export function alignReplicaAuditRecords({
   openingFees = [],
   closingFees = [],
   fundingRows = [],
+  orderRows = [],
   openingFailures = [],
   closeFailures = [],
   unprocessedCloses = [],
@@ -27,13 +32,18 @@ export function alignReplicaAuditRecords({
     closeSignalEvents,
     openingFees,
     closingFees,
-    fundingRows
+    fundingRows,
+    orderRows
   });
   const aligned = attachOpeningFailures(
     alignBySymbol(sheetRows, lifecycles, sheetCoverageEndTime),
     openingFailures
   );
-  const matchedRealized = new Set(aligned.map((item) => item.realizedSource || item.realized).filter(Boolean));
+  const matchedRealized = new Set(aligned.flatMap((item) => (
+    item.realizedSources?.length
+      ? item.realizedSources
+      : [item.realizedSource || item.realized]
+  )).filter(Boolean));
 
   for (const realized of realizedRows) {
     if (matchedRealized.has(realized)) {
@@ -220,7 +230,492 @@ export function alignSequences(sheetRows = [], lifecycles = []) {
   return aligned.reverse();
 }
 
-function buildExecutionLifecycles({ openings, realizedRows, closeEvents, closeSignalEvents, openingFees, closingFees, fundingRows }) {
+function buildExecutionLifecycles(args) {
+  if (hasUsableOrderHistory(args.orderRows)) {
+    const historyLifecycles = buildOrderBackedLifecycles(args);
+    if (historyLifecycles) {
+      return historyLifecycles;
+    }
+  }
+  return buildIncomeBackedLifecycles(args);
+}
+
+function hasUsableOrderHistory(rows = []) {
+  const orders = (rows || []).map(normalizeOrderEvidence).filter(Boolean);
+  return orders.some((order) => !order.isClose) && orders.some((order) => order.isClose);
+}
+
+function buildOrderBackedLifecycles({
+  openings = [],
+  realizedRows = [],
+  closeEvents = [],
+  closeSignalEvents = [],
+  openingFees = [],
+  closingFees = [],
+  fundingRows = [],
+  orderRows = []
+}) {
+  const orders = orderRows.map(normalizeOrderEvidence).filter(Boolean);
+  const entryOrders = orders.filter((order) => !order.isClose).sort(compareOrderTime);
+  const closeOrders = orders.filter((order) => order.isClose).sort(compareOrderTime);
+  const openingByOrderId = new Map();
+  const openingByClientOrderId = new Map();
+  for (const opening of openings) {
+    const orderId = openingOrderId(opening);
+    const clientOrderId = String(opening?.order?.clientOrderId || '').trim();
+    if (orderId) {
+      openingByOrderId.set(orderId, opening);
+    }
+    if (clientOrderId) {
+      openingByClientOrderId.set(clientOrderId, opening);
+    }
+  }
+  const matchedOpeningEvents = new Set();
+  const records = entryOrders.map((order) => {
+    const sourceOpening = openingByOrderId.get(order.orderId)
+      || openingByClientOrderId.get(order.clientOrderId)
+      || null;
+    if (sourceOpening) {
+      matchedOpeningEvents.add(sourceOpening);
+    }
+    const opening = auditOpeningFromOrder(order, sourceOpening);
+    return {
+      opening,
+      order,
+      positionId: order.positionId,
+      quantity: order.quantity,
+      remainingQuantity: order.quantity,
+      openedAt: order.time,
+      stopLoss: firstFinite([opening?.signal?.stopLoss, order.stopPrice]),
+      allocations: []
+    };
+  });
+  const coveredEvents = openings.filter((opening) => matchedOpeningEvents.has(opening)).length;
+  const coverage = openings.length ? coveredEvents / openings.length : 1;
+  if (coverage < ORDER_HISTORY_MIN_EVENT_COVERAGE) {
+    return null;
+  }
+
+  for (const opening of openings.filter((event) => !matchedOpeningEvents.has(event))) {
+    const quantity = openingQuantity(opening);
+    if (!(quantity > 0)) {
+      continue;
+    }
+    records.push({
+      opening,
+      order: null,
+      positionId: openingPositionId(opening),
+      quantity,
+      remainingQuantity: quantity,
+      openedAt: eventTime(opening),
+      stopLoss: firstFinite([opening?.signal?.stopLoss]),
+      allocations: []
+    });
+  }
+  records.sort((left, right) => left.openedAt - right.openedAt);
+
+  const incomeByOrder = matchCloseOrdersToIncome(closeOrders, realizedRows);
+  const incomeCoverage = realizedRows.length
+    ? incomeByOrder.size / Math.min(closeOrders.length || 1, realizedRows.length)
+    : 1;
+  if (incomeCoverage < ORDER_HISTORY_MIN_EVENT_COVERAGE) {
+    return null;
+  }
+  const closingFeeByOrder = new Map();
+  for (const order of closeOrders) {
+    const realized = incomeByOrder.get(order.orderId);
+    const fee = realized ? closingFeeForRealized(realized, closingFees) : null;
+    if (fee) {
+      closingFeeByOrder.set(order.orderId, fee);
+    }
+  }
+
+  for (const closeOrder of closeOrders) {
+    allocateCloseOrder({
+      closeOrder,
+      records,
+      realizedSource: incomeByOrder.get(closeOrder.orderId) || null,
+      closingFeeSource: closingFeeByOrder.get(closeOrder.orderId) || null
+    });
+  }
+
+  const fundingByOpening = allocateFundingByOpening(records, fundingRows);
+  const usedOpeningFees = new Set();
+  const positionOpeningCounts = records.reduce((counts, record) => {
+    if (record.positionId) {
+      counts.set(record.positionId, (counts.get(record.positionId) || 0) + 1);
+    }
+    return counts;
+  }, new Map());
+
+  return records.map((record) => {
+    const openingFee = nearestUnusedIncome(
+      openingFees.filter((fee) => incomeSymbol(fee) === eventSymbol(record.opening)),
+      record.openedAt,
+      usedOpeningFees,
+      FEE_MATCH_WINDOW_MS
+    );
+    if (openingFee) {
+      usedOpeningFees.add(openingFee);
+    }
+    if (!record.allocations.length) {
+      return {
+        opening: record.opening,
+        realized: null,
+        realizedSource: null,
+        realizedSources: [],
+        closeEvent: null,
+        closeSignalEvent: null,
+        closeOrderEvidence: null,
+        openingFee,
+        closingFee: null,
+        closingFeeSource: null,
+        closingFeeSources: [],
+        funding: fundingByOpening.get(record) || 0,
+        aggregatedOpenings: positionOpeningCounts.get(record.positionId) || 1,
+        orderHistoryBacked: true
+      };
+    }
+
+    const closedAt = Math.max(...record.allocations.map((allocation) => allocation.order.time));
+    const realizedSources = uniqueObjects(record.allocations.map((allocation) => allocation.realizedSource).filter(Boolean));
+    const closingFeeSources = uniqueObjects(record.allocations.map((allocation) => allocation.closingFeeSource).filter(Boolean));
+    const symbol = eventSymbol(record.opening);
+    const realizedSource = aggregateAllocatedIncome(record.allocations, 'realized', realizedSources, closedAt, symbol);
+    const closingFeeSource = aggregateAllocatedIncome(record.allocations, 'closingFee', closingFeeSources, closedAt, symbol);
+    const closeOrderEvidence = aggregateCloseOrderEvidence(record.allocations);
+    const closeEvent = nearestEventBySymbol(closeEvents, symbol, closedAt, record.openedAt);
+    const closeSignalEvent = nearestPrecedingEventBySymbol(
+      closeSignalEvents,
+      symbol,
+      closeEvent ? eventTime(closeEvent) : closedAt,
+      record.openedAt
+    );
+    const aggregatedOpenings = Math.max(
+      positionOpeningCounts.get(record.positionId) || 1,
+      ...record.allocations.map((allocation) => allocation.sharedOpenings || 1)
+    );
+
+    return {
+      opening: record.opening,
+      realized: realizedSource ? {
+        ...realizedSource,
+        allocationRatio: roundAmount(closeOrderEvidence.quantity / record.quantity),
+        aggregatedOpenings
+      } : null,
+      realizedSource,
+      realizedSources,
+      closeEvent,
+      closeSignalEvent,
+      closeOrderEvidence,
+      openingFee,
+      closingFee: closingFeeSource,
+      closingFeeSource,
+      closingFeeSources,
+      funding: fundingByOpening.get(record) || 0,
+      aggregatedOpenings,
+      orderHistoryBacked: true
+    };
+  });
+}
+
+function normalizeOrderEvidence(row = {}) {
+  const orderId = String(row.orderId || row.orderID || '').trim();
+  const symbol = normalizeSymbol(row.symbol);
+  const quantity = firstFinite([row.executedQty]);
+  const avgPrice = firstFinite([row.avgPrice]);
+  const time = Number(row.time || row.updateTime);
+  if (!orderId || !symbol || !(quantity > 0) || !(avgPrice > 0) || !Number.isFinite(time)) {
+    return null;
+  }
+  const isClose = row.reduceOnly === true || String(row.reduceOnly).toLowerCase() === 'true';
+  return {
+    raw: row,
+    orderId,
+    clientOrderId: String(row.clientOrderId || '').trim(),
+    positionId: String(row.positionID || row.positionId || '').trim(),
+    symbol,
+    direction: normalizeDirection(row.positionSide),
+    quantity,
+    avgPrice,
+    profit: Number(row.profit || 0),
+    commission: Number(row.commission || 0),
+    stopPrice: firstFinite([row.stopPrice, row.stopLossEntrustPrice, attachedStopPrice(row)]) || 0,
+    leverage: firstFinite([String(row.leverage || '').replace(/x/i, '')]) || 1,
+    type: String(row.type || row.orderType || '').toUpperCase(),
+    isClose,
+    time
+  };
+}
+
+function auditOpeningFromOrder(order, sourceOpening) {
+  if (sourceOpening) {
+    const responseOrder = sourceOpening?.response?.data?.order || {};
+    return {
+      ...sourceOpening,
+      response: {
+        ...sourceOpening.response,
+        data: {
+          ...sourceOpening.response?.data,
+          order: {
+            ...responseOrder,
+            orderId: order.orderId,
+            positionID: order.positionId,
+            avgPrice: String(order.avgPrice),
+            executedQty: String(order.quantity)
+          }
+        }
+      },
+      historyOrder: compactOrderEvidence(order)
+    };
+  }
+  const exposure = order.avgPrice * order.quantity;
+  const notional = exposure / order.leverage;
+  return {
+    at: new Date(order.time).toISOString(),
+    status: 'demo_order_history',
+    executionMode: 'demo',
+    signal: {
+      isSignal: true,
+      symbol: order.symbol,
+      direction: order.direction,
+      entry: { type: 'MARKET', price: order.avgPrice },
+      stopLoss: order.stopPrice || null,
+      takeProfits: [],
+      leverage: order.leverage
+    },
+    order: {
+      symbol: order.symbol,
+      type: 'MARKET',
+      quantity: order.quantity,
+      clientOrderId: order.clientOrderId || null
+    },
+    response: {
+      data: {
+        order: {
+          orderId: order.orderId,
+          positionID: order.positionId,
+          avgPrice: String(order.avgPrice),
+          executedQty: String(order.quantity)
+        }
+      }
+    },
+    sizing: { notional: roundAmount(notional) },
+    costGuard: { exposure: roundAmount(exposure) },
+    marketPrice: order.avgPrice,
+    entryPrice: order.avgPrice,
+    referenceEntryPrice: order.avgPrice,
+    historyOrderOnly: true,
+    historyOrder: compactOrderEvidence(order),
+    eventId: `order-history|${order.orderId}`
+  };
+}
+
+function compactOrderEvidence(order) {
+  return {
+    orderId: order.orderId,
+    positionId: order.positionId,
+    type: order.type,
+    avgPrice: order.avgPrice,
+    quantity: order.quantity,
+    profit: order.profit,
+    commission: order.commission,
+    stopPrice: order.stopPrice,
+    time: order.time
+  };
+}
+
+function attachedStopPrice(row = {}) {
+  if (row.stopLoss && typeof row.stopLoss === 'object') {
+    return firstFinite([row.stopLoss.stopPrice, row.stopLoss.price]);
+  }
+  if (typeof row.stopLoss !== 'string') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(row.stopLoss);
+    return firstFinite([parsed?.stopPrice, parsed?.price]);
+  } catch {
+    return null;
+  }
+}
+
+function openingOrderId(opening = {}) {
+  return String(
+    opening?.response?.data?.order?.orderId
+    || opening?.response?.data?.order?.orderID
+    || opening?.historyOrder?.orderId
+    || ''
+  ).trim();
+}
+
+function openingPositionId(opening = {}) {
+  return String(
+    opening?.response?.data?.order?.positionID
+    || opening?.response?.data?.order?.positionId
+    || opening?.exchangePosition?.id
+    || ''
+  ).trim();
+}
+
+function matchCloseOrdersToIncome(closeOrders = [], realizedRows = []) {
+  const used = new Set();
+  const matches = new Map();
+  for (const order of closeOrders) {
+    const match = realizedRows
+      .map((row, index) => ({
+        row,
+        index,
+        timeDiff: Math.abs(incomeTime(row) - order.time),
+        profitDiff: Math.abs(Number(row?.income || 0) - order.profit)
+      }))
+      .filter((item) => !used.has(item.index))
+      .filter((item) => incomeSymbol(item.row) === order.symbol)
+      .filter((item) => item.timeDiff <= ORDER_INCOME_MATCH_WINDOW_MS)
+      .sort((left, right) => left.profitDiff - right.profitDiff || left.timeDiff - right.timeDiff)[0];
+    if (!match || match.profitDiff > ORDER_PROFIT_MATCH_TOLERANCE) {
+      continue;
+    }
+    used.add(match.index);
+    matches.set(order.orderId, match.row);
+  }
+  return matches;
+}
+
+function allocateCloseOrder({ closeOrder, records, realizedSource, closingFeeSource }) {
+  let remaining = closeOrder.quantity;
+  const candidates = records.filter((record) => (
+    record.remainingQuantity > QUANTITY_TOLERANCE
+    && record.openedAt <= closeOrder.time
+    && eventSymbol(record.opening) === closeOrder.symbol
+    && (!closeOrder.positionId || !record.positionId || record.positionId === closeOrder.positionId)
+    && (!closeOrder.direction || !normalizeDirection(record.opening?.signal?.direction)
+      || normalizeDirection(record.opening?.signal?.direction) === closeOrder.direction)
+  ));
+  sortCloseCandidates(candidates, closeOrder);
+  const selected = [];
+  for (const record of candidates) {
+    if (remaining <= QUANTITY_TOLERANCE) {
+      break;
+    }
+    const quantity = Math.min(record.remainingQuantity, remaining);
+    record.remainingQuantity = roundAmount(record.remainingQuantity - quantity);
+    remaining = roundAmount(remaining - quantity);
+    selected.push({ record, quantity });
+  }
+  for (const { record, quantity } of selected) {
+    const ratio = quantity / closeOrder.quantity;
+    record.allocations.push({
+      order: closeOrder,
+      quantity,
+      realized: roundAmount(Number(realizedSource?.income ?? closeOrder.profit) * ratio),
+      closingFee: roundAmount(Number(closingFeeSource?.income ?? closeOrder.commission) * ratio),
+      realizedSource,
+      closingFeeSource,
+      sharedOpenings: selected.length
+    });
+  }
+}
+
+function sortCloseCandidates(candidates, closeOrder) {
+  if (closeOrder.stopPrice > 0) {
+    candidates.sort((left, right) => {
+      const leftDistance = left.stopLoss > 0
+        ? Math.abs(left.stopLoss - closeOrder.stopPrice) / closeOrder.stopPrice
+        : Number.POSITIVE_INFINITY;
+      const rightDistance = right.stopLoss > 0
+        ? Math.abs(right.stopLoss - closeOrder.stopPrice) / closeOrder.stopPrice
+        : Number.POSITIVE_INFINITY;
+      return leftDistance - rightDistance
+        || Math.abs(left.remainingQuantity - closeOrder.quantity) - Math.abs(right.remainingQuantity - closeOrder.quantity)
+        || right.openedAt - left.openedAt;
+    });
+    return;
+  }
+  candidates.sort((left, right) => left.openedAt - right.openedAt);
+}
+
+function aggregateCloseOrderEvidence(allocations = []) {
+  const quantity = sum(allocations.map((allocation) => allocation.quantity));
+  const avgPrice = quantity > 0
+    ? sum(allocations.map((allocation) => allocation.order.avgPrice * allocation.quantity)) / quantity
+    : null;
+  return {
+    source: 'exchange_order_history',
+    avgPrice: roundAmount(avgPrice),
+    quantity: roundAmount(quantity),
+    orderIds: [...new Set(allocations.map((allocation) => allocation.order.orderId))],
+    positionIds: [...new Set(allocations.map((allocation) => allocation.order.positionId).filter(Boolean))],
+    types: [...new Set(allocations.map((allocation) => allocation.order.type).filter(Boolean))],
+    stopPrices: [...new Set(allocations.map((allocation) => allocation.order.stopPrice).filter((value) => value > 0))],
+    closedAt: allocations.length
+      ? new Date(Math.max(...allocations.map((allocation) => allocation.order.time))).toISOString()
+      : null
+  };
+}
+
+function aggregateAllocatedIncome(allocations, valueKey, sources, time, symbol) {
+  const income = roundAmount(sum(allocations.map((allocation) => allocation[valueKey])));
+  const tradeIds = sources.map((source) => String(source?.tradeId || '')).filter(Boolean);
+  return {
+    ...(sources[0] || {}),
+    symbol: sources[0]?.symbol || symbol,
+    incomeType: sources[0]?.incomeType || (valueKey === 'realized' ? 'REALIZED_PNL' : 'TRADING_FEE'),
+    income,
+    time,
+    tradeId: tradeIds.length === 1 ? tradeIds[0] : '',
+    tradeIds,
+    groupedRecords: sources.length || allocations.length,
+    source: 'exchange_order_history'
+  };
+}
+
+function allocateFundingByOpening(records = [], fundingRows = []) {
+  const totals = new Map(records.map((record) => [record, 0]));
+  for (const funding of fundingRows) {
+    const timestamp = incomeTime(funding);
+    const symbol = incomeSymbol(funding);
+    const active = records.filter((record) => (
+      eventSymbol(record.opening) === symbol
+      && record.openedAt <= timestamp
+      && (!record.allocations.length || Math.max(...record.allocations.map((allocation) => allocation.order.time)) >= timestamp)
+    ));
+    if (!active.length) {
+      continue;
+    }
+    const weights = active.map((record) => openingExposure(record.opening));
+    const parts = allocateAmount(Number(funding.income || 0), weights);
+    active.forEach((record, index) => totals.set(record, roundAmount((totals.get(record) || 0) + parts[index])));
+  }
+  return totals;
+}
+
+function nearestEventBySymbol(rows, symbol, targetTime, minimumTime) {
+  return rows
+    .filter((row) => eventSymbol(row) === symbol && eventTime(row) >= minimumTime)
+    .map((row) => ({ row, distance: Math.abs(eventTime(row) - targetTime) }))
+    .filter((item) => item.distance <= CLOSE_EVENT_MATCH_WINDOW_MS)
+    .sort((left, right) => left.distance - right.distance)[0]?.row || null;
+}
+
+function nearestPrecedingEventBySymbol(rows, symbol, targetTime, minimumTime) {
+  return rows
+    .filter((row) => eventSymbol(row) === symbol)
+    .filter((row) => eventTime(row) >= minimumTime && eventTime(row) <= targetTime)
+    .map((row) => ({ row, distance: targetTime - eventTime(row) }))
+    .filter((item) => item.distance <= CLOSE_EVENT_MATCH_WINDOW_MS)
+    .sort((left, right) => left.distance - right.distance)[0]?.row || null;
+}
+
+function uniqueObjects(values = []) {
+  return [...new Set(values)];
+}
+
+function compareOrderTime(left, right) {
+  return left.time - right.time || left.orderId.localeCompare(right.orderId);
+}
+
+function buildIncomeBackedLifecycles({ openings, realizedRows, closeEvents, closeSignalEvents, openingFees, closingFees, fundingRows }) {
   const openingsBySymbol = groupBySymbol(openings, eventSymbol);
   const realizedBySymbol = groupBySymbol(realizedRows, incomeSymbol);
   const closeEventsBySymbol = groupBySymbol(closeEvents, eventSymbol);
@@ -237,7 +732,8 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, closeSi
     const matchedOpenings = new Set();
     let previousCloseAt = Number.NEGATIVE_INFINITY;
 
-    for (const realizedSource of realizedBySymbol.get(symbol) || []) {
+    for (const realizedCycle of groupRealizedCycles(realizedBySymbol.get(symbol) || [])) {
+      const realizedSource = realizedCycle.aggregate;
       const realizedAt = incomeTime(realizedSource);
       const cycleOpenings = sortedOpenings.filter((opening) => (
         !matchedOpenings.has(opening)
@@ -267,7 +763,8 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, closeSi
       if (closeSignalEvent) {
         usedCloseSignals.add(closeSignalEvent);
       }
-      const closingFeeSource = closingFeeForRealized(realizedSource, closingFees);
+      const closingFeeCycle = closingFeeCycleForRealized(realizedCycle.sources, closingFees);
+      const closingFeeSource = closingFeeCycle.aggregate;
       const fundingTotal = sumFunding(
         fundingBySymbol.get(symbol) || [],
         eventTime(cycleOpenings[0]),
@@ -302,11 +799,13 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, closeSi
             aggregatedOpenings: cycleOpenings.length
           },
           realizedSource,
+          realizedSources: realizedCycle.sources,
           closeEvent,
           closeSignalEvent,
           openingFee,
           closingFee: closingFeeSource ? { ...closingFeeSource, income: allocation.closingFee } : null,
           closingFeeSource,
+          closingFeeSources: closingFeeCycle.sources,
           funding: allocation.funding,
           aggregatedOpenings: cycleOpenings.length
         });
@@ -338,6 +837,56 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, closeSi
   }
 
   return lifecycles;
+}
+
+function groupRealizedCycles(rows = []) {
+  const groups = [];
+  for (const row of rows) {
+    const timestamp = incomeTime(row);
+    const current = groups.at(-1);
+    if (current && current.timestamp === timestamp) {
+      current.sources.push(row);
+      continue;
+    }
+    groups.push({ timestamp, sources: [row] });
+  }
+  return groups.map((group) => ({
+    sources: group.sources,
+    aggregate: aggregateIncomeRows(group.sources)
+  }));
+}
+
+function closingFeeCycleForRealized(realizedSources = [], closingFees = []) {
+  const used = new Set();
+  const sources = [];
+  for (const realized of realizedSources) {
+    const fee = closingFeeForRealized(realized, closingFees);
+    if (fee && !used.has(fee)) {
+      used.add(fee);
+      sources.push(fee);
+    }
+  }
+  return {
+    sources,
+    aggregate: aggregateIncomeRows(sources)
+  };
+}
+
+function aggregateIncomeRows(rows = []) {
+  if (!rows.length) {
+    return null;
+  }
+  if (rows.length === 1) {
+    return rows[0];
+  }
+  const tradeIds = rows.map((row) => String(row?.tradeId || '')).filter(Boolean);
+  return {
+    ...rows[0],
+    income: roundAmount(rows.reduce((total, row) => total + Number(row?.income || 0), 0)),
+    tradeId: '',
+    tradeIds,
+    groupedRecords: rows.length
+  };
 }
 
 function allocateCycleAmounts({ openings, realized, closingFee, funding, closeEvent }) {

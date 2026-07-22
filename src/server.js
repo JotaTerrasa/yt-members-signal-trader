@@ -53,6 +53,8 @@ const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 15 * 60 * 1000;
 const MONTHLY_RESET_CHECK_MS = 60 * 60 * 1000;
 const PNL_CACHE_TTL_MS = 45_000;
+const ORDER_HISTORY_OVERLAP_MS = 10 * 60 * 1000;
+const ORDER_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1000;
 const PNL_BACKOFF_DEFAULT_MS = 5 * 60 * 1000;
 const PNL_BACKOFF_MAX_MS = 15 * 60 * 1000;
 const REDACTED_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -119,6 +121,7 @@ const clients = new Set();
 let pnlCache = null;
 let pnlSourcesCache = null;
 let replicaAuditCache = null;
+let demoOrderHistoryCache = null;
 let pnlLastGood = null;
 let pnlSourcesLastGood = pnlSnapshotStore.getSources(currentMonthKey());
 let pnlBackoffUntil = 0;
@@ -2346,6 +2349,10 @@ async function clearPnlCaches({ clearSnapshots = false } = {}) {
   pnlSourcesCache = null;
   pnlLastGood = null;
   pnlSourcesLastGood = null;
+  replicaAuditCache = null;
+  if (clearSnapshots) {
+    demoOrderHistoryCache = null;
+  }
   clearPnlBackoff();
   if (clearSnapshots) {
     await pnlSnapshotStore.clear().catch((error) => {
@@ -4253,9 +4260,10 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     .filter((position) => monthKeyFromIso(position.closedAt || position.openedAt) === month)
     .sort(compareAuditSheetRows);
   const monthWindow = auditMonthWindow({ month, resetAt: config.vstPnlResetAt });
-  const [incomeRows, commissionRate] = await Promise.all([
+  const [incomeRows, commissionRate, orderHistory] = await Promise.all([
     demoIncomeRows({ config, monthWindow }),
-    demoCommissionRate({ config }).catch(() => null)
+    demoCommissionRate({ config }).catch(() => null),
+    demoOrderHistory({ config, monthWindow })
   ]);
   const windowEvents = tradeEventStore.list()
     .filter(Boolean)
@@ -4274,6 +4282,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     incomeRows,
     events,
     posts,
+    orderRows: orderHistory.rows,
     unprocessedCloses,
     defaultNotional: publicConfig.defaultNotionalUSDT || publicConfig.monthlyOrderNotionalUSDT || 0
   }), sheetRows);
@@ -4295,6 +4304,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     incomeRows,
     events,
     posts,
+    orderRows: orderHistory.rows,
     unprocessedCloses,
     reference,
     config: publicConfig,
@@ -4309,6 +4319,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
       incomeRows,
       events,
       posts,
+      orderRows: orderHistory.rows,
       unprocessedCloses,
       reference,
       config: publicConfig,
@@ -4325,7 +4336,14 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
       url: reference?.spreadsheetUrl || reference?.source?.spreadsheetUrl || portfolioSourceForReference(portfolio),
       startingCapital: reference?.startingCapital ?? null,
       equity: reference?.equity ?? null,
-      error: referenceError
+      error: referenceError,
+      orderHistory: {
+        available: orderHistory.available,
+        stale: orderHistory.stale,
+        records: orderHistory.rows.length,
+        fetchedAt: orderHistory.fetchedAt,
+        error: orderHistory.error
+      }
     },
     window: {
       startAt: new Date(monthWindow.startTime).toISOString(),
@@ -4361,6 +4379,93 @@ async function demoCommissionRate({ config }) {
   return response?.data?.commission || response?.data || null;
 }
 
+async function demoOrderHistory({ config, monthWindow }) {
+  if (!config.apiKey || !config.apiSecret) {
+    return { rows: [], available: false, stale: false, fetchedAt: null, throughTime: null, error: 'Credenciales VST no configuradas.' };
+  }
+  const now = Date.now();
+  const endTime = Math.min(Number(monthWindow.endTime || now), now);
+  const cacheKey = `${Number(monthWindow.startTime || 0)}|${String(config.apiKey).slice(-8)}`;
+  if (demoOrderHistoryCache?.key === cacheKey && now - demoOrderHistoryCache.at < PNL_CACHE_TTL_MS) {
+    return { ...demoOrderHistoryCache.value, cached: true };
+  }
+  const previous = demoOrderHistoryCache?.key === cacheKey ? demoOrderHistoryCache.value : null;
+  const startTime = previous?.throughTime
+    ? Math.max(Number(monthWindow.startTime || 0), Number(previous.throughTime) - ORDER_HISTORY_OVERLAP_MS)
+    : Number(monthWindow.startTime || 0);
+  const client = futuresTrader.client({ ...config, mode: 'demo' });
+  try {
+    const freshRows = [];
+    for (let cursor = startTime; cursor <= endTime; cursor += ORDER_HISTORY_MAX_WINDOW_MS) {
+      const chunkEnd = Math.min(endTime, cursor + ORDER_HISTORY_MAX_WINDOW_MS);
+      const response = await client.getOrderHistory({
+        startTime: cursor,
+        endTime: chunkEnd,
+        limit: 1000
+      });
+      const rows = response?.data?.orders || response?.data || [];
+      if (Array.isArray(rows)) {
+        freshRows.push(...rows);
+      }
+      if (chunkEnd >= endTime) {
+        break;
+      }
+    }
+    const byId = new Map((previous?.rows || []).map((order) => [auditOrderId(order), order]));
+    for (const order of freshRows) {
+      const orderId = auditOrderId(order);
+      if (orderId) {
+        byId.set(orderId, order);
+      }
+    }
+    const value = {
+      rows: [...byId.values()].sort((left, right) => auditOrderTime(left) - auditOrderTime(right)),
+      available: true,
+      stale: false,
+      fetchedAt: new Date(now).toISOString(),
+      throughTime: endTime,
+      error: null
+    };
+    demoOrderHistoryCache = { key: cacheKey, at: now, value };
+    return value;
+  } catch (error) {
+    if (previous?.rows?.length) {
+      const value = {
+        ...previous,
+        stale: true,
+        error: `No se pudo refrescar el historico de ordenes: ${safePublicMessage(error.message)}`
+      };
+      demoOrderHistoryCache = { key: cacheKey, at: now, value };
+      return value;
+    }
+    return {
+      rows: [],
+      available: false,
+      stale: false,
+      fetchedAt: null,
+      throughTime: null,
+      error: `Historico de ordenes no disponible: ${safePublicMessage(error.message)}`
+    };
+  }
+}
+
+function auditOrderId(order = {}) {
+  return String(order.orderId || order.orderID || '').trim();
+}
+
+function openingOrderIdForAudit(opening = {}) {
+  return String(
+    opening?.response?.data?.order?.orderId
+    || opening?.response?.data?.order?.orderID
+    || ''
+  ).trim() || null;
+}
+
+function auditOrderTime(order = {}) {
+  const timestamp = Number(order.time || order.updateTime);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function buildReplicaAuditCohort({
   startedAt,
   endedAt = null,
@@ -4368,6 +4473,7 @@ function buildReplicaAuditCohort({
   incomeRows,
   events,
   posts,
+  orderRows,
   unprocessedCloses,
   reference,
   config,
@@ -4383,11 +4489,16 @@ function buildReplicaAuditCohort({
     incomeRows: cohortIncomeRows,
     events: cohortEvents
   } = scopeReplicaCohortInputs({ sheetRows, incomeRows, events, window: cohortWindow });
+  const cohortOrderRows = (orderRows || []).filter((order) => {
+    const timestamp = auditOrderTime(order);
+    return timestamp >= cohortWindow.startTime && timestamp <= cohortWindow.endTime;
+  });
   const rawRows = buildReplicaAuditRows({
     sheetRows: cohortSheetRows,
     incomeRows: cohortIncomeRows,
     events: cohortEvents,
     posts,
+    orderRows: cohortOrderRows,
     unprocessedCloses: (unprocessedCloses || []).filter((close) => auditEventInWindow(close, cohortWindow)),
     defaultNotional: config.defaultNotionalUSDT || config.monthlyOrderNotionalUSDT || 0
   }).filter(cohortAuditRowHasOrigin);
@@ -4415,7 +4526,7 @@ function buildReplicaAuditCohort({
   };
 }
 
-function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], posts = [], unprocessedCloses = [], defaultNotional = 0 }) {
+function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], posts = [], orderRows = [], unprocessedCloses = [], defaultNotional = 0 }) {
   const timingContext = buildAuditTimingContext({ events, posts });
   const aligned = alignReplicaAuditRecords({
     sheetRows,
@@ -4429,6 +4540,7 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], p
     openingFees: auditFeeRows(incomeRows, 'opening'),
     closingFees: auditFeeRows(incomeRows, 'closing'),
     fundingRows: auditIncomeByType(incomeRows, 'FUNDING_FEE'),
+    orderRows,
     sheetCoverageEndTime: referenceCoverageEndTime(sheetRows)
   });
   const sequences = new Map();
@@ -4518,16 +4630,20 @@ function replicaAuditRow({
   opening,
   realized,
   realizedSource,
+  realizedSources = [],
   closeEvent,
   closeSignalEvent,
+  closeOrderEvidence,
   openingFee,
   closingFee,
+  closingFeeSources = [],
   funding,
   openingFailure,
   closeFailures = [],
   unprocessedCloses = [],
   unmatchedClose,
   aggregatedOpenings,
+  orderHistoryBacked = false,
   timingContext,
   defaultNotional
 }) {
@@ -4541,6 +4657,7 @@ function replicaAuditRow({
     opening,
     closeEvent,
     closeSignalEvent,
+    closeOrderEvidence,
     realized,
     realizedSource
   });
@@ -4568,12 +4685,18 @@ function replicaAuditRow({
     reference: closeReference?.price,
     direction
   });
+  const historyStopLoss = closeOrderEvidence?.types?.some((type) => String(type).includes('STOP'))
+    ? closeOrderEvidence?.stopPrices?.at(-1)
+    : null;
   const stopLoss = auditNumber(
-    closeEvent?.exchangePosition?.stopLoss ?? opening?.signal?.stopLoss,
+    historyStopLoss ?? closeEvent?.exchangePosition?.stopLoss ?? opening?.signal?.stopLoss,
     null
   );
+  const historyCloseStatus = closeOrderEvidence?.types?.some((type) => String(type).includes('STOP'))
+    ? 'exchange_stop_closed'
+    : closeOrderEvidence?.orderIds?.length ? 'exchange_signal_closed' : '';
   const closeKind = observedCloseKind({
-    status: closeEvent?.status,
+    status: closeEvent?.status || historyCloseStatus,
     hasCloseSignal: Boolean(closeSignalEvent),
     direction,
     stopLoss,
@@ -4648,6 +4771,10 @@ function replicaAuditRow({
       stopLoss: auditRound(stopLoss),
       entryPriceSource: entryFill?.source || '',
       closePriceSource: closeFill?.source || '',
+      orderHistoryBacked: Boolean(orderHistoryBacked),
+      openingHistoryOnly: Boolean(opening?.historyOrderOnly),
+      closeOrderIds: closeOrderEvidence?.orderIds || [],
+      closeOrderTypes: closeOrderEvidence?.types || [],
       closeKind: closeKind.kind,
       closeKindSource: closeKind.source,
       entrySlippagePercent: auditRound(entrySlippagePercent),
@@ -4665,7 +4792,7 @@ function replicaAuditRow({
       closingFirstAttemptAt: closingTiming.firstAttemptAt,
       closeSignalAt: closeSignalEvent?.at || null,
       closingAt: realized ? new Date(Number(realized.time || 0)).toISOString() : closeEvent?.at || null,
-      closeStatus: closeEvent?.status || '',
+      closeStatus: closeEvent?.status || historyCloseStatus,
       closeReason: closeEvent?.reason || '',
       stopAlignment,
       closeFailures: closeFailures.map((failure) => ({
@@ -4712,8 +4839,19 @@ function replicaAuditRow({
       closeSignalEventId: closeSignalEvent?.eventId || null,
       exchangePositionId: closeEvent?.exchangePosition?.id || null,
       tradeId: realized?.tradeId || null,
+      tradeIds: [...new Set([
+        ...(realized?.tradeIds || []),
+        ...realizedSources.map((source) => String(source?.tradeId || '')).filter(Boolean)
+      ])],
       openingFeeTradeId: openingFee?.tradeId || null,
       closingFeeTradeId: closingFee?.tradeId || null,
+      closingFeeTradeIds: [...new Set([
+        ...(closingFee?.tradeIds || []),
+        ...closingFeeSources.map((source) => String(source?.tradeId || '')).filter(Boolean)
+      ])],
+      openingOrderId: opening?.historyOrder?.orderId || openingOrderIdForAudit(opening),
+      closeOrderIds: closeOrderEvidence?.orderIds || [],
+      exchangePositionIds: closeOrderEvidence?.positionIds || [],
       unprocessedClosePostIds: [...new Set(unprocessedCloses.map((close) => close.postId).filter(Boolean))]
     },
     cause: status.cause,
@@ -4863,7 +5001,8 @@ function summarizeReplicaAudit({
     takerCommissionRate: commission.takerCommissionRate,
     makerCommissionRate: commission.makerCommissionRate
   });
-  const openings = scopeToRows
+  const orderHistoryEvidence = summarizeOrderHistoryEvidence(rows);
+  const openings = scopeToRows || orderHistoryEvidence.backedRows
     ? rows.filter((row) => row.vst?.openingAt)
     : auditOpeningEvents(events);
   const closes = scopeToRows
@@ -4943,6 +5082,7 @@ function summarizeReplicaAudit({
     issueCounts,
     signAnalysis,
     fillQuality,
+    orderHistoryEvidence,
     gapBridge,
     matchedGapAttribution,
     executionPriceChain,
@@ -4983,6 +5123,37 @@ function summarizeReplicaFillQuality(rows = []) {
       : null),
     entrySources: countReplicaPriceSources(rows, 'entryPriceSource'),
     closeSources: countReplicaPriceSources(rows, 'closePriceSource')
+  };
+}
+
+function summarizeOrderHistoryEvidence(rows = []) {
+  const openingRows = rows.filter((row) => row.vst?.openingAt);
+  const backedRows = rows.filter((row) => row.vst?.orderHistoryBacked && row.vst?.openingAt);
+  const closedRows = backedRows.filter((row) => row.vst?.grossPnl !== null && row.vst?.grossPnl !== undefined);
+  const closeOrderIds = new Set(backedRows.flatMap((row) => row.vst?.closeOrderIds || []));
+  const positionIds = new Set(backedRows.flatMap((row) => row.trace?.exchangePositionIds || []));
+  const recoveredOpenings = backedRows.filter((row) => row.vst?.openingHistoryOnly).length;
+  const exactCloseRows = closedRows.filter((row) => row.vst?.closePriceSource === 'exchange_order_history').length;
+  const partialCloseRows = backedRows.filter((row) => Number(row.vst?.closeOrderIds?.length || 0) > 1).length;
+  const unlinkedCloseRows = rows.filter((row) => row.cause === 'Cierre sin apertura enlazada').length;
+  return {
+    available: backedRows.length > 0,
+    openingRows: openingRows.length,
+    backedRows: backedRows.length,
+    fallbackRows: Math.max(0, openingRows.length - backedRows.length),
+    closedRows: closedRows.length,
+    exactCloseRows,
+    exactCloseCoveragePercent: closedRows.length
+      ? auditRound(exactCloseRows / closedRows.length * 100)
+      : null,
+    closeOrders: closeOrderIds.size,
+    positions: positionIds.size,
+    recoveredOpenings,
+    localEventCoveragePercent: backedRows.length
+      ? auditRound((backedRows.length - recoveredOpenings) / backedRows.length * 100)
+      : null,
+    partialCloseRows,
+    unlinkedCloseRows
   };
 }
 

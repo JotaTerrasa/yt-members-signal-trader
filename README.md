@@ -475,6 +475,8 @@ La auditoría incluye una cohorte posterior a las mejoras, las tarifas maker/tak
 
 El comparador reconstruye además la cadena `hoja → señal/objetivo → cotización previa → fill` y la representa con Plotly. La latencia se divide entre reacción inicial y espera por reintentos, de modo que un movimiento previo, un retry y una diferencia entre cotización y fill no se mezclen bajo una única etiqueta de slippage.
 
+Para reconstruir los ciclos utiliza el histórico firmado de órdenes de BingX como evidencia principal. Conserva `orderId`, `positionID` y `tradeId` como cadenas para no perder precisión, reparte cierres de posiciones agregadas y enlaza cada `avgPrice` ejecutado con su PnL y sus comisiones. El panel indica la cobertura exacta, las aperturas recuperadas y los cierres sin enlazar. Si BingX no entrega el histórico, la auditoría activa y etiqueta un fallback basado en eventos e ingresos; ese fallback nunca se presenta como fill exacto.
+
 Si un paquete Demo reciente presenta una apertura sin evento de ejecución, la cobertura vuelve a validar la señal tras un breve margen y la reenvía por la ruta idempotente. Las aperturas ya ejecutadas desde otra fuente se enlazan mediante su identidad estable en lugar de contarse como ausentes. Esta recuperación no cambia el modo, no arma Live y no habilita aperturas desde Telegram Web.
 
 Endpoints:

@@ -40,6 +40,10 @@ export class BingXClient {
     return this.request('GET', '/openApi/swap/v2/trade/openOrders', symbol ? { symbol } : {});
   }
 
+  async getOrderHistory(params = {}) {
+    return this.request('GET', '/openApi/swap/v2/trade/allOrders', params);
+  }
+
   async setLeverage({ symbol, side, leverage }) {
     return this.request('POST', '/openApi/swap/v2/trade/leverage', {
       symbol,
@@ -200,7 +204,14 @@ async function parseJsonResponse(response) {
     return {};
   }
 
-  return JSON.parse(text.replace(/("(?:orderId|orderID)"\s*:\s*)(\d{16,})/g, '$1"$2"'));
+  return parseBingXJsonText(text);
+}
+
+export function parseBingXJsonText(text) {
+  return JSON.parse(String(text || '{}').replace(
+    /("(?:orderId|orderID|positionId|positionID|tradeId|tradeID|triggerOrderId|mainOrderId)"\s*:\s*)(\d{16,})/g,
+    '$1"$2"'
+  ));
 }
 
 function buildEncodedQuery(parameters) {
