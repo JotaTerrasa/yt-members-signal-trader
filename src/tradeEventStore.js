@@ -1,5 +1,6 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { atomicWriteFile } from './atomicFile.js';
 
 const COMPACT_EVERY_EVENTS = 100;
 
@@ -116,9 +117,7 @@ export class TradeEventStore {
 
   async compactNow() {
     this.data.updatedAt = new Date().toISOString();
-    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(this.data, null, 2)}\n`, 'utf8');
-    await rename(temporaryPath, this.filePath);
+    await atomicWriteFile(this.filePath, `${JSON.stringify(this.data, null, 2)}\n`);
     await writeFile(this.journalPath, '', 'utf8');
     this.pendingJournalEntries = 0;
   }

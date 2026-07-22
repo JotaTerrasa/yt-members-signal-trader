@@ -162,6 +162,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - Una lectura vacía aislada de YouTube se registra como aviso transitorio; solo un monitor parado, obsoleto o sin estado verificable se clasifica como incidencia crítica.
 - El histórico usa un diario incremental y compactación atómica.
 - Una caída durante una escritura no obliga a reescribir ni perder el archivo completo.
+- Los bloqueos transitorios de renombrado en Windows se reintentan de forma acotada y dejan el diario intacto; los errores permanentes siguen siendo visibles.
 - El parser, las guardas, el riesgo, los cierres, la auditoría y la persistencia tienen pruebas automáticas.
 - La errata histórica `CUERRE` se reconoce como cierre y está cubierta con el mensaje exacto que se perdió el 5 de julio.
 - Cada publicación con aperturas forma un paquete auditable: símbolos esperados, ejecutados, pendientes y ausentes.

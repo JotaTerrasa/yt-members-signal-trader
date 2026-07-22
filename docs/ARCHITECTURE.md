@@ -149,6 +149,10 @@ También clasifica qué errores son transitorios. No reintenta errores de creden
 
 Mantiene la cola local de aperturas y cierres pendientes mediante reemplazo atómico. La cola no contiene secretos y conserva modo, señal, caducidad, intentos y último motivo. Al arrancar, `server.js` la recupera y reconcilia BingX antes de cualquier reenvío.
 
+### `src/atomicFile.js`
+
+Centraliza el reemplazo atómico utilizado por los almacenes JSON y por el diario de eventos. En Windows reintenta únicamente bloqueos transitorios `EPERM`, `EBUSY` y `EACCES`, con espera exponencial acotada; un error permanente se propaga de inmediato y el temporal se limpia siempre.
+
 ### `src/coverageRecovery.js`
 
 Selecciona huecos recientes de cobertura que pueden recuperarse de forma segura. Solo propone aperturas Demo con motivo `no_execution_event`, dentro de la ventana temporal y con una señal parseada exacta. Los fallos ya explicados, los huecos antiguos y cualquier modo Live quedan fuera.

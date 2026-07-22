@@ -614,7 +614,7 @@ Contenido importante:
 
 No borres `.yt-profile/` salvo que quieras reiniciar sesiones web.
 
-Los almacenes principales serializan las escrituras, generan primero un archivo temporal y lo sustituyen de forma atómica. Durante un apagado normal, el servidor espera a que esas colas terminen.
+Los almacenes principales serializan las escrituras, generan primero un archivo temporal y lo sustituyen de forma atómica. En Windows, un bloqueo transitorio del antivirus o del sistema de archivos se reintenta con espera creciente antes de declarar el fallo; los errores permanentes no se ocultan. Durante un apagado normal, el servidor espera a que esas colas terminen.
 
 ## Guía para Codex
 
