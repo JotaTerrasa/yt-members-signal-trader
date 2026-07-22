@@ -409,6 +409,120 @@ try {
     throw new Error(`Errores JavaScript al navegar la hoja: ${sheetNavigationErrors.join(' | ')}`);
   }
 
+  const outcomeImpactPage = await browser.newPage({ viewport: { width: 760, height: 900 } });
+  const outcomeImpactErrors = [];
+  const outcomeImpactFixture = economicImpactAuditFixture(fixtureMonth);
+  outcomeImpactPage.on('pageerror', (error) => outcomeImpactErrors.push(error.message));
+  await outcomeImpactPage.route('**/api/bingx', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        bingx: {
+          enabled: false,
+          mode: 'demo',
+          apiKeyConfigured: false,
+          apiSecretConfigured: false
+        },
+        trades: [],
+        paperTrades: [],
+        exchangePositions: [],
+        exchangeSafety: {},
+        risk: {}
+      })
+    });
+  });
+  await outcomeImpactPage.route('**/api/historical-pnl?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        historical: {
+          source: { alignedMonth: fixtureMonth },
+          months: [],
+          positions: []
+        }
+      })
+    });
+  });
+  await outcomeImpactPage.route('**/api/bingx/pnl-sources**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, month: fixtureMonth, sources: {}, positions: { vst: [], live: [] } })
+    });
+  });
+  await outcomeImpactPage.route('**/api/replica-audit**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(outcomeImpactFixture)
+    });
+  });
+
+  await outcomeImpactPage.goto(`${baseUrl}/?outcome-impact-check=${Date.now()}#sheet-vst-alignment`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await outcomeImpactPage.waitForFunction(() => (
+    document.querySelectorAll('.replica-impact-table:not(.symbol) tbody tr').length === 3
+      && document.querySelectorAll('.replica-impact-table.symbol tbody tr').length === 4
+      && document.querySelectorAll('.replica-audit-table tbody tr').length === 6
+  ), null, { timeout: 20_000 });
+
+  const outcomeImpactState = await outcomeImpactPage.evaluate(() => {
+    const categoryRows = [...document.querySelectorAll('.replica-impact-table:not(.symbol) tbody tr')];
+    const symbolRows = [...document.querySelectorAll('.replica-impact-table.symbol tbody tr')];
+    const wraps = [...document.querySelectorAll('.replica-impact-table-wrap')];
+    wraps[0]?.scrollTo({ left: wraps[0].scrollWidth, behavior: 'instant' });
+    return {
+      total: document.querySelector('.replica-outcome-impact-total strong')?.textContent || '',
+      categories: categoryRows.map((row) => row.textContent.replace(/\s+/g, ' ').trim()),
+      symbols: symbolRows.map((row) => row.textContent.replace(/\s+/g, ' ').trim()),
+      horizontalRange: wraps[0] ? wraps[0].scrollWidth - wraps[0].clientWidth : 0,
+      horizontalPosition: wraps[0]?.scrollLeft || 0
+    };
+  });
+  if (!outcomeImpactState.total.includes('-39')
+    || !outcomeImpactState.categories.some((row) => row.includes('Signo distinto antes de costes') && row.includes('2'))
+    || !outcomeImpactState.categories.some((row) => row.includes('Ganancia absorbida por costes') && row.includes('1'))
+    || !outcomeImpactState.categories.some((row) => row.includes('Mismo signo neto') && row.includes('3'))
+    || !outcomeImpactState.symbols.some((row) => row.includes('SOL-USDT') && row.includes('-15'))
+    || outcomeImpactState.horizontalRange <= 0
+    || outcomeImpactState.horizontalPosition <= 0) {
+    throw new Error(`El impacto económico no se representó correctamente: ${JSON.stringify(outcomeImpactState)}.`);
+  }
+
+  await outcomeImpactPage.click('.replica-outcome-impact [data-replica-filter="market_mismatch"]');
+  await outcomeImpactPage.waitForFunction(() => (
+    document.querySelectorAll('.replica-audit-table tbody tr').length === 2
+      && document.querySelector('.replica-box-title span')?.textContent.includes('2 filtradas de 6')
+  ));
+  const marketOutcomeSymbols = await outcomeImpactPage.locator('.replica-audit-table tbody tr td:nth-child(2) strong').allTextContents();
+  if (marketOutcomeSymbols.join(',') !== 'SOL-USDT,SUI-USDT') {
+    throw new Error(`El filtro causal devolvió activos incorrectos: ${marketOutcomeSymbols.join(', ')}.`);
+  }
+
+  await outcomeImpactPage.click('.replica-outcome-impact [data-replica-filter="symbol:SOL-USDT"]');
+  await outcomeImpactPage.waitForFunction(() => (
+    document.querySelectorAll('.replica-audit-table tbody tr').length === 2
+      && document.querySelector('.replica-box-title span')?.textContent.includes('2 filtradas de 6')
+      && document.querySelector('.replica-impact-filter.active')?.textContent.includes('SOL-USDT')
+  ));
+  const solOutcomeSymbols = await outcomeImpactPage.locator('.replica-audit-table tbody tr td:nth-child(2) strong').allTextContents();
+  if (solOutcomeSymbols.some((symbol) => symbol !== 'SOL-USDT')) {
+    throw new Error(`El filtro de activo mezcló operaciones: ${solOutcomeSymbols.join(', ')}.`);
+  }
+
+  await outcomeImpactPage.click('[data-replica-filter="all"]');
+  await outcomeImpactPage.waitForFunction(() => (
+    document.querySelectorAll('.replica-audit-table tbody tr').length === 6
+      && document.querySelector('.replica-outcome-filter.active')?.dataset.replicaFilter === 'all'
+  ));
+  if (outcomeImpactErrors.length) {
+    throw new Error(`Errores JavaScript en el impacto económico: ${outcomeImpactErrors.join(' | ')}`);
+  }
+
   const manualRefreshPage = await browser.newPage();
   const manualRefreshErrors = [];
   const manualRefreshRequests = {
@@ -512,6 +626,7 @@ try {
     externalSheetOpenRowsPassed: true,
     externalSheetPendingPnlPassed: true,
     externalSheetNavigationPassed: true,
+    outcomeImpactPanelPassed: true,
     manualPnlRefreshPassed: true
   }));
 } finally {
@@ -531,4 +646,142 @@ function localMonthKey(value = new Date()) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+}
+
+function economicImpactAuditFixture(month) {
+  const closedAt = `${month}-15T12:00:00.000Z`;
+  const definitions = [
+    { symbol: 'SOL-USDT', category: 'market_driven_mismatch', replicaPnl: 10, grossPnl: -2, fees: -1, funding: 0, netPnl: -3 },
+    { symbol: 'SOL-USDT', category: 'same_net_sign', replicaPnl: 8, grossPnl: 7, fees: -1, funding: 0, netPnl: 6 },
+    { symbol: 'ETH-USDT', category: 'cost_driven_mismatch', replicaPnl: 5, grossPnl: 1, fees: -2, funding: 0, netPnl: -1 },
+    { symbol: 'ETH-USDT', category: 'same_net_sign', replicaPnl: 12, grossPnl: 10, fees: -1, funding: 0, netPnl: 9 },
+    { symbol: 'BTC-USDT', category: 'same_net_sign', replicaPnl: 10, grossPnl: 9, fees: -0.5, funding: -0.5, netPnl: 8 },
+    { symbol: 'SUI-USDT', category: 'market_driven_mismatch', replicaPnl: 10, grossPnl: -2, fees: -1, funding: 0, netPnl: -3 }
+  ];
+  const labels = {
+    market_driven_mismatch: 'Signo distinto antes de costes',
+    cost_driven_mismatch: 'Ganancia absorbida por costes',
+    same_net_sign: 'Mismo signo neto'
+  };
+  const rows = definitions.map((definition, index) => {
+    const marketMismatch = definition.category === 'market_driven_mismatch';
+    const costMismatch = definition.category === 'cost_driven_mismatch';
+    const sameNetSign = definition.category === 'same_net_sign';
+    return {
+      id: `impact-${index + 1}`,
+      sequence: index + 1,
+      orderNumber: index + 1,
+      symbol: definition.symbol,
+      direction: 'LONG',
+      severity: sameNetSign ? 'positive' : 'negative',
+      cause: labels[definition.category],
+      detail: 'Muestra sintética de validación visual.',
+      sheet: { pnl: definition.replicaPnl * 10, entry: 100, exit: 101 },
+      replica: { pnl: definition.replicaPnl, notional: 45 },
+      vst: {
+        openingAt: closedAt,
+        closingAt: closedAt,
+        entry: 100,
+        exit: 101,
+        signalEntry: 100,
+        signalClose: 101,
+        entryPriceSource: 'exchange_fill',
+        closePriceSource: 'exchange_order_history',
+        grossPnl: definition.grossPnl,
+        fees: definition.fees + definition.funding,
+        funding: definition.funding,
+        netPnl: definition.netPnl
+      },
+      diff: { net: definition.netPnl - definition.replicaPnl, entryPercent: 0, closePercent: 0 },
+      outcome: {
+        comparable: true,
+        key: definition.category,
+        label: labels[definition.category],
+        sameNetSign,
+        netMismatch: !sameNetSign,
+        grossMeasured: true,
+        grossMismatch: marketMismatch,
+        marketDrivenNetMismatch: marketMismatch,
+        costDrivenNetMismatch: costMismatch,
+        otherNetMismatch: false,
+        grossMismatchRecoveredByCosts: false
+      }
+    };
+  });
+
+  return {
+    ok: true,
+    audit: {
+      month,
+      summary: {
+        sheetRows: 6,
+        vstOpenings: 6,
+        vstCloses: 6,
+        sheetPnl: 550,
+        replicaPnl: 55,
+        defaultNotionalVST: 45,
+        bingxGross: 23,
+        bingxFees: -6.5,
+        bingxFunding: -0.5,
+        bingxNet: 16,
+        netGap: -39,
+        issueCounts: {
+          'Signo distinto de mercado': 2,
+          'Ganancia absorbida por costes': 1,
+          Alineada: 3
+        },
+        pairedOutcomeAnalysis: {
+          rows: 6,
+          sheetWins: 6,
+          vstWins: 3,
+          sheetWinRate: 100,
+          vstWinRate: 50,
+          winRateGapPoints: -50,
+          sameNetSign: 3,
+          netSignMismatch: 3,
+          sheetWinVstLoss: 3,
+          sheetLossVstWin: 0,
+          marketDrivenNetMismatch: 2,
+          costDrivenNetMismatch: 1,
+          otherNetMismatch: 0,
+          grossMismatchRecoveredByCosts: 0
+        },
+        pairedOutcomeImpact: {
+          rows: 6,
+          replicaPnl: 55,
+          bingxGross: 23,
+          fees: -6.5,
+          funding: -0.5,
+          costs: -7,
+          bingxNet: 16,
+          gapVsReplica: -39,
+          residual: 0,
+          reconciled: true,
+          groups: [
+            { key: 'market_driven_mismatch', label: labels.market_driven_mismatch, rows: 2, netMismatch: 2, replicaPnl: 20, bingxGross: -4, costs: -2, bingxNet: -6, gapVsReplica: -26 },
+            { key: 'cost_driven_mismatch', label: labels.cost_driven_mismatch, rows: 1, netMismatch: 1, replicaPnl: 5, bingxGross: 1, costs: -2, bingxNet: -1, gapVsReplica: -6 },
+            { key: 'same_net_sign', label: labels.same_net_sign, rows: 3, sameNetSign: 3, netMismatch: 0, replicaPnl: 30, bingxGross: 26, costs: -3, bingxNet: 23, gapVsReplica: -7 }
+          ],
+          bySymbol: [
+            { key: 'SOL-USDT', label: 'SOL-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 1, costDrivenNetMismatch: 0, gapVsReplica: -15 },
+            { key: 'SUI-USDT', label: 'SUI-USDT', rows: 1, netMismatch: 1, marketDrivenNetMismatch: 1, costDrivenNetMismatch: 0, gapVsReplica: -13 },
+            { key: 'ETH-USDT', label: 'ETH-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 1, gapVsReplica: -9 },
+            { key: 'BTC-USDT', label: 'BTC-USDT', rows: 1, netMismatch: 0, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 0, gapVsReplica: -2 }
+          ]
+        },
+        signAnalysis: { marketMismatch: 2, costFlip: 1, netMismatch: 3, pairedRows: 6 },
+        fillQuality: {},
+        missingReasonCounts: {},
+        stopAnalysis: { total: 0, aligned: 0, divergent: 0 },
+        referenceCoverage: {
+          latestSheetAt: closedAt,
+          stale: false,
+          provisionalLatestDay: false,
+          outsideCoverageRows: 0
+        }
+      },
+      source: { orderHistory: { available: true, records: 6 } },
+      rows
+    }
+  };
 }
