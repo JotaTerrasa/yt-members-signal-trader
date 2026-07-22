@@ -265,6 +265,7 @@ test('el puente contable reconcilia réplica, incidencias, costes y neto BingX',
     matched: 1,
     missingExecution: 1,
     sheetWithoutResult: 0,
+    pendingReference: 0,
     outsideCoverage: 1,
     extras: 1,
     unlinkedCloses: 1,
@@ -274,6 +275,7 @@ test('el puente contable reconcilia réplica, incidencias, costes y neto BingX',
     matched_gap: -3,
     missing_execution: 2,
     sheet_without_result: 0,
+    pending_reference: 0,
     outside_coverage: 3,
     extra_execution: -1,
     unlinked_close: -4,
@@ -282,6 +284,26 @@ test('el puente contable reconcilia réplica, incidencias, costes y neto BingX',
     funding: -0.5
   });
   assert.equal(bridge.steps.find((step) => step.key === 'fees').count, null);
+});
+
+test('el puente separa los cierres cuyo resultado sigue pendiente en la hoja', () => {
+  const bridge = buildReplicaGapBridge({
+    rows: [
+      { sheet: { status: 'closed' }, replica: { pnl: 10 }, vst: { grossPnl: 7 }, cause: 'Diferencia de ejecución' },
+      { sheet: { status: 'open' }, replica: { pnl: null }, vst: { grossPnl: -2 }, cause: 'Resultado pendiente en hoja' },
+      { sheet: { status: 'open' }, replica: { pnl: null }, vst: { grossPnl: null }, cause: 'Abierta en ambas' }
+    ],
+    bingxFees: -1,
+    bingxFunding: 0
+  });
+
+  assert.equal(bridge.replicaPnl, 10);
+  assert.equal(bridge.bingxGross, 5);
+  assert.equal(bridge.bingxNet, 4);
+  assert.equal(bridge.counts.pendingReference, 2);
+  assert.equal(bridge.steps.find((step) => step.key === 'pending_reference').value, -2);
+  assert.equal(bridge.residual, 0);
+  assert.equal(bridge.reconciled, true);
 });
 
 test('descompone el gap emparejado entre entrada, salida, cantidad y evidencia incompleta', () => {

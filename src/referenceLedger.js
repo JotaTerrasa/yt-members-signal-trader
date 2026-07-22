@@ -302,14 +302,16 @@ function sheetNameYear(value) {
 
 function referencePosition(row, month, sheetName) {
   const orderNumber = Number(row[0]);
-  const symbol = `${String(row[2] || '').trim().toUpperCase()}-USDT`;
+  const asset = String(row[2] || '').trim().toUpperCase();
+  const symbol = asset ? `${asset}-USDT` : '';
   const direction = String(row[3] || '').trim().toUpperCase();
   const entryPrice = parseNumber(row[4]);
-  const closePrice = parseNumber(row[5]);
+  const secondaryPrice = parseNumber(row[5]);
   const leverage = parseNumber(row[6]);
   const notional = parseNumber(row[7]);
   const exposure = parseNumber(row[8]) || notional * leverage;
   const pnl = parseNumber(row[10]);
+  const hasFinalPnl = Number.isFinite(pnl);
   const parsedDate = parseSpanishDate(row[1]);
   if (parsedDate && monthKey(parsedDate) !== month) {
     return null;
@@ -317,11 +319,13 @@ function referencePosition(row, month, sheetName) {
   const date = parsedDate || firstDayOfMonth(month);
   const quantity = entryPrice > 0 ? exposure / entryPrice : 0;
 
-  if (!symbol || !direction || !entryPrice || !leverage || !notional || !Number.isFinite(pnl)) {
+  if (!symbol || !direction || !entryPrice || !leverage || !notional) {
     return null;
   }
 
-  const status = closePrice > 0 ? 'closed' : 'open';
+  const status = hasFinalPnl ? 'closed' : 'open';
+  const closePrice = status === 'closed' && secondaryPrice > 0 ? secondaryPrice : null;
+  const stopLoss = status === 'open' && secondaryPrice > 0 ? secondaryPrice : null;
   const at = date.toISOString();
   return {
     id: `ref_${month}_${orderNumber}`,
@@ -333,19 +337,19 @@ function referencePosition(row, month, sheetName) {
     quantity,
     entryPrice,
     currentPrice: closePrice || entryPrice,
-    closePrice: closePrice || null,
+    closePrice,
     closeReason: status === 'closed' ? 'reference_ledger' : null,
-    stopLoss: null,
+    stopLoss,
     takeProfit: null,
     takeProfits: [],
     leverage,
     notional,
     exposure,
-    unrealizedPnl: status === 'open' ? pnl : 0,
-    realizedPnl: status === 'closed' ? pnl : 0,
-    paperPnl: pnl,
+    unrealizedPnl: null,
+    realizedPnl: status === 'closed' ? pnl : null,
+    paperPnl: status === 'closed' ? pnl : null,
     orderNumber,
-    outcome: row[11] || '',
+    outcome: row[11] || (status === 'open' ? 'ABIERTA' : ''),
     referenceSheet: sheetName,
     historical: true,
     referenceLedger: true

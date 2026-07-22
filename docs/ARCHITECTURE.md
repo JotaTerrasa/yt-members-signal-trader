@@ -318,7 +318,7 @@ Lee Google Sheets vía endpoint `gviz` y transforma la hoja mensual a posiciones
 
 La auditoría acota las fuentes a la ventana temporal antes de emparejar operaciones. Además, separa las aperturas VST posteriores a la última fila disponible de la hoja: se muestran como pendientes de referencia y no como operaciones extra ni como desalineaciones demostradas.
 
-También resuelve enlaces acortados de portfolio. El frontend presenta las posiciones descargadas por `gviz` en una tabla nativa con scroll y conserva un enlace al documento original; no depende de que Google permita cargar una sesión dentro de un `iframe`.
+También resuelve enlaces acortados de portfolio. El frontend presenta las posiciones descargadas por `gviz` en una tabla nativa con scroll y conserva un enlace al documento original; no depende de que Google permita cargar una sesión dentro de un `iframe`. Una fila con entrada, apalancamiento y margen, pero todavía sin PnL, representa una operación abierta. En ese estado, el segundo precio se conserva como stop loss, el PnL permanece desconocido y la operación queda fuera del win rate y de la comparación económica cerrada hasta recibir resultado.
 
 ### `src/portfolioDetector.js`
 

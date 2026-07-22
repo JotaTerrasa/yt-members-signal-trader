@@ -209,6 +209,7 @@ try {
   const fixtureAt = new Date();
   fixtureAt.setDate(1);
   fixtureAt.setHours(12, 0, 0, 0);
+  const fixtureOpenAt = new Date();
   nativeSheetPage.on('pageerror', (error) => nativeSheetErrors.push(error.message));
   await nativeSheetPage.route('**/api/historical-pnl?**', async (route) => {
     await route.fulfill({
@@ -228,23 +229,44 @@ try {
             asset: 'USDT',
             total: 15,
             realized: 15,
-            closedTrades: 1
+            closedTrades: 1,
+            openPaperTrades: 1
           }],
-          positions: [{
-            id: 'sheet-qa-1',
-            orderNumber: 1,
-            referenceLedger: true,
-            symbol: 'BTC-USDT',
-            direction: 'LONG',
-            leverage: 25,
-            openedAt: fixtureAt.toISOString(),
-            closedAt: fixtureAt.toISOString(),
-            entryPrice: 100,
-            closePrice: 101,
-            realizedPnl: 15,
-            notional: 1500,
-            outcome: 'GANADA'
-          }]
+          positions: [
+            {
+              id: 'sheet-qa-1',
+              orderNumber: 1,
+              status: 'closed',
+              referenceLedger: true,
+              symbol: 'BTC-USDT',
+              direction: 'LONG',
+              leverage: 25,
+              openedAt: fixtureAt.toISOString(),
+              closedAt: fixtureAt.toISOString(),
+              entryPrice: 100,
+              closePrice: 101,
+              realizedPnl: 15,
+              notional: 1500,
+              outcome: 'GANADA'
+            },
+            {
+              id: 'sheet-qa-2',
+              orderNumber: 2,
+              status: 'open',
+              referenceLedger: true,
+              symbol: 'ETH-USDT',
+              direction: 'LONG',
+              leverage: 25,
+              openedAt: fixtureOpenAt.toISOString(),
+              closedAt: null,
+              entryPrice: 200,
+              stopLoss: 195,
+              realizedPnl: null,
+              paperPnl: null,
+              notional: 1500,
+              outcome: 'ABIERTA'
+            }
+          ]
         }
       })
     });
@@ -259,16 +281,23 @@ try {
     const status = document.querySelector('#external-sheet-status');
     return panel
       && panel.dataset.sheetState !== 'loading'
-      && document.querySelectorAll('#external-sheet-body tr').length === 1
+      && document.querySelectorAll('#external-sheet-body tr').length === 2
       && status?.textContent.includes('datos hasta');
   }, null, { timeout: 20_000 });
   const nativeSheetState = await nativeSheetPage.evaluate(() => ({
     iframeCount: document.querySelectorAll('#external-sheet-panel iframe').length,
     rowCount: document.querySelectorAll('#external-sheet-body tr').length,
     status: document.querySelector('#external-sheet-status')?.textContent || '',
+    summary: document.querySelector('#external-sheet-summary')?.textContent || '',
+    firstRow: document.querySelector('#external-sheet-body tr')?.textContent || '',
     tableVisible: !document.querySelector('#external-sheet-native')?.classList.contains('hidden')
   }));
-  if (nativeSheetState.iframeCount !== 0 || nativeSheetState.rowCount !== 1 || !nativeSheetState.tableVisible) {
+  if (nativeSheetState.iframeCount !== 0
+    || nativeSheetState.rowCount !== 2
+    || !nativeSheetState.tableVisible
+    || !nativeSheetState.summary.includes('1 abiertas')
+    || !nativeSheetState.firstRow.includes('SL 195')
+    || !nativeSheetState.firstRow.includes('ABIERTA')) {
     throw new Error(`La hoja externa no uso la tabla nativa: ${JSON.stringify(nativeSheetState)}.`);
   }
   if (nativeSheetErrors.length) {
@@ -375,6 +404,7 @@ try {
     historicalFailures,
     pnlIsolationPassed: true,
     externalSheetNativePassed: true,
+    externalSheetOpenRowsPassed: true,
     manualPnlRefreshPassed: true
   }));
 } finally {

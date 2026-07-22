@@ -396,11 +396,13 @@ export function summarizeReplicaStops(rows = []) {
 export function buildReplicaGapBridge({ rows = [], bingxFees = 0, bingxFunding = 0 } = {}) {
   const auditRows = Array.isArray(rows) ? rows.filter(Boolean) : [];
   const sheetRows = auditRows.filter((row) => Boolean(row.sheet));
-  const matchedRows = sheetRows.filter(hasReplicaGrossPnl);
-  const missingRows = sheetRows.filter((row) => (
+  const pendingReferenceRows = sheetRows.filter((row) => row.sheet?.status === 'open');
+  const settledSheetRows = sheetRows.filter((row) => row.sheet?.status !== 'open');
+  const matchedRows = settledSheetRows.filter(hasReplicaGrossPnl);
+  const missingRows = settledSheetRows.filter((row) => (
     !hasReplicaGrossPnl(row) && row.cause === 'No ejecutada en VST'
   ));
-  const unresolvedSheetRows = sheetRows.filter((row) => (
+  const unresolvedSheetRows = settledSheetRows.filter((row) => (
     !hasReplicaGrossPnl(row) && row.cause !== 'No ejecutada en VST'
   ));
   const unreferencedRows = auditRows.filter((row) => !row.sheet);
@@ -414,9 +416,10 @@ export function buildReplicaGapBridge({ rows = [], bingxFees = 0, bingxFunding =
   ]);
   const otherRows = unreferencedRows.filter((row) => !knownUnreferenced.has(row.cause));
 
-  const replicaPnl = sumFinite(sheetRows.map((row) => row.replica?.pnl));
+  const replicaPnl = sumFinite(settledSheetRows.map((row) => row.replica?.pnl));
   const matchedReplicaPnl = sumFinite(matchedRows.map((row) => row.replica?.pnl));
   const matchedGrossPnl = sumFinite(matchedRows.map((row) => row.vst?.grossPnl));
+  const pendingReferenceGrossPnl = sumFinite(pendingReferenceRows.map((row) => row.vst?.grossPnl));
   const observedGross = sumFinite(auditRows.map((row) => row.vst?.grossPnl));
   const fees = roundMoney(bingxFees);
   const funding = roundMoney(bingxFunding);
@@ -424,6 +427,7 @@ export function buildReplicaGapBridge({ rows = [], bingxFees = 0, bingxFunding =
     bridgeStep('matched_gap', 'Emparejadas vs hoja', matchedGrossPnl - matchedReplicaPnl, matchedRows.length),
     bridgeStep('missing_execution', 'No ejecutadas', -sumFinite(missingRows.map((row) => row.replica?.pnl)), missingRows.length),
     bridgeStep('sheet_without_result', 'Hoja sin cierre VST', -sumFinite(unresolvedSheetRows.map((row) => row.replica?.pnl)), unresolvedSheetRows.length),
+    bridgeStep('pending_reference', 'Resultado pendiente en hoja', pendingReferenceGrossPnl, pendingReferenceRows.length),
     bridgeStep('outside_coverage', 'Posteriores sin hoja', sumFinite(outsideCoverageRows.map((row) => row.vst?.grossPnl)), outsideCoverageRows.length),
     bridgeStep('extra_execution', 'Extras en cobertura', sumFinite(extraRows.map((row) => row.vst?.grossPnl)), extraRows.length),
     bridgeStep('unlinked_close', 'Cierres no enlazados', sumFinite(unlinkedCloseRows.map((row) => row.vst?.grossPnl)), unlinkedCloseRows.length),
@@ -452,6 +456,7 @@ export function buildReplicaGapBridge({ rows = [], bingxFees = 0, bingxFunding =
       matched: matchedRows.length,
       missingExecution: missingRows.length,
       sheetWithoutResult: unresolvedSheetRows.length,
+      pendingReference: pendingReferenceRows.length,
       outsideCoverage: outsideCoverageRows.length,
       extras: extraRows.length,
       unlinkedCloses: unlinkedCloseRows.length,

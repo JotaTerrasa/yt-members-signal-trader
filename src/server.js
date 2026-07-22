@@ -4982,7 +4982,8 @@ function replicaAuditRow({
   timingContext,
   defaultNotional
 }) {
-  const sheetPnl = auditNumber(sheet?.realizedPnl ?? sheet?.paperPnl, null);
+  const sheetIsOpen = sheet?.status === 'open';
+  const sheetPnl = sheetIsOpen ? null : auditNumber(sheet?.realizedPnl ?? sheet?.paperPnl, null);
   const sheetNotional = auditNumber(sheet?.notional, 0);
   const leverage = auditNumber(sheet?.leverage ?? opening?.signal?.leverage, 1);
   const entryFill = resolveEntryFill(opening);
@@ -5008,7 +5009,9 @@ function replicaAuditRow({
   const fees = roundMoney(openingFeeAmount + closingFeeAmount + fundingAmount);
   const netPnl = grossPnl == null ? null : roundMoney(grossPnl + fees);
   const entryDiffPercent = auditPercentDiff(entryPrice, sheet?.entryPrice);
-  const closeDiffPercent = auditPercentDiff(closePrice, sheet?.closePrice || sheet?.currentPrice);
+  const closeDiffPercent = sheetIsOpen
+    ? null
+    : auditPercentDiff(closePrice, sheet?.closePrice || sheet?.currentPrice);
   const direction = sheet?.direction || opening?.signal?.direction || closeEvent?.signal?.direction || '';
   const entrySlippagePercent = entryAdverseDeviationPercent({
     actual: entryPrice,
@@ -5085,8 +5088,10 @@ function replicaAuditRow({
     sequence,
     direction: sheet?.direction || opening?.signal?.direction || closeEvent?.signal?.direction || '',
     sheet: sheet ? {
+      status: sheet.status || 'closed',
       entry: auditRound(sheet.entryPrice),
-      exit: auditRound(sheet.closePrice || sheet.currentPrice),
+      exit: sheetIsOpen ? null : auditRound(sheet.closePrice || sheet.currentPrice),
+      stopLoss: auditRound(sheet.stopLoss),
       pnl: auditRound(sheetPnl),
       notional: auditRound(sheetNotional),
       leverage: auditRound(leverage),
@@ -5242,6 +5247,19 @@ function auditRowStatus({
       detail: `Histórico: ${unprocessedCloses.length} cierre${unprocessedCloses.length === 1 ? '' : 's'} no ${unprocessedCloses.length === 1 ? 'generó' : 'generaron'} ejecución${typoCount ? '; CUERRE ya está cubierto' : ''}.`,
       severity: 'negative'
     };
+  }
+  if (sheet?.status === 'open') {
+    return realized
+      ? {
+          cause: 'Resultado pendiente en hoja',
+          detail: 'BingX ya cerró la operación, pero la hoja todavía conserva la fila abierta y no publica PnL final.',
+          severity: 'warn'
+        }
+      : {
+          cause: 'Abierta en ambas',
+          detail: 'La operación continúa abierta tanto en la hoja como en BingX.',
+          severity: 'positive'
+        };
   }
   if (opening && !realized) {
     return { cause: 'Abierta o sin cierre', detail: 'La señal entró, pero no hay cierre realizado emparejado en BingX.', severity: 'warn' };

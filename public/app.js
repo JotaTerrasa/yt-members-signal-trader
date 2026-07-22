@@ -5166,12 +5166,15 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
   const steps = Object.fromEntries(bridge.steps.map((step) => [step.key, step]));
   const costs = Number(bridge.bingxFees || 0) + Number(bridge.bingxFunding || 0);
   const outsideCoverage = Number(bridge.counts?.outsideCoverage || referenceCoverage.outsideCoverageRows || 0);
+  const pendingReference = Number(bridge.counts?.pendingReference || 0);
   const status = bridge.reconciled
     ? 'Cuadra al céntimo'
     : `Residual ${formatMoney(bridge.residual, 'VST')}`;
   const coverageNote = referenceCoverage.stale
     ? `${outsideCoverage} operaciones posteriores a la hoja se muestran como resultado sin referencia y no como diferencia de estrategia.`
-    : 'La hoja cubre toda la ventana temporal utilizada por el puente.';
+    : pendingReference
+      ? `${pendingReference} operaciones ya aparecen en la hoja, pero siguen abiertas y no entrarán en la comparación económica hasta publicar PnL.`
+      : 'La hoja cubre toda la ventana temporal utilizada por el puente.';
   const fact = (key, label) => {
     const step = steps[key] || {};
     const count = step.count !== null && step.count !== undefined && Number.isFinite(Number(step.count))
@@ -5199,7 +5202,9 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
       <div class="replica-gap-facts">
         ${fact('matched_gap', 'Emparejadas vs hoja')}
         ${fact('missing_execution', 'No ejecutadas')}
-        ${fact('unlinked_close', 'Cierres no enlazados')}
+        ${pendingReference
+          ? fact('pending_reference', 'Pendientes en hoja')
+          : fact('unlinked_close', 'Cierres no enlazados')}
         <div>
           <span>Comisiones + funding</span>
           <strong class="${amountClass(costs)}">${escapeHtml(formatMoney(costs, 'VST'))}</strong>
@@ -8010,7 +8015,9 @@ function renderExternalSheetEmbed() {
     return;
   }
 
-  const winners = positions.filter((position) => Number(position.realizedPnl ?? position.paperPnl ?? 0) > 0).length;
+  const openPositions = positions.filter((position) => position.status === 'open');
+  const closedPositions = positions.filter((position) => position.status !== 'open');
+  const winners = closedPositions.filter((position) => Number(position.realizedPnl ?? position.paperPnl ?? 0) > 0).length;
   const visiblePositions = positions.slice(0, appState.externalSheetVisibleLimit);
   const total = Number(reference?.row?.total ?? positions.reduce((sum, position) => (
     sum + Number(position.realizedPnl ?? position.paperPnl ?? 0)
@@ -8019,8 +8026,8 @@ function renderExternalSheetEmbed() {
   if (appState.externalSheetRenderKey !== renderKey) {
     elements.externalSheetSummary.innerHTML = `
       <div><span>Hoja</span><strong>${escapeHtml(reference?.label || source.label)}</strong></div>
-      <div><span>Operaciones</span><strong>${positions.length}</strong></div>
-      <div><span>Win rate</span><strong>${escapeHtml(formatPercent(positions.length ? (winners / positions.length) * 100 : 0))}</strong></div>
+      <div><span>Operaciones</span><strong>${positions.length}${openPositions.length ? ` · ${openPositions.length} abiertas` : ''}</strong></div>
+      <div><span>Win rate</span><strong>${escapeHtml(formatPercent(closedPositions.length ? (winners / closedPositions.length) * 100 : 0))}</strong></div>
       <div><span>Resultado</span><strong class="${escapeAttribute(amountClass(total))}">${escapeHtml(formatMoney(total, 'USDT'))}</strong></div>
       <div><span>Equity</span><strong>${escapeHtml(reference?.equity == null ? '-' : formatMoney(reference.equity, 'USDT'))}</strong></div>
     `;
@@ -8056,7 +8063,9 @@ function externalSheetDataKey(reference, positions) {
   const rows = positions.map((position) => [
     position.id,
     position.orderNumber,
+    position.status,
     position.entryPrice,
+    position.stopLoss,
     position.closePrice ?? position.currentPrice,
     position.realizedPnl ?? position.paperPnl,
     position.outcome
@@ -8104,11 +8113,17 @@ function externalSheetFreshnessLabel(freshness = {}, updatedLabel = '') {
 }
 
 function renderExternalSheetRow(position) {
-  const pnl = Number(position.realizedPnl ?? position.paperPnl ?? 0);
+  const isOpen = position.status === 'open';
+  const pnl = isOpen ? null : Number(position.realizedPnl ?? position.paperPnl ?? 0);
   const margin = Number(position.notional || 0);
-  const roi = margin > 0 ? (pnl / margin) * 100 : null;
-  const outcome = position.outcome || (pnl > 0 ? 'GANADA' : pnl < 0 ? 'PERDIDA' : 'PLANA');
-  const outcomeClass = pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : 'neutral';
+  const roi = pnl !== null && margin > 0 ? (pnl / margin) * 100 : null;
+  const outcome = isOpen
+    ? 'ABIERTA'
+    : position.outcome || (pnl > 0 ? 'GANADA' : pnl < 0 ? 'PERDIDA' : 'PLANA');
+  const outcomeClass = isOpen ? 'neutral' : pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : 'neutral';
+  const exit = isOpen
+    ? position.stopLoss > 0 ? `SL ${formatPrice(position.stopLoss)}` : '-'
+    : formatPrice(position.closePrice ?? position.currentPrice);
   return `
     <tr>
       <td>
@@ -8120,8 +8135,8 @@ function renderExternalSheetRow(position) {
         <span>${escapeHtml(`${position.direction || '-'} · ${formatLeverage(position.leverage)}`)}</span>
       </td>
       <td>${escapeHtml(formatPrice(position.entryPrice))}</td>
-      <td>${escapeHtml(formatPrice(position.closePrice ?? position.currentPrice))}</td>
-      <td class="${escapeAttribute(amountClass(pnl))}"><strong>${escapeHtml(formatMoney(pnl, 'USDT'))}</strong></td>
+      <td>${escapeHtml(exit)}</td>
+      <td class="${escapeAttribute(amountClass(pnl))}"><strong>${escapeHtml(pnl === null ? '-' : formatMoney(pnl, 'USDT'))}</strong></td>
       <td class="${escapeAttribute(amountClass(roi))}">${escapeHtml(roi == null ? '-' : formatPercent(roi))}</td>
       <td><span class="ledger-status ${escapeAttribute(outcomeClass)}">${escapeHtml(outcome)}</span></td>
     </tr>
