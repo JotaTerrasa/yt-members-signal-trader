@@ -3138,6 +3138,32 @@ summary.dashboard-section-title {
   background: var(--line);
 }
 
+.entry-diagnosis-timing {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.entry-diagnosis-mix {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--accent);
+  background: #edf8f5;
+}
+
+.entry-diagnosis-mix strong {
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.entry-diagnosis-mix span,
+.entry-diagnosis-mix small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
 .entry-diagnosis-stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -5720,6 +5746,10 @@ h1 {
   }
 
   .entry-diagnosis-stages {
+    grid-template-columns: 1fr;
+  }
+
+  .entry-diagnosis-timing {
     grid-template-columns: 1fr;
   }
 

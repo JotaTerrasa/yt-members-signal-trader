@@ -500,12 +500,16 @@ test('mide reacción y reintentos sin duplicar un mismo cierre', () => {
   assert.equal(summary.closing.total.medianSeconds, 1);
 });
 
-test('localiza la desviación de entrada por fase, activo y reintento sin duplicar aperturas', () => {
-  const row = ({ id, symbol, direction = 'LONG', signal, quote, fill, detectedAt, firstAttemptAt, openingAt }) => ({
+test('localiza la desviación de entrada por fase, activo, paquete y fill sin duplicar aperturas', () => {
+  const row = ({ id, postId, symbol, direction = 'LONG', signal, quote, fill, detectedAt, firstAttemptAt, openingAt, fillAt }) => ({
     id,
     symbol,
     direction,
-    trace: { openingEventId: id },
+    trace: {
+      openingEventId: id,
+      openingPostId: postId,
+      executionKey: `demo|${postId}|${symbol}|${direction}|${signal}|90`
+    },
     vst: {
       signalEntry: signal,
       preOrderMarket: quote,
@@ -513,21 +517,26 @@ test('localiza la desviación de entrada por fase, activo y reintento sin duplic
       entrySlippagePercent: null,
       openingDetectedAt: detectedAt,
       openingFirstAttemptAt: firstAttemptAt,
+      openingAttemptAt: openingAt,
+      openingFillAt: fillAt,
       openingAt
     }
   });
   const btc = row({
     id: 'btc-1',
+    postId: 'post-a',
     symbol: 'BTC-USDT',
     signal: 100,
     quote: 100.1,
     fill: 100.2,
     detectedAt: '2026-07-20T08:00:00.000Z',
     firstAttemptAt: '2026-07-20T08:00:01.000Z',
-    openingAt: '2026-07-20T08:00:01.000Z'
+    openingAt: '2026-07-20T08:00:01.000Z',
+    fillAt: '2026-07-20T08:00:02.000Z'
   });
   const eth = row({
     id: 'eth-1',
+    postId: 'post-a',
     symbol: 'ETH-USDT',
     direction: 'SHORT',
     signal: 100,
@@ -535,17 +544,20 @@ test('localiza la desviación de entrada por fase, activo y reintento sin duplic
     fill: 99.9,
     detectedAt: '2026-07-20T12:00:00.000Z',
     firstAttemptAt: '2026-07-20T12:00:01.000Z',
-    openingAt: '2026-07-20T12:00:01.000Z'
+    openingAt: '2026-07-20T12:00:01.000Z',
+    fillAt: '2026-07-20T12:00:02.000Z'
   });
   const sol = row({
     id: 'sol-1',
+    postId: 'post-b',
     symbol: 'SOL-USDT',
     signal: 100,
     quote: 100.2,
     fill: 100.3,
     detectedAt: '2026-07-20T22:00:00.000Z',
     firstAttemptAt: '2026-07-20T22:00:01.000Z',
-    openingAt: '2026-07-20T22:01:01.000Z'
+    openingAt: '2026-07-20T22:01:01.000Z',
+    fillAt: '2026-07-20T22:01:02.000Z'
   });
   const analysis = buildEntryExecutionAnalysis([btc, eth, sol, { ...btc }]);
 
@@ -555,11 +567,16 @@ test('localiza la desviación de entrada por fase, activo y reintento sin duplic
   assert.equal(analysis.byRoute.find((group) => group.key === 'immediate').openings, 2);
   assert.equal(analysis.byRoute.find((group) => group.key === 'retried').openings, 1);
   assert.equal(analysis.byLatency.find((group) => group.key === 'from_30_to_120s').openings, 1);
+  assert.equal(analysis.byPackageSlot.find((group) => group.key === 'slot_1').openings, 2);
+  assert.equal(analysis.byPackageSlot.find((group) => group.key === 'slot_2').openings, 1);
   assert.equal(analysis.byTimeWindow.find((group) => group.key === 'morning').openings, 1);
   assert.equal(analysis.byTimeWindow.find((group) => group.key === 'night').openings, 1);
   assert.equal(analysis.totals.signalToQuote.measured, 3);
   assert.equal(analysis.totals.quoteToFill.measured, 3);
+  assert.equal(analysis.totals.latency.exchangeBacked, 3);
+  assert.equal(analysis.totals.latency.attemptToFill.medianSeconds, 1);
   assert.equal(analysis.timezone, 'Europe/Madrid');
+  assert.equal(analysis.exchangeTimestampPrecisionSeconds, 1);
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

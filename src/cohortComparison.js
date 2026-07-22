@@ -228,6 +228,11 @@ function buildEntryDiagnosis({ current, previous }) {
   ];
   const bySymbol = compareEntryGroups(previousAnalysis.bySymbol, currentAnalysis.bySymbol, { minimumSamples: 3 });
   const byRoute = compareEntryGroups(previousAnalysis.byRoute, currentAnalysis.byRoute, { minimumSamples: 3 });
+  const byPackageSlot = compareEntryGroups(previousAnalysis.byPackageSlot, currentAnalysis.byPackageSlot, { minimumSamples: 3 });
+  const mixAnalysis = {
+    bySymbol: decomposeEntryMix(previousAnalysis.bySymbol, currentAnalysis.bySymbol),
+    byPackageSlot: decomposeEntryMix(previousAnalysis.byPackageSlot, currentAnalysis.byPackageSlot)
+  };
   const currentTotal = currentAnalysis.totals;
   const immediate = entryGroup(currentAnalysis.byRoute, 'immediate');
   const retried = entryGroup(currentAnalysis.byRoute, 'retried');
@@ -267,6 +272,13 @@ function buildEntryDiagnosis({ current, previous }) {
   const comparableDetail = comparableDeterioration
     ? `El deterioro comparable más claro está en ${comparableDeterioration.label}: ${formatMetricNumber(comparableDeterioration.previousAboveTolerancePercent, 1)}% → ${formatMetricNumber(comparableDeterioration.currentAboveTolerancePercent, 1)}% sobre el umbral.`
     : 'Ningún activo tiene aún una comparación antes/después concluyente.';
+  const packagePattern = summarizeCurrentPackagePattern(currentAnalysis.byPackageSlot, currentTotal);
+  const packageDetail = packagePattern
+    ? `La primera apertura del paquete promedia ${formatMetricNumber(packagePattern.firstAverageAdversePercent, 4)}%; las posteriores, ${formatMetricNumber(packagePattern.laterAverageAdversePercent, 4)}%. El tiempo medio desde detección hasta el primer intento pasa de ${formatMetricNumber(packagePattern.firstReactionAverageSeconds, 2)} s a ${formatMetricNumber(packagePattern.laterReactionAverageSeconds, 2)} s, mientras que inicio→fill ronda ${formatMetricNumber(packagePattern.attemptToFillAverageSeconds, 2)} s.`
+    : 'Falta muestra para separar la primera apertura de las posteriores.';
+  const mixDetail = finiteNumber(mixAnalysis.byPackageSlot?.compositionSharePercent) !== null
+    ? `El cambio de mezcla por posición explica descriptivamente ${formatMetricNumber(mixAnalysis.byPackageSlot.compositionSharePercent, 1)}% del aumento medio observado.`
+    : 'El efecto de mezcla por posición todavía no puede reconciliarse.';
 
   return {
     tolerancePercent: currentAnalysis.tolerancePercent,
@@ -274,8 +286,8 @@ function buildEntryDiagnosis({ current, previous }) {
     summary: {
       key: stageKey,
       label: stageLabel,
-      detail: `${symbolDetail} ${comparableDetail} ${retryDetail}`,
-      caveat: 'Es una asociación descriptiva. No demuestra causalidad ni justifica cambiar la ejecución sin una muestra posterior controlada.',
+      detail: `${symbolDetail} ${comparableDetail} ${packageDetail} ${mixDetail} ${retryDetail}`,
+      caveat: 'Es una asociación descriptiva. Activo y posición dentro del paquete están correlacionados; sus desgloses son lecturas alternativas y no deben sumarse como causas. No justifica cambiar la ejecución sin una muestra posterior controlada.',
       currentOpenings: Number(currentTotal.openings || 0),
       currentAboveTolerance: totalAbove,
       immediateAboveTolerance: immediateAbove,
@@ -283,11 +295,15 @@ function buildEntryDiagnosis({ current, previous }) {
       retrySharePercent,
       dominantSymbol: dominantSymbol?.key || null,
       comparableDeteriorationSymbol: comparableDeterioration?.key || null,
-      dominantStage: dominantStage?.key || null
+      dominantStage: dominantStage?.key || null,
+      packagePattern
     },
     stages,
     bySymbol,
     byRoute,
+    byPackageSlot,
+    mixAnalysis,
+    timing: compareEntryTiming(previousAnalysis.totals?.latency, currentAnalysis.totals?.latency),
     currentByLatency: currentAnalysis.byLatency || [],
     currentByTimeWindow: currentAnalysis.byTimeWindow || []
   };
@@ -364,6 +380,10 @@ function compareEntryGroups(previousGroups = [], currentGroups = [], { minimumSa
         ? null
         : round(currentAbove - previousAbove),
       currentLatencyP95Seconds: round(current.latency?.p95Seconds),
+      previousReactionAverageSeconds: round(previous.latency?.reaction?.averageSeconds),
+      currentReactionAverageSeconds: round(current.latency?.reaction?.averageSeconds),
+      previousAttemptToFillAverageSeconds: round(previous.latency?.attemptToFill?.averageSeconds),
+      currentAttemptToFillAverageSeconds: round(current.latency?.attemptToFill?.averageSeconds),
       currentMatchedEntryImpactPerRow: round(current.matchedEntryImpactPerRow),
       assessment: combineEntryAssessments(averageAssessment, rateAssessment)
     };
@@ -372,6 +392,144 @@ function compareEntryGroups(previousGroups = [], currentGroups = [], { minimumSa
     || right.currentOpenings - left.currentOpenings
     || left.key.localeCompare(right.key)
   ));
+}
+
+function summarizeCurrentPackagePattern(groups = [], totals = {}) {
+  const first = entryGroup(groups, 'slot_1');
+  const later = aggregateEntryGroups((groups || []).filter((group) => (
+    ['slot_2', 'slot_3', 'slot_4_plus'].includes(group.key)
+  )));
+  if (!first || Number(first.measured || 0) < 3 || !later || later.measured < 3) {
+    return null;
+  }
+  return {
+    firstOpenings: Number(first.openings || 0),
+    laterOpenings: later.openings,
+    firstAverageAdversePercent: round(first.averageAdversePercent),
+    laterAverageAdversePercent: round(later.averageAdversePercent),
+    firstAboveTolerancePercent: round(first.aboveTolerancePercent),
+    laterAboveTolerancePercent: round(later.aboveTolerancePercent),
+    firstReactionAverageSeconds: round(first.latency?.reaction?.averageSeconds),
+    laterReactionAverageSeconds: round(later.reactionAverageSeconds),
+    attemptToFillAverageSeconds: round(totals?.latency?.attemptToFill?.averageSeconds),
+    exchangeBacked: Number(totals?.latency?.exchangeBacked || 0)
+  };
+}
+
+function aggregateEntryGroups(groups = []) {
+  const valid = (groups || []).filter((group) => (
+    Number(group.measured || 0) > 0
+    && finiteNumber(group.averageAdversePercent) !== null
+  ));
+  const measured = valid.reduce((sum, group) => sum + Number(group.measured || 0), 0);
+  if (!measured) {
+    return null;
+  }
+  const openings = valid.reduce((sum, group) => sum + Number(group.openings || 0), 0);
+  const above = valid.reduce((sum, group) => sum + Number(group.aboveTolerance || 0), 0);
+  const weighted = (selector) => {
+    const withValue = valid
+      .map((group) => ({ group, value: finiteNumber(selector(group)) }))
+      .filter((item) => item.value !== null);
+    const denominator = withValue.reduce((sum, item) => sum + Number(item.group.measured || 0), 0);
+    return denominator
+      ? withValue.reduce((sum, item) => sum + item.value * Number(item.group.measured || 0), 0) / denominator
+      : null;
+  };
+  return {
+    openings,
+    measured,
+    averageAdversePercent: weighted((group) => group.averageAdversePercent),
+    aboveTolerancePercent: above / measured * 100,
+    reactionAverageSeconds: weighted((group) => group.latency?.reaction?.averageSeconds)
+  };
+}
+
+function decomposeEntryMix(previousGroups = [], currentGroups = []) {
+  const previousMap = new Map((previousGroups || []).map((group) => [group.key, group]));
+  const currentMap = new Map((currentGroups || []).map((group) => [group.key, group]));
+  const keys = [...new Set([...previousMap.keys(), ...currentMap.keys()])];
+  const previousTotal = [...previousMap.values()].reduce((sum, group) => sum + Number(group.measured || 0), 0);
+  const currentTotal = [...currentMap.values()].reduce((sum, group) => sum + Number(group.measured || 0), 0);
+  if (!keys.length || !previousTotal || !currentTotal) {
+    return null;
+  }
+  const comparable = keys.every((key) => {
+    const previous = previousMap.get(key);
+    const current = currentMap.get(key);
+    return previous && current
+      && Number(previous.measured || 0) > 0
+      && Number(current.measured || 0) > 0
+      && finiteNumber(previous.averageAdversePercent) !== null
+      && finiteNumber(current.averageAdversePercent) !== null;
+  });
+  if (!comparable) {
+    return null;
+  }
+  let compositionEffect = 0;
+  let withinGroupEffect = 0;
+  let previousAverage = 0;
+  let currentAverage = 0;
+  const groups = keys.map((key) => {
+    const previous = previousMap.get(key);
+    const current = currentMap.get(key);
+    const previousShare = Number(previous.measured) / previousTotal;
+    const currentShare = Number(current.measured) / currentTotal;
+    const previousMean = Number(previous.averageAdversePercent);
+    const currentMean = Number(current.averageAdversePercent);
+    const composition = (currentShare - previousShare) * (previousMean + currentMean) / 2;
+    const within = (currentMean - previousMean) * (previousShare + currentShare) / 2;
+    compositionEffect += composition;
+    withinGroupEffect += within;
+    previousAverage += previousShare * previousMean;
+    currentAverage += currentShare * currentMean;
+    return {
+      key,
+      label: current.label || previous.label || key,
+      previousSharePercent: round(previousShare * 100),
+      currentSharePercent: round(currentShare * 100),
+      previousAverageAdversePercent: round(previousMean),
+      currentAverageAdversePercent: round(currentMean),
+      compositionEffect: round(composition),
+      withinGroupEffect: round(within)
+    };
+  });
+  const observedDelta = currentAverage - previousAverage;
+  const residual = observedDelta - compositionEffect - withinGroupEffect;
+  return {
+    previousOpenings: previousTotal,
+    currentOpenings: currentTotal,
+    observedDelta: round(observedDelta),
+    previousAverageAdversePercent: round(previousAverage),
+    currentAverageAdversePercent: round(currentAverage),
+    compositionEffect: round(compositionEffect),
+    withinGroupEffect: round(withinGroupEffect),
+    compositionSharePercent: Math.abs(observedDelta) > 0.0000001
+      ? round(compositionEffect / observedDelta * 100)
+      : null,
+    residual: Math.abs(residual) <= 0.0000001 ? 0 : round(residual),
+    groups
+  };
+}
+
+function compareEntryTiming(previous = {}, current = {}) {
+  return {
+    previousExchangeBacked: Number(previous.exchangeBacked || 0),
+    currentExchangeBacked: Number(current.exchangeBacked || 0),
+    reactionAverageSeconds: compareTimingValue(previous.reaction?.averageSeconds, current.reaction?.averageSeconds),
+    attemptToFillAverageSeconds: compareTimingValue(previous.attemptToFill?.averageSeconds, current.attemptToFill?.averageSeconds),
+    totalP95Seconds: compareTimingValue(previous.p95Seconds, current.p95Seconds)
+  };
+}
+
+function compareTimingValue(previous, current) {
+  const previousValue = finiteNumber(previous);
+  const currentValue = finiteNumber(current);
+  return {
+    previous: round(previousValue),
+    current: round(currentValue),
+    delta: previousValue === null || currentValue === null ? null : round(currentValue - previousValue)
+  };
 }
 
 function entryDeltaAssessment({

@@ -237,7 +237,13 @@ El diagnóstico añadido al corte del 22 de julio atribuye la desviación advers
 
 SUI presenta la media actual más alta, pero la cohorte anterior solo aporta dos aperturas y no permite contrastar el cambio. SOL es el deterioro comparable más claro. De las 23 aperturas que superan el umbral, 21 se ejecutaron sin espera de reintento y dos después de reintentarse. Por tanto, en esta muestra las esperas de la cola no explican la mayor parte de los desvíos.
 
-La lectura por activo, ruta, latencia y franja horaria es descriptiva. No demuestra causalidad, no justifica bloquear un ticker o una hora y no sustituye una prueba controlada con suficiente muestra. Su finalidad es señalar dónde investigar antes de proponer otra modificación del camino de ejecución.
+La hora del histórico firmado permite corregir otra ambigüedad: el evento local marcaba el inicio del intento, no el fill. Las 38 aperturas actuales quedan ahora respaldadas por una hora de BingX. El intervalo entre el inicio del intento y el fill dura 1,99 segundos de media y apenas cambia entre posiciones. En cambio, la detección al primer intento promedia 0,01 segundos en la primera apertura, 2,09 en la segunda y 4,04 en la tercera, porque el paquete se procesa de forma secuencial.
+
+La primera apertura del paquete promedia un 0,0558% de desviación adversa; las 25 posteriores, un 0,1852%. La cohorte actual contiene proporcionalmente menos primeras aperturas y más posiciones posteriores. La descomposición por posición atribuye **0,0110 puntos porcentuales** del aumento medio a ese cambio de composición y **0,0048 puntos** al cambio dentro de los grupos; ambas partes reconstruyen exactamente los **0,0157 puntos** observados. El efecto de composición representa un 69,6% de ese aumento en esta muestra.
+
+La posición no es una causa aislada: suele coincidir con el activo, ya que BTC aparece primero y ETH, SOL o SUI después. El tramo `cotización → fill` actual es del 0,0052% en BTC, 0,1037% en ETH, 0,1214% en SOL y 0,1315% en SUI, con tiempos de inicio a fill muy parecidos. Esto es compatible con diferencias de spread o liquidez del entorno Demo VST, pero no las demuestra porque la cotización almacenada es `lastPrice`, no el mejor ask ejecutable.
+
+La lectura por activo, posición, ruta, latencia y franja horaria es descriptiva. No demuestra causalidad, no justifica bloquear un ticker o una hora, ni permite sumar el efecto por activo al efecto por posición. Tampoco sustituye una prueba controlada con suficiente muestra. Su finalidad es señalar dónde investigar antes de proponer otra modificación del camino de ejecución.
 
 ## Límites de la mejora
 

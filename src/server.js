@@ -4717,6 +4717,10 @@ function replicaAuditRow({
   });
   const openingTiming = auditEventTiming(opening, 'OPEN', timingContext);
   const closingTiming = auditEventTiming(closeSignalEvent, 'CLOSE', timingContext);
+  const openingExchangeTime = Number(opening?.historyOrder?.time);
+  const openingFillAt = Number.isFinite(openingExchangeTime) && openingExchangeTime > 0
+    ? new Date(openingExchangeTime).toISOString()
+    : null;
   const preOrderMarket = firstAuditPrice([
     opening?.marketPrice,
     opening?.entryPrice
@@ -4799,6 +4803,8 @@ function replicaAuditRow({
       netPnl: auditRound(netPnl),
       openingDetectedAt: openingTiming.detectedAt,
       openingFirstAttemptAt: openingTiming.firstAttemptAt,
+      openingAttemptAt: opening?.at || null,
+      openingFillAt,
       openingAt: opening?.at || null,
       closingDetectedAt: closingTiming.detectedAt,
       closingFirstAttemptAt: closingTiming.firstAttemptAt,
@@ -4845,6 +4851,7 @@ function replicaAuditRow({
     },
     trace: {
       openingEventId: opening?.eventId || null,
+      openingPostId: opening?.postId || null,
       openingFailureEventId: openingFailure?.eventId || null,
       executionKey: opening?.executionKey || null,
       closeEventId: closeEvent?.eventId || null,

@@ -5036,6 +5036,19 @@ function renderEntryDiagnosis(diagnosis) {
       <div role="cell"><span>Lectura</span><strong class="${escapeAttribute(cohortAssessmentClass(group.assessment))}">${escapeHtml(cohortAssessmentLabel(group.assessment))}</strong></div>
     </div>
   `).join('');
+  const packageSlotOrder = { slot_1: 1, slot_2: 2, slot_3: 3, slot_4_plus: 4, unknown: 5 };
+  const packageSlots = [...(diagnosis.byPackageSlot || [])]
+    .sort((left, right) => (packageSlotOrder[left.key] || 99) - (packageSlotOrder[right.key] || 99))
+    .map((group) => `
+    <div class="entry-diagnosis-row" role="row">
+      <div class="entry-diagnosis-name" role="cell"><span>Posición</span><strong>${escapeHtml(group.label || group.key || '-')}</strong></div>
+      <div role="cell"><span>Muestra</span><strong>${escapeHtml(`${group.previousOpenings || 0} → ${group.currentOpenings || 0}`)}</strong></div>
+      <div role="cell"><span>Media antes</span><strong>${escapeHtml(formatCohortPercent(group.previousAverageAdversePercent))}</strong></div>
+      <div role="cell"><span>Media ahora</span><strong>${escapeHtml(formatCohortPercent(group.currentAverageAdversePercent))}</strong></div>
+      <div role="cell"><span>1.er intento / fill</span><strong>${escapeHtml(`${formatLatencySeconds(group.currentReactionAverageSeconds)} / ${formatLatencySeconds(group.currentAttemptToFillAverageSeconds)}`)}</strong></div>
+      <div role="cell"><span>Lectura</span><strong class="${escapeAttribute(cohortAssessmentClass(group.assessment))}">${escapeHtml(cohortAssessmentLabel(group.assessment))}</strong></div>
+    </div>
+  `).join('');
   const routes = (diagnosis.byRoute || []).map((group) => `
     <div class="entry-diagnosis-slice">
       <span>${escapeHtml(group.label || group.key || '-')}</span>
@@ -5062,12 +5075,33 @@ function renderEntryDiagnosis(diagnosis) {
       <b>${escapeHtml(`${group.latency?.retried || 0} con reintento`)}</b>
     </div>
   `).join('');
+  const timing = diagnosis.timing || {};
+  const timingCards = [
+    ['Reacción hasta el intento', timing.reactionAverageSeconds],
+    ['Inicio del intento a fill', timing.attemptToFillAverageSeconds],
+    ['Latencia total p95', timing.totalP95Seconds]
+  ].map(([label, values]) => `
+    <div class="entry-diagnosis-stage">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(formatLatencySeconds(values?.current))}</strong>
+      <small>${escapeHtml(`Antes ${formatLatencySeconds(values?.previous)} · cambio ${formatSignedSeconds(values?.delta)}`)}</small>
+      <b>${escapeHtml(`${timing.currentExchangeBacked || 0} fills con hora BingX`)}</b>
+    </div>
+  `).join('');
+  const mix = diagnosis.mixAnalysis?.byPackageSlot;
+  const mixPanel = mix ? `
+    <div class="entry-diagnosis-mix">
+      <strong>Qué parte cambia por composición del paquete</strong>
+      <span>${escapeHtml(`Mezcla ${formatSignedCohortDelta(mix.compositionEffect)} · cambio dentro de cada posición ${formatSignedCohortDelta(mix.withinGroupEffect)} · total ${formatSignedCohortDelta(mix.observedDelta)}`)}</span>
+      <small>${escapeHtml(`${formatOptionalPercent(mix.compositionSharePercent)} del aumento queda asociado al cambio de mezcla por posición. Es una descomposición contable, no una prueba causal.`)}</small>
+    </div>
+  ` : '';
 
   return `
     <section class="entry-diagnosis" aria-labelledby="entry-diagnosis-title">
       <div class="entry-diagnosis-heading">
         <div>
-          <span>Diagnóstico causal descriptivo</span>
+          <span>Diagnóstico descriptivo de ejecución</span>
           <strong id="entry-diagnosis-title">Dónde se deterioran las entradas</strong>
         </div>
         <span class="ledger-status warn">${escapeHtml(`${summary.currentAboveTolerance || 0}/${summary.currentOpenings || 0} sobre 0,15%`)}</span>
@@ -5078,10 +5112,21 @@ function renderEntryDiagnosis(diagnosis) {
       </div>
       <div class="entry-diagnosis-stages">${stages}</div>
       <div class="entry-diagnosis-subheading">
+        <strong>Tiempo observado hasta el fill</strong>
+        <span>La hora del histórico firmado de BingX tiene precisión de un segundo</span>
+      </div>
+      <div class="entry-diagnosis-stages entry-diagnosis-timing">${timingCards}</div>
+      ${mixPanel}
+      <div class="entry-diagnosis-subheading">
         <strong>Comparación por activo</strong>
         <span>Media adversa desde la señal hasta el fill</span>
       </div>
       <div class="entry-diagnosis-table" role="table" aria-label="Diagnóstico de entrada por activo">${symbols}</div>
+      <div class="entry-diagnosis-subheading">
+        <strong>Comparación por posición del paquete</strong>
+        <span>La posición y el activo suelen coincidir; se muestran como lentes separadas</span>
+      </div>
+      <div class="entry-diagnosis-table" role="table" aria-label="Diagnóstico de entrada por posición del paquete">${packageSlots}</div>
       <div class="entry-diagnosis-subheading">
         <strong>Ruta de ejecución actual</strong>
         <span>Una espera larga no implica por sí sola que cause el desvío</span>
@@ -5108,6 +5153,14 @@ function formatSignedCohortDelta(value) {
     return '-';
   }
   return `${number > 0 ? '+' : ''}${number.toLocaleString('es-ES', { maximumFractionDigits: Math.abs(number) < 1 ? 4 : 2 })} pp`;
+}
+
+function formatSignedSeconds(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  return `${number > 0 ? '+' : ''}${number.toLocaleString('es-ES', { maximumFractionDigits: 2 })} s`;
 }
 
 function renderCohortPeriod(label, period = {}) {

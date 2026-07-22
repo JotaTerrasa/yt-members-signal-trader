@@ -795,6 +795,20 @@ function renderEntryDiagnosisLines(diagnosis) {
   const routeLines = (diagnosis.byRoute || []).map((group) => (
     `- ${group.label}: ${group.currentOpenings || 0} aperturas actuales; media ${percent(group.currentAverageAdversePercent)}; ${percent(group.currentAboveTolerancePercent)} sobre 0,15%; ${cohortAssessmentLabel(group.assessment)}.`
   ));
+  const packageLines = (diagnosis.byPackageSlot || []).map((group) => (
+    `- ${group.label}: ${group.previousOpenings || 0} → ${group.currentOpenings || 0} aperturas; media ${percent(group.previousAverageAdversePercent)} → ${percent(group.currentAverageAdversePercent)}; detección a primer intento ${seconds(group.currentReactionAverageSeconds)}; inicio a fill ${seconds(group.currentAttemptToFillAverageSeconds)}; ${cohortAssessmentLabel(group.assessment)}.`
+  ));
+  const timing = diagnosis.timing || {};
+  const timingLines = [
+    `- Reacción hasta el intento: ${seconds(timing.reactionAverageSeconds?.previous)} → ${seconds(timing.reactionAverageSeconds?.current)}.`,
+    `- Inicio del intento a fill: ${seconds(timing.attemptToFillAverageSeconds?.previous)} → ${seconds(timing.attemptToFillAverageSeconds?.current)}.`,
+    `- Latencia total p95: ${seconds(timing.totalP95Seconds?.previous)} → ${seconds(timing.totalP95Seconds?.current)}; ${timing.currentExchangeBacked || 0} aperturas actuales con hora del histórico de BingX.`
+  ];
+  const mix = diagnosis.mixAnalysis?.byPackageSlot;
+  const mixLines = mix ? [
+    `- Mezcla por posición del paquete: ${signedPercentPoints(mix.compositionEffect)}; cambio dentro de cada posición: ${signedPercentPoints(mix.withinGroupEffect)}; variación observada: ${signedPercentPoints(mix.observedDelta)}.`,
+    `- Proporción descriptiva asociada a la mezcla por posición: ${percent(mix.compositionSharePercent)}. Este desglose no se suma al desglose por activo.`
+  ] : [];
   return [
     `- Diagnóstico de entrada: ${withFinalPeriod(diagnosis.summary.label)} ${withFinalPeriod(diagnosis.summary.detail)}`.trim(),
     '- Descomposición por fase:',
@@ -803,6 +817,11 @@ function renderEntryDiagnosisLines(diagnosis) {
     ...symbolLines,
     '- Comparación por ruta:',
     ...routeLines,
+    '- Tiempo observado hasta el fill:',
+    ...timingLines,
+    '- Comparación por posición dentro del paquete:',
+    ...packageLines,
+    ...mixLines,
     `- Límite del diagnóstico: ${withFinalPeriod(diagnosis.summary.caveat || '')}`
   ];
 }
@@ -1001,6 +1020,9 @@ function money(value) {
 }
 
 function seconds(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'sin datos';
+  }
   const number = Number(value);
   return Number.isFinite(number) ? `${number.toFixed(number < 10 ? 2 : 1)} s` : 'sin datos';
 }

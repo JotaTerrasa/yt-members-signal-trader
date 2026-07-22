@@ -792,7 +792,7 @@ export function buildExecutionPriceChainAttribution(rows = []) {
 
 export function buildEntryExecutionAnalysis(rows = [], { tolerancePercent = 0.15 } = {}) {
   const tolerance = Math.max(0, Number(tolerancePercent) || 0.15);
-  const points = uniqueEntryExecutionPoints(rows);
+  const points = assignEntryPackageSlots(uniqueEntryExecutionPoints(rows));
   const totals = summarizeEntryExecutionGroup('all', 'Todas las aperturas', points, tolerance);
   const bySymbol = groupedEntryExecution(points, (point) => point.symbol)
     .map(([key, items]) => summarizeEntryExecutionGroup(key, key, items, tolerance))
@@ -831,15 +831,29 @@ export function buildEntryExecutionAnalysis(rows = [], { tolerancePercent = 0.15
   const byTimeWindow = timeOrder
     .filter((key) => timeMap.has(key))
     .map((key) => summarizeEntryExecutionGroup(key, timeLabels[key], timeMap.get(key), tolerance));
+  const packageSlotLabels = {
+    slot_1: 'Primera del paquete',
+    slot_2: 'Segunda del paquete',
+    slot_3: 'Tercera del paquete',
+    slot_4_plus: 'Cuarta o posterior',
+    unknown: 'Posición desconocida'
+  };
+  const packageSlotOrder = ['slot_1', 'slot_2', 'slot_3', 'slot_4_plus', 'unknown'];
+  const packageSlotMap = new Map(groupedEntryExecution(points, (point) => point.packageSlotKey));
+  const byPackageSlot = packageSlotOrder
+    .filter((key) => packageSlotMap.has(key))
+    .map((key) => summarizeEntryExecutionGroup(key, packageSlotLabels[key], packageSlotMap.get(key), tolerance));
 
   return {
     tolerancePercent: roundMoney(tolerance),
     timezone: 'Europe/Madrid',
+    exchangeTimestampPrecisionSeconds: 1,
     totals,
     bySymbol,
     byRoute,
     byLatency,
-    byTimeWindow
+    byTimeWindow,
+    byPackageSlot
   };
 }
 
@@ -888,13 +902,17 @@ function entryExecutionPoint(row, eventId) {
   const fill = positiveNumber(row?.vst?.entry);
   const detectedAt = validTimestamp(row?.vst?.openingDetectedAt);
   const firstAttemptAt = validTimestamp(row?.vst?.openingFirstAttemptAt);
-  const completedAt = validTimestamp(row?.vst?.openingAt);
-  const validTiming = [detectedAt, firstAttemptAt, completedAt].every(Number.isFinite)
+  const successfulAttemptAt = validTimestamp(row?.vst?.openingAttemptAt || row?.vst?.openingAt);
+  const exchangeFillAt = validTimestamp(row?.vst?.openingFillAt);
+  const validQueueTiming = [detectedAt, firstAttemptAt, successfulAttemptAt].every(Number.isFinite)
     && firstAttemptAt >= detectedAt
-    && completedAt >= firstAttemptAt;
-  const reactionSeconds = validTiming ? (firstAttemptAt - detectedAt) / 1000 : null;
-  const retryWaitSeconds = validTiming ? (completedAt - firstAttemptAt) / 1000 : null;
-  const totalLatencySeconds = validTiming ? (completedAt - detectedAt) / 1000 : null;
+    && successfulAttemptAt >= firstAttemptAt;
+  const reactionSeconds = validQueueTiming ? (firstAttemptAt - detectedAt) / 1000 : null;
+  const retryWaitSeconds = validQueueTiming ? (successfulAttemptAt - firstAttemptAt) / 1000 : null;
+  const attemptToFillSeconds = timestampDeltaSeconds(exchangeFillAt, successfulAttemptAt, { precisionToleranceSeconds: 2 });
+  const detectedToFillSeconds = timestampDeltaSeconds(exchangeFillAt, detectedAt, { precisionToleranceSeconds: 2 });
+  const totalLatencySeconds = detectedToFillSeconds
+    ?? (validQueueTiming ? (successfulAttemptAt - detectedAt) / 1000 : null);
   const attribution = executionPriceChainRowAttribution(row);
   const entryImpact = attribution
     ? sumFinite([
@@ -907,6 +925,9 @@ function entryExecutionPoint(row, eventId) {
 
   return {
     id: eventId,
+    postId: entryExecutionPostId(row),
+    successfulAttemptAt: Number.isFinite(successfulAttemptAt) ? successfulAttemptAt : null,
+    exchangeFillAt: Number.isFinite(exchangeFillAt) ? exchangeFillAt : null,
     symbol: String(row?.symbol || 'UNKNOWN').toUpperCase(),
     direction,
     signal,
@@ -921,7 +942,9 @@ function entryExecutionPoint(row, eventId) {
     quoteToFillSignedPercent: entrySignedDeviationPercent({ actual: fill, reference: quote, direction }),
     reactionSeconds,
     retryWaitSeconds,
+    attemptToFillSeconds,
     totalLatencySeconds,
+    exchangeTimingBacked: Number.isFinite(exchangeFillAt),
     route: retryWaitSeconds === null ? 'unknown' : retryWaitSeconds > 0.5 ? 'retried' : 'immediate',
     latencyBucket: entryLatencyBucket(totalLatencySeconds),
     timeWindow: entryTimeWindow(row?.vst?.openingDetectedAt || row?.vst?.openingAt),
@@ -935,6 +958,7 @@ function entryExecutionEvidenceScore(point = {}) {
     point.quote,
     point.fill,
     point.totalAdversePercent,
+    point.attemptToFillSeconds,
     point.totalLatencySeconds,
     point.matchedEntryImpact
   ].filter((value) => value !== null && value !== undefined).length;
@@ -945,11 +969,17 @@ function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
   const measured = items.filter((point) => point.totalAdversePercent !== null);
   const aboveTolerance = measured.filter((point) => point.totalAdversePercent > tolerancePercent).length;
   const latencyValues = items.map((point) => point.totalLatencySeconds);
+  const reactionValues = items.map((point) => point.reactionSeconds);
+  const retryWaitValues = items.map((point) => point.retryWaitSeconds);
+  const attemptToFillValues = items.map((point) => point.attemptToFillSeconds);
   const matchedImpacts = items.map((point) => point.matchedEntryImpact).filter((value) => value !== null);
   const signalToQuote = entryStageStats(items, 'signalToQuote');
   const quoteToFill = entryStageStats(items, 'quoteToFill');
   const adverse = entryPercentStats(measured.map((point) => point.totalAdversePercent));
   const latency = entryValueStats(latencyValues, { allowNegative: false });
+  const reaction = entryValueStats(reactionValues, { allowNegative: false });
+  const retryWait = entryValueStats(retryWaitValues, { allowNegative: false });
+  const attemptToFill = entryValueStats(attemptToFillValues, { allowNegative: false });
   const matchedEntryImpact = sumFinite(matchedImpacts);
 
   return {
@@ -966,10 +996,29 @@ function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
     quoteToFill,
     latency: {
       measured: latency.count,
+      exchangeBacked: items.filter((point) => point.exchangeTimingBacked).length,
       retried: items.filter((point) => point.route === 'retried').length,
       averageSeconds: latency.average,
       medianSeconds: latency.median,
-      p95Seconds: latency.p95
+      p95Seconds: latency.p95,
+      reaction: {
+        measured: reaction.count,
+        averageSeconds: reaction.average,
+        medianSeconds: reaction.median,
+        p95Seconds: reaction.p95
+      },
+      retryWait: {
+        measured: retryWait.count,
+        averageSeconds: retryWait.average,
+        medianSeconds: retryWait.median,
+        p95Seconds: retryWait.p95
+      },
+      attemptToFill: {
+        measured: attemptToFill.count,
+        averageSeconds: attemptToFill.average,
+        medianSeconds: attemptToFill.median,
+        p95Seconds: attemptToFill.p95
+      }
     },
     matchedEconomicRows: matchedImpacts.length,
     matchedEntryImpact: matchedImpacts.length ? roundMoney(matchedEntryImpact) : null,
@@ -1019,6 +1068,53 @@ function groupedEntryExecution(points, selector) {
     groups.set(key, items);
   }
   return [...groups.entries()];
+}
+
+function assignEntryPackageSlots(points = []) {
+  const packages = new Map();
+  for (const point of points) {
+    if (!point.postId) {
+      point.packageSlot = null;
+      point.packageSlotKey = 'unknown';
+      continue;
+    }
+    const items = packages.get(point.postId) || [];
+    items.push(point);
+    packages.set(point.postId, items);
+  }
+  for (const items of packages.values()) {
+    items.sort((left, right) => (
+      Number(left.successfulAttemptAt || left.exchangeFillAt || 0)
+      - Number(right.successfulAttemptAt || right.exchangeFillAt || 0)
+      || left.id.localeCompare(right.id)
+    ));
+    items.forEach((point, index) => {
+      point.packageSlot = index + 1;
+      point.packageSlotKey = index >= 3 ? 'slot_4_plus' : `slot_${index + 1}`;
+    });
+  }
+  return points;
+}
+
+function entryExecutionPostId(row = {}) {
+  const explicit = String(row?.trace?.openingPostId || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+  const executionKey = String(row?.trace?.executionKey || '');
+  const parts = executionKey.split('|');
+  return parts.length > 1 ? String(parts[1] || '').trim() || null : null;
+}
+
+function timestampDeltaSeconds(later, earlier, { precisionToleranceSeconds = 0 } = {}) {
+  if (![later, earlier].every(Number.isFinite)) {
+    return null;
+  }
+  const delta = (later - earlier) / 1000;
+  if (delta < -Math.max(0, Number(precisionToleranceSeconds) || 0)) {
+    return null;
+  }
+  return Math.max(0, delta);
 }
 
 function compareEntryExecutionGroups(left, right) {

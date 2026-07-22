@@ -148,7 +148,7 @@ test('no construye un contraste sin una cohorte anterior completa', () => {
 });
 
 test('explica dónde se concentra el deterioro de entrada sin culpar automáticamente a los reintentos', () => {
-  const analysis = ({ signalStage, fillStage, symbols, routes, openings, above }) => ({
+  const analysis = ({ signalStage, fillStage, symbols, routes, slots, openings, above, reaction, attemptToFill }) => ({
     tolerancePercent: 0.15,
     timezone: 'Europe/Madrid',
     totals: {
@@ -156,18 +156,27 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
       measured: openings,
       aboveTolerance: above,
       signalToQuote: { measured: openings, averageAdversePercent: signalStage, averageSignedPercent: signalStage },
-      quoteToFill: { measured: openings, averageAdversePercent: fillStage, averageSignedPercent: fillStage }
+      quoteToFill: { measured: openings, averageAdversePercent: fillStage, averageSignedPercent: fillStage },
+      latency: {
+        exchangeBacked: openings,
+        p95Seconds: reaction + attemptToFill,
+        reaction: { averageSeconds: reaction },
+        attemptToFill: { averageSeconds: attemptToFill }
+      }
     },
     bySymbol: symbols,
     byRoute: routes,
     byLatency: [],
-    byTimeWindow: []
+    byTimeWindow: [],
+    byPackageSlot: slots
   });
   const previousAnalysis = analysis({
     signalStage: 0.05,
     fillStage: 0.04,
     openings: 8,
     above: 2,
+    reaction: 1,
+    attemptToFill: 2,
     symbols: [
       { key: 'SOL-USDT', label: 'SOL-USDT', openings: 4, measured: 4, averageAdversePercent: 0.1, aboveTolerancePercent: 25, latency: {} },
       { key: 'BTC-USDT', label: 'BTC-USDT', openings: 4, measured: 4, averageAdversePercent: 0.05, aboveTolerancePercent: 25, latency: {} }
@@ -175,6 +184,10 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
     routes: [
       { key: 'immediate', label: 'Sin espera de reintento', openings: 6, measured: 6, aboveTolerance: 1, aboveTolerancePercent: 16.67, averageAdversePercent: 0.06, latency: {} },
       { key: 'retried', label: 'Con espera de reintento', openings: 2, measured: 2, aboveTolerance: 1, aboveTolerancePercent: 50, averageAdversePercent: 0.15, latency: {} }
+    ],
+    slots: [
+      { key: 'slot_1', label: 'Primera del paquete', openings: 4, measured: 4, aboveTolerance: 1, aboveTolerancePercent: 25, averageAdversePercent: 0.1, latency: { reaction: { averageSeconds: 0.1 }, attemptToFill: { averageSeconds: 2 } } },
+      { key: 'slot_2', label: 'Segunda del paquete', openings: 4, measured: 4, aboveTolerance: 1, aboveTolerancePercent: 25, averageAdversePercent: 0.1, latency: { reaction: { averageSeconds: 2 }, attemptToFill: { averageSeconds: 2 } } }
     ]
   });
   const currentAnalysis = analysis({
@@ -182,6 +195,8 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
     fillStage: 0.04,
     openings: 8,
     above: 5,
+    reaction: 1.5,
+    attemptToFill: 2.1,
     symbols: [
       { key: 'SOL-USDT', label: 'SOL-USDT', openings: 4, measured: 4, averageAdversePercent: 0.25, aboveTolerancePercent: 100, latency: {} },
       { key: 'BTC-USDT', label: 'BTC-USDT', openings: 4, measured: 4, averageAdversePercent: 0.04, aboveTolerancePercent: 25, latency: {} }
@@ -189,6 +204,10 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
     routes: [
       { key: 'immediate', label: 'Sin espera de reintento', openings: 7, measured: 7, aboveTolerance: 4, aboveTolerancePercent: 57.14, averageAdversePercent: 0.15, latency: {} },
       { key: 'retried', label: 'Con espera de reintento', openings: 1, measured: 1, aboveTolerance: 1, aboveTolerancePercent: 100, averageAdversePercent: 0.3, latency: {} }
+    ],
+    slots: [
+      { key: 'slot_1', label: 'Primera del paquete', openings: 3, measured: 3, aboveTolerance: 0, aboveTolerancePercent: 0, averageAdversePercent: 0.1, latency: { reaction: { averageSeconds: 0.1 }, attemptToFill: { averageSeconds: 2.1 } } },
+      { key: 'slot_2', label: 'Segunda del paquete', openings: 5, measured: 5, aboveTolerance: 5, aboveTolerancePercent: 100, averageAdversePercent: 0.2, latency: { reaction: { averageSeconds: 2.2 }, attemptToFill: { averageSeconds: 2.1 } } }
     ]
   });
   const comparison = buildCohortComparison({
@@ -211,4 +230,10 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
   assert.equal(comparison.entryDiagnosis.stages.find((stage) => stage.key === 'signalToQuote').assessment, 'worse');
   assert.equal(comparison.entryDiagnosis.bySymbol.find((group) => group.key === 'SOL-USDT').assessment, 'worse');
   assert.equal(comparison.entryDiagnosis.byRoute.find((group) => group.key === 'retried').assessment, 'insufficient');
+  assert.equal(comparison.entryDiagnosis.byPackageSlot.find((group) => group.key === 'slot_2').assessment, 'worse');
+  assert.equal(comparison.entryDiagnosis.summary.packagePattern.firstOpenings, 3);
+  assert.equal(comparison.entryDiagnosis.summary.packagePattern.laterOpenings, 5);
+  assert.equal(comparison.entryDiagnosis.mixAnalysis.byPackageSlot.observedDelta, 0.0625);
+  assert.equal(comparison.entryDiagnosis.mixAnalysis.byPackageSlot.compositionSharePercent, 10);
+  assert.equal(comparison.entryDiagnosis.timing.attemptToFillAverageSeconds.current, 2.1);
 });
