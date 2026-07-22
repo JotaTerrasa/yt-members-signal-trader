@@ -1,4 +1,4 @@
-import { entryAdverseDeviationPercent, entrySignedDeviationPercent } from './executionAuditPrices.js';
+import { closeAdverseDeviationPercent, closeSignedDeviationPercent, entryAdverseDeviationPercent, entrySignedDeviationPercent } from './executionAuditPrices.js';
 
 const transientClosePatterns = [
   /please try again later/i,
@@ -857,6 +857,21 @@ export function buildEntryExecutionAnalysis(rows = [], { tolerancePercent = 0.15
   };
 }
 
+export function buildCloseExecutionAnalysis(rows = [], { tolerancePercent = 0.15 } = {}) {
+  const tolerance = Math.max(0, Number(tolerancePercent) || 0.15);
+  const points = uniqueCloseExecutionPoints(rows);
+  const totals = summarizeCloseExecutionGroup('all', 'Todos los cierres explícitos', points, tolerance);
+  const bySymbol = groupedEntryExecution(points, (point) => point.symbol)
+    .map(([key, items]) => summarizeCloseExecutionGroup(key, key, items, tolerance))
+    .sort((left, right) => Number(right.closes || 0) - Number(left.closes || 0) || left.key.localeCompare(right.key));
+  return {
+    tolerancePercent: roundMoney(tolerance),
+    exchangeTimestampPrecisionSeconds: 1,
+    totals,
+    bySymbol
+  };
+}
+
 export function summarizeExecutionLatency(rows = []) {
   return {
     opening: summarizeLatencyPhase(rows, {
@@ -871,6 +886,119 @@ export function summarizeExecutionLatency(rows = []) {
       firstAttemptAt: (row) => row?.vst?.closingFirstAttemptAt,
       completedAt: (row) => row?.vst?.closeSignalAt
     })
+  };
+}
+
+function uniqueCloseExecutionPoints(rows = []) {
+  const unique = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const telemetry = row?.vst?.closeTelemetry || null;
+    const closeSignalAt = row?.vst?.closeSignalAt || null;
+    if (!telemetry && !closeSignalAt) {
+      continue;
+    }
+    const eventId = row?.trace?.closeSignalEventId
+      || [row?.vst?.closePostUrl, row?.symbol, closeSignalAt].filter(Boolean).join('|');
+    if (!eventId || !row?.symbol) {
+      continue;
+    }
+    const key = `${eventId}|${row.symbol}`;
+    const point = closeExecutionPoint(row, eventId);
+    const existing = unique.get(key);
+    if (!existing || closeExecutionEvidenceScore(point) > closeExecutionEvidenceScore(existing)) {
+      unique.set(key, point);
+    }
+  }
+  return [...unique.values()];
+}
+
+function closeExecutionPoint(row, eventId) {
+  const direction = String(row?.direction || '').toUpperCase();
+  const telemetry = row?.vst?.closeTelemetry || null;
+  const topOfBook = telemetry?.topOfBook || null;
+  const executableQuote = direction === 'SHORT'
+    ? positiveNumber(topOfBook?.askPrice)
+    : positiveNumber(topOfBook?.bidPrice);
+  const quoteAvailable = Boolean(topOfBook?.available) && !topOfBook?.stale && executableQuote !== null;
+  const lastPrice = positiveNumber(telemetry?.preCloseMarketRead?.price)
+    ?? positiveNumber(telemetry?.positionMarketPrice)
+    ?? positiveNumber(row?.vst?.preCloseMarket);
+  const fill = positiveNumber(row?.vst?.exit);
+  const target = positiveNumber(row?.vst?.closeTarget);
+  const detectedAt = validTimestamp(row?.vst?.closingDetectedAt);
+  const closeSignalAt = validTimestamp(row?.vst?.closeSignalAt);
+  const orderRequestStartedAt = validTimestamp(telemetry?.orderRequest?.startedAt);
+  const fillAt = validTimestamp(row?.vst?.closingAt);
+  return {
+    eventId,
+    symbol: row?.symbol || 'UNKNOWN',
+    direction,
+    target,
+    lastPrice,
+    fill,
+    telemetryCaptured: Boolean(telemetry),
+    topOfBookCaptured: quoteAvailable,
+    topOfBookStale: Boolean(topOfBook?.stale),
+    executableQuote: quoteAvailable ? executableQuote : null,
+    spreadPercent: quoteAvailable ? nullableNumber(topOfBook?.spreadPercent) : null,
+    quoteAgeMs: quoteAvailable ? nullableNumber(topOfBook?.ageMs) : null,
+    lastToExecutableAdversePercent: quoteAvailable
+      ? closeAdverseDeviationPercent({ actual: executableQuote, reference: lastPrice, direction })
+      : null,
+    lastToExecutableSignedPercent: quoteAvailable
+      ? closeSignedDeviationPercent({ actual: executableQuote, reference: lastPrice, direction })
+      : null,
+    executableToFillAdversePercent: quoteAvailable
+      ? closeAdverseDeviationPercent({ actual: fill, reference: executableQuote, direction })
+      : null,
+    executableToFillSignedPercent: quoteAvailable
+      ? closeSignedDeviationPercent({ actual: fill, reference: executableQuote, direction })
+      : null,
+    tickerRoundTripMs: nullableNumber(telemetry?.preCloseMarketRead?.roundTripMs),
+    orderRequestRoundTripMs: nullableNumber(telemetry?.orderRequest?.roundTripMs),
+    detectedToRequestSeconds: timestampDeltaSeconds(orderRequestStartedAt, detectedAt),
+    signalToRequestSeconds: timestampDeltaSeconds(orderRequestStartedAt, closeSignalAt),
+    requestToFillSeconds: timestampDeltaSeconds(fillAt, orderRequestStartedAt, { precisionToleranceSeconds: 2 })
+  };
+}
+
+function closeExecutionEvidenceScore(point = {}) {
+  return [
+    point.target,
+    point.lastPrice,
+    point.executableQuote,
+    point.fill,
+    point.orderRequestRoundTripMs,
+    point.requestToFillSeconds
+  ].filter((value) => value !== null && value !== undefined).length;
+}
+
+function summarizeCloseExecutionGroup(key, label, points, tolerancePercent) {
+  const items = Array.isArray(points) ? points : [];
+  const requestToFill = entryValueStats(items.map((point) => point.requestToFillSeconds), { allowNegative: false });
+  const signalToRequest = entryValueStats(items.map((point) => point.signalToRequestSeconds), { allowNegative: false });
+  const executableToFill = entryPercentStats(items.map((point) => point.executableToFillAdversePercent));
+  return {
+    key,
+    label,
+    closes: items.length,
+    instrumented: items.filter((point) => point.telemetryCaptured).length,
+    topOfBookMeasured: items.filter((point) => point.topOfBookCaptured).length,
+    aboveTolerance: items.filter((point) => (
+      point.executableToFillAdversePercent !== null
+      && point.executableToFillAdversePercent > tolerancePercent
+    )).length,
+    aboveTolerancePercent: executableToFill.count
+      ? roundMoney(items.filter((point) => (
+        point.executableToFillAdversePercent !== null
+        && point.executableToFillAdversePercent > tolerancePercent
+      )).length / executableToFill.count * 100)
+      : null,
+    microstructure: summarizeEntryMicrostructure(items),
+    latency: {
+      signalToRequest,
+      requestToFill
+    }
   };
 }
 

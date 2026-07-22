@@ -224,7 +224,7 @@ Gestiona ejecución:
 - soporta modo `dual`.
 - consulta posiciones e ingresos de la cuenta activa para aplicar límites de riesgo reales;
 - impide perseguir entradas y rechaza stops anormalmente lejanos;
-- ejecuta cierres explícitos inmediatamente y conserva la desviación como telemetría.
+- ejecuta cierres explícitos inmediatamente y conserva, sin condicionar la orden, la cotización y los tiempos de la solicitud como telemetría.
 - descuenta aportaciones técnicas VST de la equity estratégica y del ROI demo.
 
 ### `src/replicaAuditMatcher.js`
@@ -274,6 +274,8 @@ Entornos:
 Conecta al WebSocket público de mercado de BingX. Mantiene `lastPrice` para valorar posiciones y procesar cierres paper, y `bookTicker` para observar el mejor bid/ask cada 200 ms. Ambos canales están separados: una actualización de bid/ask nunca se emite como precio de mercado ni puede disparar un cierre.
 
 Cuando se detecta un paquete de aperturas, todos sus símbolos quedan observados durante diez minutos. La suscripción se inicia antes de procesar la primera orden y no introduce ninguna espera. `FuturesTrader` lee la última instantánea fresca de forma síncrona justo antes de enviar la orden; si falta o está caducada, conserva ese hecho como ausencia de evidencia y continúa con la operativa original.
+
+Las posiciones abiertas permanecen suscritas al mismo WebSocket. Justo antes de un cierre explícito, `FuturesTrader` toma la instantánea ya disponible y temporiza la llamada que cierra la posición, tanto si usa `closePosition` como una orden `MARKET reduceOnly`. No espera una actualización nueva, no añade una consulta REST y no cambia la decisión de cerrar.
 
 Se usa para:
 
@@ -408,6 +410,8 @@ Los totales se normalizan por cierre o por operación emparejada. El contraste e
 Cada resumen de cohorte incorpora `entryExecutionAnalysis`, calculado en `src/operationalAudit.js`. Las aperturas se deduplican por identidad de evento u orden y se separan en dos tramos: `señal → cotización previa` y `cotización previa → fill`. El resumen conserva muestra, desviación adversa, ruta inmediata o reintentada, latencia, activo, franja horaria de Madrid, posición dentro del paquete e impacto económico únicamente cuando existe una operación emparejada. La ausencia de evidencia económica se representa como `null`, nunca como un cero observado.
 
 Los eventos nuevos incorporan `executionTelemetry` con dos lecturas temporizadas de `lastPrice`, la instantánea `bookTicker` más próxima al envío y el RTT local de la petición de orden. La fila auditada lo expone como `vst.entryTelemetry`. A partir de esa evidencia, la auditoría separa spread, `lastPrice → ask` para LONG o `lastPrice → bid` para SHORT, y `precio ejecutable → fill`. La cobertura es prospectiva: no reconstruye bid/ask históricos ni convierte su ausencia en cero.
+
+Cada orden de cierre explícito incorpora además `executionTelemetry` dentro de `exchangeClose.orders`; la fila auditada lo normaliza como `vst.closeTelemetry`. `closeExecutionAnalysis` deduplica posiciones agregadas y separa spread, `último precio → bid` al cerrar LONG o `último precio → ask` al cerrar SHORT, `precio ejecutable → fill`, antigüedad de cotización y RTT. Los cierres históricos anteriores al despliegue permanecen sin instrumentar y los stops se mantienen fuera de este análisis prospectivo.
 
 La fila auditada diferencia `openingAttemptAt`, tomado del inicio del intento local, de `openingFillAt`, procedente de `historyOrder.time` en el histórico firmado de BingX. Con ambos valores se separan reacción, espera por reintento, inicio del intento a fill y latencia total. La marca temporal del exchange tiene precisión de un segundo; pequeñas diferencias negativas debidas al redondeo se acotan a cero y no se presentan como latencia negativa.
 

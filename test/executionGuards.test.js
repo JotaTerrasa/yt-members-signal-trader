@@ -448,6 +448,19 @@ test('un cierre explícito se ejecuta aunque el mercado ya esté peor', async ()
   });
   trader.getContract = async () => ({ quantityPrecision: 3 });
   trader.fetchMarketPrice = async () => 1759;
+  trader.marketQuoteSnapshot = () => ({
+    symbol: 'ETH-USDT',
+    bidPrice: 1758.9,
+    askPrice: 1759.1,
+    bidQuantity: 12,
+    askQuantity: 9,
+    midPrice: 1759,
+    spreadAbsolute: 0.2,
+    spreadPercent: 0.01137,
+    receivedAt: new Date().toISOString(),
+    ageMs: 25,
+    stale: false
+  });
 
   const result = await trader.closeExchangePositions({
     client,
@@ -467,6 +480,13 @@ test('un cierre explícito se ejecuta aunque el mercado ya esté peor', async ()
   assert.equal(result.skipped.length, 0);
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0].reason, /^close_price_slippage:/);
+  assert.equal(result.orders[0].executionTelemetry.mode, 'observational_only');
+  assert.equal(result.orders[0].executionTelemetry.direction, 'LONG');
+  assert.equal(result.orders[0].executionTelemetry.closeSide, 'SELL');
+  assert.equal(result.orders[0].executionTelemetry.requestType, 'close_position');
+  assert.equal(result.orders[0].executionTelemetry.preCloseMarketRead.price, 1759);
+  assert.equal(result.orders[0].executionTelemetry.topOfBook.bidPrice, 1758.9);
+  assert.ok(result.orders[0].executionTelemetry.orderRequest.roundTripMs >= 0);
 });
 
 test('un cierre rentable alineado evalúa el PnL neto y se envía sin errores', async () => {
@@ -526,6 +546,11 @@ test('un error interno del guard no impide ejecutar un cierre explícito', async
       throw new Error('guard boom');
     }
   });
+  Object.defineProperty(position, 'markPrice', {
+    get() {
+      throw new Error('telemetry boom');
+    }
+  });
   const client = {
     getPositions: async () => ({ data: [position] }),
     closePosition: async ({ positionId }) => {
@@ -559,6 +584,8 @@ test('un error interno del guard no impide ejecutar un cierre explícito', async
   assert.equal(result.orders.length, 1);
   assert.equal(result.warnings.length, 1);
   assert.equal(result.warnings[0].reason, 'close_guard_error:guard boom');
+  assert.equal(result.orders[0].executionTelemetry.available, false);
+  assert.match(result.orders[0].executionTelemetry.reason, /^telemetry_error:/);
 });
 
 test('un error temporal de cierre conserva el modo para poder reintentarse', async () => {

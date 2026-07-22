@@ -251,6 +251,10 @@ La descomposición prospectiva tendrá tres tramos: `señal → lastPrice`, `las
 
 Las 38 aperturas ya incluidas en la cohorte vigente son anteriores a esta instrumentación y, por tanto, no tienen bid/ask histórico. El panel muestra inicialmente `0/38` con cobertura de microestructura y empezará a crecer con la siguiente apertura. No se imputan ceros, no se usa el spread actual para rellenar el pasado y ninguna de estas métricas alimenta guards, tamaños, stops, reintentos o cierres.
 
+La misma captura se aplica prospectivamente a los cierres explícitos. Al cerrar LONG, el bid es el lado ejecutable; al cerrar SHORT, lo es el ask. La auditoría separa `último precio → ejecutable` y `ejecutable → fill`, mide el RTT de la solicitud y conserva resultados por activo. Una posición agregada se cuenta una sola vez por evento y símbolo.
+
+Los cierres anteriores a esta instrumentación no se reconstruyen con el libro actual. Los stops tampoco se incluyen porque BingX los ejecuta sin que la aplicación pueda capturar una instantánea inmediatamente anterior a su disparo. La cobertura inicial aparece como `0/N` y solo crecerá con cierres explícitos nuevos; una ausencia de bid/ask nunca frena ni retrasa el cierre.
+
 La lectura por activo, posición, ruta, latencia y franja horaria es descriptiva. No demuestra causalidad, no justifica bloquear un ticker o una hora, ni permite sumar el efecto por activo al efecto por posición. Tampoco sustituye una prueba controlada con suficiente muestra. Su finalidad es señalar dónde investigar antes de proponer otra modificación del camino de ejecución.
 
 ## Límites de la mejora

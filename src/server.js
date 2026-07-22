@@ -21,7 +21,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4772,6 +4772,7 @@ function replicaAuditRow({
   const closeTarget = closeReference?.price
     ?? (closeKind.kind === 'stop' ? stopLoss : null);
   const preCloseMarket = auditPreCloseMarket({ symbol, closeSignalEvent, closeEvent });
+  const closeTelemetry = auditCloseTelemetry(closeSignalEvent, symbol);
   const stopAlignment = replicaStopAlignment({
     closeStatus: closeKind.kind === 'stop' ? 'exchange_stop_closed' : closeEvent?.status,
     replicaPnl,
@@ -4829,6 +4830,7 @@ function replicaAuditRow({
       entryTelemetry: auditEntryTelemetry(opening?.executionTelemetry),
       closeTarget: auditRound(closeTarget),
       preCloseMarket: auditRound(preCloseMarket),
+      closeTelemetry,
       stopLoss: auditRound(stopLoss),
       entryPriceSource: entryFill?.source || '',
       closePriceSource: closeFill?.source || '',
@@ -5089,6 +5091,7 @@ function summarizeReplicaAudit({
   const executionPriceChain = buildExecutionPriceChainAttribution(rows);
   const executionLatency = summarizeExecutionLatency(rows);
   const entryExecutionAnalysis = buildEntryExecutionAnalysis(rows);
+  const closeExecutionAnalysis = buildCloseExecutionAnalysis(rows);
   const missingReasonCounts = rows
     .filter((row) => row.cause === 'No ejecutada en VST')
     .reduce((totals, row) => {
@@ -5155,6 +5158,7 @@ function summarizeReplicaAudit({
     executionPriceChain,
     executionLatency,
     entryExecutionAnalysis,
+    closeExecutionAnalysis,
     missingReasonCounts,
     stopAnalysis,
     unprocessedCloseRows: unprocessedCloseRows.length,
@@ -5402,41 +5406,72 @@ function auditEntryTelemetry(telemetry) {
   if (!telemetry || typeof telemetry !== 'object') {
     return null;
   }
-  const marketRead = (read) => read && typeof read === 'object' ? {
+  return {
+    schemaVersion: Number(telemetry.schemaVersion || 1),
+    mode: telemetry.mode || 'observational_only',
+    initialMarketRead: auditTelemetryMarketRead(telemetry.initialMarketRead),
+    preOrderMarketRead: auditTelemetryMarketRead(telemetry.preOrderMarketRead),
+    topOfBook: auditTelemetryQuote(telemetry.topOfBook),
+    orderRequest: auditTelemetryRequest(telemetry.orderRequest)
+  };
+}
+
+function auditCloseTelemetry(closeSignalEvent, symbol) {
+  const orders = Array.isArray(closeSignalEvent?.exchangeClose?.orders)
+    ? closeSignalEvent.exchangeClose.orders
+    : [];
+  const order = orders.find((item) => auditPositionSymbol(item?.position) === symbol)
+    || (orders.length === 1 ? orders[0] : null);
+  const telemetry = order?.executionTelemetry || closeSignalEvent?.closeExecutionTelemetry;
+  if (!telemetry || typeof telemetry !== 'object') {
+    return null;
+  }
+  return {
+    schemaVersion: Number(telemetry.schemaVersion || 1),
+    mode: telemetry.mode || 'observational_only',
+    direction: telemetry.direction || null,
+    closeSide: telemetry.closeSide || null,
+    requestType: telemetry.requestType || null,
+    positionMarketPrice: auditRound(telemetry.positionMarketPrice),
+    preCloseMarketRead: auditTelemetryMarketRead(telemetry.preCloseMarketRead),
+    topOfBook: auditTelemetryQuote(telemetry.topOfBook),
+    orderRequest: auditTelemetryRequest(telemetry.orderRequest)
+  };
+}
+
+function auditTelemetryMarketRead(read) {
+  return read && typeof read === 'object' ? {
     price: auditRound(read.price),
     requestedAt: read.requestedAt || null,
     receivedAt: read.receivedAt || null,
     roundTripMs: auditRound(read.roundTripMs)
   } : null;
-  const quote = telemetry.topOfBook && typeof telemetry.topOfBook === 'object'
-    ? {
-        available: Boolean(telemetry.topOfBook.available),
-        reason: telemetry.topOfBook.reason || '',
-        bidPrice: auditRound(telemetry.topOfBook.bidPrice),
-        askPrice: auditRound(telemetry.topOfBook.askPrice),
-        bidQuantity: auditRound(telemetry.topOfBook.bidQuantity),
-        askQuantity: auditRound(telemetry.topOfBook.askQuantity),
-        midPrice: auditRound(telemetry.topOfBook.midPrice),
-        spreadAbsolute: auditRound(telemetry.topOfBook.spreadAbsolute),
-        spreadPercent: auditRound(telemetry.topOfBook.spreadPercent),
-        receivedAt: telemetry.topOfBook.receivedAt || null,
-        exchangeAt: telemetry.topOfBook.exchangeAt || null,
-        ageMs: auditRound(telemetry.topOfBook.ageMs),
-        stale: Boolean(telemetry.topOfBook.stale)
-      }
-    : null;
-  return {
-    schemaVersion: Number(telemetry.schemaVersion || 1),
-    mode: telemetry.mode || 'observational_only',
-    initialMarketRead: marketRead(telemetry.initialMarketRead),
-    preOrderMarketRead: marketRead(telemetry.preOrderMarketRead),
-    topOfBook: quote,
-    orderRequest: telemetry.orderRequest && typeof telemetry.orderRequest === 'object' ? {
-      startedAt: telemetry.orderRequest.startedAt || null,
-      completedAt: telemetry.orderRequest.completedAt || null,
-      roundTripMs: auditRound(telemetry.orderRequest.roundTripMs)
-    } : null
-  };
+}
+
+function auditTelemetryQuote(quote) {
+  return quote && typeof quote === 'object' ? {
+    available: Boolean(quote.available),
+    reason: quote.reason || '',
+    bidPrice: auditRound(quote.bidPrice),
+    askPrice: auditRound(quote.askPrice),
+    bidQuantity: auditRound(quote.bidQuantity),
+    askQuantity: auditRound(quote.askQuantity),
+    midPrice: auditRound(quote.midPrice),
+    spreadAbsolute: auditRound(quote.spreadAbsolute),
+    spreadPercent: auditRound(quote.spreadPercent),
+    receivedAt: quote.receivedAt || null,
+    exchangeAt: quote.exchangeAt || null,
+    ageMs: auditRound(quote.ageMs),
+    stale: Boolean(quote.stale)
+  } : null;
+}
+
+function auditTelemetryRequest(request) {
+  return request && typeof request === 'object' ? {
+    startedAt: request.startedAt || null,
+    completedAt: request.completedAt || null,
+    roundTripMs: auditRound(request.roundTripMs)
+  } : null;
 }
 
 function formatMonthLabel(month) {

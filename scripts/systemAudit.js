@@ -776,6 +776,7 @@ function renderCohortComparisonLines(comparison) {
     '- Métricas normalizadas:',
     ...metricLines,
     ...renderEntryDiagnosisLines(comparison.entryDiagnosis),
+    ...renderCloseExecutionLines(comparison.prospectiveCloseExecution),
     `- Media neta enlazada: antes ${money(statistics.previous?.mean)} VST; ahora ${money(statistics.current?.mean)} VST; diferencia ${money(statistics.meanDifference)} VST por cierre.`,
     `- Bootstrap determinista (${statistics.iterations || 0} iteraciones): intervalo del 95% ${money(statistics.ci95Low)} a ${money(statistics.ci95High)} VST; probabilidad exploratoria de mejora ${percent(statistics.probabilityCurrentHigherPercent)}; lectura ${cohortAssessmentLabel(statistics.conclusion)}.`,
     '- Límite: el contraste describe esta muestra. La cobertura parcial y un intervalo que cruce cero impiden afirmar una mejora económica o garantizar rentabilidad futura.'
@@ -831,6 +832,26 @@ function renderEntryDiagnosisLines(diagnosis) {
     ...packageLines,
     ...mixLines,
     `- Límite del diagnóstico: ${withFinalPeriod(diagnosis.summary.caveat || '')}`
+  ];
+}
+
+function renderCloseExecutionLines(analysis) {
+  if (!analysis?.totals) {
+    return ['- Microestructura prospectiva de cierre: sin telemetría suficiente.'];
+  }
+  const totals = analysis.totals;
+  const microstructure = totals.microstructure || {};
+  const symbolLines = (analysis.bySymbol || [])
+    .filter((group) => Number(group.topOfBookMeasured || 0) > 0)
+    .map((group) => (
+      `- ${group.label}: ${group.topOfBookMeasured || 0}/${group.closes || 0} cierres medidos; ejecutable a fill ${percent(group.microstructure?.executableToFill?.averageAdversePercent)}; ${group.aboveTolerance || 0} sobre 0,15%.`
+    ));
+  return [
+    '- Microestructura prospectiva de cierre (solo cierres explícitos nuevos):',
+    `- Cobertura bid/ask prospectiva: ${totals.topOfBookMeasured || 0}/${totals.closes || 0} cierres; ${microstructure.staleQuotes || 0} instantáneas caducadas.`,
+    `- Spread medio observado: ${percent(microstructure.spread?.averagePercent)}; último precio a ejecutable ${percent(microstructure.lastToExecutable?.averageAdversePercent)}; ejecutable a fill ${percent(microstructure.executableToFill?.averageAdversePercent)}.`,
+    `- RTT local medio: ticker ${milliseconds(microstructure.tickerRoundTripMs?.average)}; orden ${milliseconds(microstructure.orderRequestRoundTripMs?.average)}; antigüedad mediana de la cotización ${milliseconds(microstructure.quoteAgeMs?.median)}.`,
+    ...symbolLines
   ];
 }
 

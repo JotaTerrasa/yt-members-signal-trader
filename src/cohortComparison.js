@@ -174,6 +174,7 @@ export function buildCohortComparison({ current = null, previous = null } = {}) 
   const status = comparisonStatus({ currentPeriod, referenceIsPartial });
   const verdicts = comparisonVerdicts({ metrics, statistics, currentPeriod, previousPeriod, referenceIsPartial });
   const entryDiagnosis = buildEntryDiagnosis({ current, previous });
+  const prospectiveCloseExecution = current?.summary?.closeExecutionAnalysis || null;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -184,6 +185,7 @@ export function buildCohortComparison({ current = null, previous = null } = {}) 
     metrics,
     statistics,
     entryDiagnosis,
+    prospectiveCloseExecution,
     overall: overallComparisonVerdict({ statistics, currentPeriod, verdicts })
   };
 }

@@ -18,7 +18,8 @@ function cohort({
   closeAbove = 8,
   closeAverage = 0.08,
   closeP95 = 2,
-  entryExecutionAnalysis = null
+  entryExecutionAnalysis = null,
+  closeExecutionAnalysis = null
 }) {
   return {
     startedAt,
@@ -46,6 +47,7 @@ function cohort({
         closing: { total: { p95Seconds: closeP95 } }
       },
       entryExecutionAnalysis,
+      closeExecutionAnalysis,
       executionRouteAnalysis: {
         gap: -matched,
         counts: {
@@ -227,7 +229,16 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
     }),
     current: cohort({
       startedAt: '2026-07-10T00:00:00.000Z',
-      entryExecutionAnalysis: currentAnalysis
+      entryExecutionAnalysis: currentAnalysis,
+      closeExecutionAnalysis: {
+        totals: {
+          closes: 8,
+          instrumented: 2,
+          topOfBookMeasured: 2,
+          microstructure: { executableToFill: { measured: 2, averageAdversePercent: 0.04 } }
+        },
+        bySymbol: []
+      }
     })
   });
 
@@ -247,4 +258,5 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
   assert.equal(comparison.entryDiagnosis.timing.attemptToFillAverageSeconds.current, 2.1);
   assert.equal(comparison.entryDiagnosis.prospectiveMicrostructure.topOfBookMeasured, 3);
   assert.equal(comparison.entryDiagnosis.prospectiveMicrostructure.orderRequestRoundTripMs.average, 180);
+  assert.equal(comparison.prospectiveCloseExecution.totals.topOfBookMeasured, 2);
 });

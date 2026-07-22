@@ -1372,6 +1372,7 @@ export class FuturesTrader {
     const warnings = [];
 
     for (const position of positions) {
+      let preCloseMarketRead = null;
       if (!skipCloseGuard) {
         try {
           const guard = await closeGuardForPosition({
@@ -1379,7 +1380,10 @@ export class FuturesTrader {
             signal,
             percent,
             marketClient,
-            fetchMarketPrice: (symbol) => this.fetchMarketPrice(marketClient, symbol)
+            fetchMarketPrice: async (symbol) => {
+              preCloseMarketRead = await this.measureMarketPrice(marketClient, symbol);
+              return preCloseMarketRead.price;
+            }
           });
           if (!guard.ok) {
             warnings.push({ position, reason: guard.reason, guard });
@@ -1393,9 +1397,17 @@ export class FuturesTrader {
       }
 
       if (percent >= 99.9 && position.positionId) {
+        const closeRequest = await this.submitCloseRequest({
+          symbol: position.symbol || signal.symbol,
+          position,
+          preCloseMarketRead,
+          requestType: 'close_position',
+          request: () => client.closePosition({ positionId: position.positionId })
+        });
         orders.push({
           position,
-          response: await client.closePosition({ positionId: position.positionId })
+          response: closeRequest.response,
+          executionTelemetry: closeRequest.executionTelemetry
         });
         continue;
       }
@@ -1420,10 +1432,18 @@ export class FuturesTrader {
         order.reduceOnly = 'true';
       }
 
+      const closeRequest = await this.submitCloseRequest({
+        symbol: position.symbol || signal.symbol,
+        position,
+        preCloseMarketRead,
+        requestType: 'market_reduce',
+        request: () => client.placeOrder(order, { test: false })
+      });
       orders.push({
         position,
         order,
-        response: await client.placeOrder(order, { test: false })
+        response: closeRequest.response,
+        executionTelemetry: closeRequest.executionTelemetry
       });
     }
 
@@ -1458,9 +1478,16 @@ export class FuturesTrader {
       }
 
       if (percent >= 99.9 && position.positionId) {
+        const closeRequest = await this.submitCloseRequest({
+          symbol,
+          position,
+          requestType: 'close_position',
+          request: () => client.closePosition({ positionId: position.positionId })
+        });
         orders.push({
           position,
-          response: await client.closePosition({ positionId: position.positionId })
+          response: closeRequest.response,
+          executionTelemetry: closeRequest.executionTelemetry
         });
         continue;
       }
@@ -1489,10 +1516,17 @@ export class FuturesTrader {
         order.reduceOnly = 'true';
       }
 
+      const closeRequest = await this.submitCloseRequest({
+        symbol,
+        position,
+        requestType: 'market_reduce',
+        request: () => client.placeOrder(order, { test: false })
+      });
       orders.push({
         position,
         order,
-        response: await client.placeOrder(order, { test: false })
+        response: closeRequest.response,
+        executionTelemetry: closeRequest.executionTelemetry
       });
     }
 
@@ -1504,6 +1538,43 @@ export class FuturesTrader {
     }
 
     return { positions, orders, protectiveCleanup };
+  }
+
+  async submitCloseRequest({ symbol, position, preCloseMarketRead = null, requestType, request }) {
+    const topOfBook = this.captureMarketQuote(symbol);
+    const orderRequestStartedAtMs = Date.now();
+    let orderRequestCompletedAtMs;
+    try {
+      const response = await request();
+      orderRequestCompletedAtMs = Date.now();
+      return {
+        response,
+        executionTelemetry: safeBuildCloseExecutionTelemetry({
+          position,
+          preCloseMarketRead,
+          topOfBook,
+          requestType,
+          orderRequestStartedAtMs,
+          orderRequestCompletedAtMs
+        })
+      };
+    } catch (error) {
+      orderRequestCompletedAtMs = Date.now();
+      const executionTelemetry = safeBuildCloseExecutionTelemetry({
+        position,
+        preCloseMarketRead,
+        topOfBook,
+        requestType,
+        orderRequestStartedAtMs,
+        orderRequestCompletedAtMs
+      });
+      try {
+        error.closeExecutionTelemetry = executionTelemetry;
+      } catch {
+        // La telemetría nunca puede sustituir el error real del exchange.
+      }
+      throw error;
+    }
   }
 
   async cancelProtectiveOrdersForClosedPositions({ client, positions = [] }) {
@@ -1903,7 +1974,8 @@ export class FuturesTrader {
       }),
       status: 'error',
       reason: error.message,
-      executionTelemetry: error.executionTelemetry || null
+      executionTelemetry: error.executionTelemetry || null,
+      closeExecutionTelemetry: error.closeExecutionTelemetry || null
     });
     this.log(`BingX ${modePrefix(config)} ${signal.symbol || 'senal'}: ${error.message}`, 'error');
     return failed;
@@ -1942,6 +2014,64 @@ function buildEntryExecutionTelemetry({
       roundTripMs: Math.max(0, orderRequestCompletedAtMs - orderRequestStartedAtMs)
     }
   };
+}
+
+function buildCloseExecutionTelemetry({
+  position,
+  preCloseMarketRead,
+  topOfBook,
+  requestType,
+  orderRequestStartedAtMs,
+  orderRequestCompletedAtMs
+}) {
+  const direction = closePositionDirection(position);
+  return {
+    schemaVersion: 1,
+    mode: 'observational_only',
+    direction,
+    closeSide: direction === 'SHORT' ? 'BUY' : 'SELL',
+    requestType: requestType || null,
+    positionMarketPrice: firstTelemetryNumber([
+      position?.markPrice,
+      position?.lastPrice,
+      position?.currentPrice
+    ]),
+    preCloseMarketRead: preCloseMarketRead ? compactMarketRead(preCloseMarketRead) : null,
+    topOfBook: topOfBook || { available: false, reason: 'quote_unavailable' },
+    orderRequest: {
+      startedAt: new Date(orderRequestStartedAtMs).toISOString(),
+      completedAt: new Date(orderRequestCompletedAtMs).toISOString(),
+      roundTripMs: Math.max(0, orderRequestCompletedAtMs - orderRequestStartedAtMs)
+    }
+  };
+}
+
+function safeBuildCloseExecutionTelemetry(context) {
+  try {
+    return buildCloseExecutionTelemetry(context);
+  } catch (error) {
+    const startedAtMs = Number(context?.orderRequestStartedAtMs);
+    const completedAtMs = Number(context?.orderRequestCompletedAtMs);
+    return {
+      schemaVersion: 1,
+      mode: 'observational_only',
+      available: false,
+      reason: `telemetry_error:${String(error?.message || error || 'unknown_error')}`,
+      direction: null,
+      closeSide: null,
+      requestType: context?.requestType || null,
+      positionMarketPrice: null,
+      preCloseMarketRead: null,
+      topOfBook: { available: false, reason: 'telemetry_error' },
+      orderRequest: {
+        startedAt: Number.isFinite(startedAtMs) ? new Date(startedAtMs).toISOString() : null,
+        completedAt: Number.isFinite(completedAtMs) ? new Date(completedAtMs).toISOString() : null,
+        roundTripMs: Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+          ? Math.max(0, completedAtMs - startedAtMs)
+          : null
+      }
+    };
+  }
 }
 
 function compactMarketRead(read) {
@@ -1985,6 +2115,24 @@ function telemetryNumber(value) {
   }
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function firstTelemetryNumber(values = []) {
+  for (const value of values) {
+    const number = telemetryNumber(value);
+    if (number !== null && number > 0) {
+      return number;
+    }
+  }
+  return null;
+}
+
+function closePositionDirection(position = {}) {
+  const positionSide = String(position.positionSide || '').toUpperCase();
+  const signedAmount = Number(position.positionAmt || position.availableAmt || 0);
+  return positionSide === 'SHORT' || (positionSide === 'BOTH' && signedAmount < 0)
+    ? 'SHORT'
+    : 'LONG';
 }
 
 function validateSignal(signal, config) {

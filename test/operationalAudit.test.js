@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -596,6 +596,51 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
   assert.equal(analysis.totals.microstructure.tickerRoundTripMs.average, 45);
   assert.equal(analysis.timezone, 'Europe/Madrid');
   assert.equal(analysis.exchangeTimestampPrecisionSeconds, 1);
+});
+
+test('separa spread y fill en la microestructura prospectiva de los cierres', () => {
+  const row = ({ id, symbol, direction, lastPrice, bidPrice, askPrice, fill }) => ({
+    id,
+    symbol,
+    direction,
+    trace: { closeSignalEventId: id },
+    vst: {
+      exit: fill,
+      closeTarget: lastPrice,
+      closeSignalAt: '2026-07-22T12:00:00.000Z',
+      closingAt: '2026-07-22T12:00:02.000Z',
+      closeTelemetry: {
+        mode: 'observational_only',
+        preCloseMarketRead: { price: lastPrice, roundTripMs: 45 },
+        topOfBook: {
+          available: true,
+          bidPrice,
+          askPrice,
+          spreadPercent: Math.abs(askPrice - bidPrice) / ((askPrice + bidPrice) / 2) * 100,
+          ageMs: 80,
+          stale: false
+        },
+        orderRequest: {
+          startedAt: '2026-07-22T12:00:00.500Z',
+          roundTripMs: 150
+        }
+      }
+    }
+  });
+  const analysis = buildCloseExecutionAnalysis([
+    row({ id: 'close-eth', symbol: 'ETH-USDT', direction: 'LONG', lastPrice: 101.05, bidPrice: 101, askPrice: 101.1, fill: 100.9 }),
+    row({ id: 'close-btc', symbol: 'BTC-USDT', direction: 'SHORT', lastPrice: 99.05, bidPrice: 98.9, askPrice: 99, fill: 99.2 })
+  ]);
+
+  assert.equal(analysis.totals.closes, 2);
+  assert.equal(analysis.totals.instrumented, 2);
+  assert.equal(analysis.totals.topOfBookMeasured, 2);
+  assert.equal(analysis.totals.aboveTolerance, 1);
+  assert.equal(analysis.totals.microstructure.spread.measured, 2);
+  assert.equal(analysis.totals.microstructure.lastToExecutable.measured, 2);
+  assert.equal(analysis.totals.microstructure.executableToFill.measured, 2);
+  assert.equal(analysis.totals.microstructure.orderRequestRoundTripMs.average, 150);
+  assert.equal(analysis.bySymbol.length, 2);
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

@@ -4999,6 +4999,7 @@ function renderCohortComparison(comparison) {
       </div>
       <div class="cohort-verdicts">${verdicts}</div>
       ${renderEntryDiagnosis(comparison.entryDiagnosis)}
+      ${renderCloseExecutionMicrostructure(comparison.prospectiveCloseExecution)}
       <div class="cohort-comparison-table" role="table" aria-label="Comparación de cohortes antes y después">
         ${metrics}
       </div>
@@ -5184,6 +5185,76 @@ function renderEntryDiagnosis(diagnosis) {
       </div>
       <div class="entry-diagnosis-slices">${timeWindows}</div>
       <p class="replica-gap-note">${escapeHtml(summary.caveat || '')}</p>
+    </section>
+  `;
+}
+
+function renderCloseExecutionMicrostructure(analysis) {
+  if (!analysis?.totals) {
+    return '';
+  }
+  const totals = analysis.totals;
+  const microstructure = totals.microstructure || {};
+  const measured = Number(totals.topOfBookMeasured || 0);
+  const closes = Number(totals.closes || 0);
+  const symbolRows = (analysis.bySymbol || [])
+    .filter((group) => Number(group.topOfBookMeasured || 0) > 0)
+    .map((group) => `
+      <div class="entry-diagnosis-slice">
+        <span>${escapeHtml(group.label || group.key || '-')}</span>
+        <strong>${escapeHtml(formatTelemetryPercent(group.microstructure?.executableToFill?.averageAdversePercent))}</strong>
+        <small>${escapeHtml(`${group.topOfBookMeasured || 0}/${group.closes || 0} cierres medidos`)}</small>
+        <b>${escapeHtml(`${group.aboveTolerance || 0} sobre 0,15%`)}</b>
+      </div>
+    `).join('');
+
+  return `
+    <section class="entry-diagnosis close-execution-diagnosis" aria-labelledby="close-execution-diagnosis-title">
+      <div class="entry-diagnosis-heading">
+        <div>
+          <span>Diagnóstico prospectivo de ejecución</span>
+          <strong id="close-execution-diagnosis-title">Microestructura de los cierres</strong>
+        </div>
+        <span class="ledger-status ${measured ? 'ok' : 'warn'}">${escapeHtml(`${measured}/${closes} con bid/ask fresco`)}</span>
+      </div>
+      <div class="entry-diagnosis-microstructure">
+        <div class="entry-diagnosis-stages entry-diagnosis-micro-grid">
+          <div class="entry-diagnosis-stage">
+            <span>Spread medio</span>
+            <strong>${escapeHtml(formatTelemetryPercent(microstructure.spread?.averagePercent))}</strong>
+            <small>${escapeHtml(`${microstructure.spread?.measured || 0} cierres medidos`)}</small>
+            <b>Bid/ask de BingX</b>
+          </div>
+          <div class="entry-diagnosis-stage">
+            <span>Último precio a ejecutable</span>
+            <strong>${escapeHtml(formatTelemetryPercent(microstructure.lastToExecutable?.averageAdversePercent))}</strong>
+            <small>Bid para cerrar LONG; ask para SHORT</small>
+            <b>Coste previo al envío</b>
+          </div>
+          <div class="entry-diagnosis-stage">
+            <span>Ejecutable a fill</span>
+            <strong>${escapeHtml(formatTelemetryPercent(microstructure.executableToFill?.averageAdversePercent))}</strong>
+            <small>${escapeHtml(`${totals.aboveTolerance || 0} cierres sobre 0,15%`)}</small>
+            <b>Movimiento tras el envío</b>
+          </div>
+          <div class="entry-diagnosis-stage">
+            <span>RTT de la orden</span>
+            <strong>${escapeHtml(formatTelemetryMilliseconds(microstructure.orderRequestRoundTripMs?.average))}</strong>
+            <small>${escapeHtml(`Antigüedad mediana: ${formatTelemetryMilliseconds(microstructure.quoteAgeMs?.median)}`)}</small>
+            <b>Observación pasiva</b>
+          </div>
+        </div>
+        <p>${escapeHtml(measured
+          ? 'La salida queda separada entre spread, movimiento hasta el lado ejecutable del libro y movimiento posterior hasta el fill.'
+          : 'Los cierres históricos no contienen bid/ask. La lectura comenzará con el próximo cierre explícito y no alterará su ejecución.')}</p>
+      </div>
+      ${symbolRows ? `
+        <div class="entry-diagnosis-subheading">
+          <strong>Ejecutable a fill por activo</strong>
+          <span>Solo cierres con una instantánea fresca</span>
+        </div>
+        <div class="entry-diagnosis-slices">${symbolRows}</div>
+      ` : ''}
     </section>
   `;
 }
