@@ -271,6 +271,7 @@ const REALTIME_RECONNECT_BASE_MS = 1000;
 const REALTIME_RECONNECT_MAX_MS = 15 * 1000;
 const RUNTIME_STORAGE_KEY = 'futures-magician-runtime-id';
 const BOOTSTRAP_RETRY_DELAYS_MS = [2000, 5000, 15_000, 30_000];
+const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8000;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
@@ -362,19 +363,26 @@ async function init() {
 
 function bootstrapLoadTasks() {
   const tasks = [
-    { key: 'state', label: 'estado general', run: loadState },
-    { key: 'telegram', label: 'alertas Telegram', run: loadTelegram },
-    { key: 'telegram-source', label: 'fuente Telegram Web', run: loadTelegramSource },
-    { key: 'strategy-study', label: 'estudio estratégico', run: loadStrategyStudy },
-    { key: 'operational-status', label: 'estado operativo', run: loadOperationalStatus },
-    { key: 'bingx', label: 'estado BingX', run: loadBingx }
+    { key: 'state', label: 'estado general', run: bootstrapLoader(loadState) },
+    { key: 'telegram', label: 'alertas Telegram', run: bootstrapLoader(loadTelegram) },
+    { key: 'telegram-source', label: 'fuente Telegram Web', run: bootstrapLoader(loadTelegramSource) },
+    { key: 'strategy-study', label: 'estudio estratégico', run: bootstrapLoader(loadStrategyStudy, { rethrow: true }) },
+    { key: 'operational-status', label: 'estado operativo', run: bootstrapLoader(loadOperationalStatus) },
+    { key: 'bingx', label: 'estado BingX', run: bootstrapLoader(loadBingx) }
   ];
   if (pnlHashTarget()) {
     appState.postsDirty = true;
   } else {
-    tasks.push({ key: 'posts', label: 'publicaciones', run: loadPosts });
+    tasks.push({ key: 'posts', label: 'publicaciones', run: bootstrapLoader(loadPosts) });
   }
   return tasks;
+}
+
+function bootstrapLoader(loader, options = {}) {
+  return () => loader({
+    timeoutMs: BOOTSTRAP_REQUEST_TIMEOUT_MS,
+    ...options
+  });
 }
 
 async function runBootstrapLoads(tasks) {
@@ -843,8 +851,8 @@ function bindEvents() {
   });
 }
 
-async function loadState() {
-  const state = await fetchJson('/api/state');
+async function loadState(options = {}) {
+  const state = await fetchJson('/api/state', options);
   if (syncRuntimeInstance(state)) {
     return;
   }
@@ -856,13 +864,13 @@ async function loadState() {
   renderTelegramWatchPanel();
 }
 
-async function loadPosts() {
+async function loadPosts(options = {}) {
   if (appState.postsLoading) {
     return;
   }
   appState.postsLoading = true;
   try {
-    const response = await fetchJson('/api/posts');
+    const response = await fetchJson('/api/posts', options);
     appState.posts = response.posts || [];
     appState.postsUpdatedAt = response.stats?.updatedAt || null;
     appState.postsDirty = false;
@@ -872,34 +880,38 @@ async function loadPosts() {
   }
 }
 
-async function loadTelegram() {
-  const response = await fetchJson('/api/telegram');
+async function loadTelegram(options = {}) {
+  const response = await fetchJson('/api/telegram', options);
   appState.telegram = response.telegram;
   renderTelegram(response.telegram);
 }
 
-async function loadTelegramSource() {
-  const response = await fetchJson('/api/telegram-source');
+async function loadTelegramSource(options = {}) {
+  const response = await fetchJson('/api/telegram-source', options);
   appState.telegramSource = response.telegramSource;
   renderTelegramSource(response.telegramSource);
   renderTelegramWatchPanel();
 }
 
-async function loadStrategyStudy() {
+async function loadStrategyStudy({ rethrow = false, ...options } = {}) {
   try {
-    const response = await fetchJson('/api/strategy-study/latest');
+    const response = await fetchJson('/api/strategy-study/latest', options);
     appState.strategyStudy = response.study || null;
   } catch (error) {
     appState.strategyStudy = {
       error: error.message
     };
+    if (rethrow) {
+      renderStrategyStudy();
+      throw error;
+    }
   }
   renderStrategyStudy();
 }
 
-async function loadOperationalStatus() {
+async function loadOperationalStatus(options = {}) {
   try {
-    appState.operationalStatus = await fetchJson('/api/operational-status');
+    appState.operationalStatus = await fetchJson('/api/operational-status', options);
   } catch (error) {
     appState.operationalStatus = {
       error: error.message
@@ -910,8 +922,8 @@ async function loadOperationalStatus() {
   renderGuardDashboard();
 }
 
-async function loadBingx() {
-  const response = await fetchJson('/api/bingx');
+async function loadBingx(options = {}) {
+  const response = await fetchJson('/api/bingx', options);
   appState.bingx = response.bingx;
   appState.trades = response.trades || appState.trades;
   appState.paperTrades = response.paperTrades || appState.paperTrades;
@@ -9500,12 +9512,51 @@ async function runAction(action) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || `Error HTTP ${response.status}`);
+  const { timeoutMs = 0, ...fetchOptions } = options;
+  const normalizedTimeout = Number(timeoutMs);
+  const controller = Number.isFinite(normalizedTimeout) && normalizedTimeout > 0
+    ? new AbortController()
+    : null;
+  const externalSignal = fetchOptions.signal;
+  let timeout = null;
+  let timedOut = false;
+  let externalAbortHandler = null;
+
+  if (controller) {
+    if (externalSignal?.aborted) {
+      controller.abort(externalSignal.reason);
+    } else if (externalSignal) {
+      externalAbortHandler = () => controller.abort(externalSignal.reason);
+      externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+    }
+    fetchOptions.signal = controller.signal;
+    timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, normalizedTimeout);
   }
-  return data;
+
+  try {
+    const response = await fetch(url, fetchOptions);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Error HTTP ${response.status}`);
+    }
+    return data;
+  } catch (error) {
+    if (timedOut) {
+      const seconds = Math.max(1, Math.ceil(normalizedTimeout / 1000));
+      throw new Error(`La consulta ${url} superó el tiempo de espera de ${seconds} segundos.`);
+    }
+    throw error;
+  } finally {
+    if (timeout !== null) {
+      window.clearTimeout(timeout);
+    }
+    if (externalSignal && externalAbortHandler) {
+      externalSignal.removeEventListener('abort', externalAbortHandler);
+    }
+  }
 }
 
 function phaseLabel(phase) {

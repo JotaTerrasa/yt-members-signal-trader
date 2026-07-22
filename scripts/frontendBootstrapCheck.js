@@ -109,6 +109,54 @@ try {
     throw new Error(`Errores JavaScript tras el evento SSE corrupto: ${realtimePageErrors.join(' | ')}`);
   }
 
+  const timeoutPage = await browser.newPage();
+  const timeoutPageErrors = [];
+  let timeoutInjectedFailures = 0;
+  let timeoutRequests = 0;
+  timeoutPage.on('pageerror', (error) => timeoutPageErrors.push(error.message));
+  await timeoutPage.route('**/api/telegram-source', async (route) => {
+    timeoutRequests += 1;
+    if (timeoutRequests === 1) {
+      timeoutInjectedFailures += 1;
+      await delay(9000);
+      await route.continue().catch(() => {});
+      return;
+    }
+    await route.continue();
+  });
+
+  await timeoutPage.goto(`${baseUrl}/?bootstrap-timeout-check=${Date.now()}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await timeoutPage.waitForFunction(() => {
+    const alert = document.querySelector('#client-error');
+    return alert
+      && !alert.classList.contains('hidden')
+      && alert.dataset.source === 'bootstrap'
+      && alert.textContent.includes('/api/telegram-source')
+      && alert.textContent.includes('8 segundos');
+  }, null, { timeout: 12_000 });
+
+  const timeoutPartial = await timeoutPage.evaluate(() => ({
+    runtime: document.documentElement.dataset.runtimeId || '',
+    status: document.querySelector('#status-text')?.textContent || ''
+  }));
+  if (!timeoutPartial.runtime || !timeoutPartial.status) {
+    throw new Error('El endpoint colgado bloqueo el resto del panel.');
+  }
+
+  await timeoutPage.waitForFunction(() => {
+    const alert = document.querySelector('#client-error');
+    return alert?.classList.contains('hidden') && !alert.dataset.source && !alert.textContent;
+  }, null, { timeout: 15_000 });
+  if (timeoutInjectedFailures !== 1 || timeoutRequests < 2) {
+    throw new Error(`La prueba de timeout no completo el reintento: ${timeoutInjectedFailures}/${timeoutRequests}.`);
+  }
+  if (timeoutPageErrors.length) {
+    throw new Error(`Errores JavaScript tras el timeout inicial: ${timeoutPageErrors.join(' | ')}`);
+  }
+
   console.log(JSON.stringify({
     ok: true,
     injectedFailures,
@@ -116,7 +164,9 @@ try {
     statusDuringFailure: partial.status,
     recovered: true,
     realtimeInjectedFailures,
-    realtimeRecovered: true
+    realtimeRecovered: true,
+    timeoutInjectedFailures,
+    timeoutRecovered: true
   }));
 } finally {
   await browser?.close().catch(() => {});

@@ -53,6 +53,7 @@ async function main() {
       runtimeRenewed: true,
       frontendRecovery: true,
       realtimePayloadRecovery: frontendCheck.realtimeRecovered,
+      bootstrapTimeoutRecovery: frontendCheck.timeoutRecovered,
       persistedVolumes: probes.length,
       uid
     }, null, 2));
@@ -106,7 +107,9 @@ function verifyFrontendBootstrap(container) {
     || result.injectedFailures !== 1
     || !result.recovered
     || result.realtimeInjectedFailures !== 1
-    || !result.realtimeRecovered) {
+    || !result.realtimeRecovered
+    || result.timeoutInjectedFailures !== 1
+    || !result.timeoutRecovered) {
     throw new Error(`El frontend no recupero su carga parcial: ${output}`);
   }
   return result;
