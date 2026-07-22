@@ -1,5 +1,6 @@
 const transientClosePatterns = [
   /please try again later/i,
+  /(?:system|service).*(?:currently )?busy|currently busy/i,
   /temporar(?:y|ily|io|iamente)/i,
   /timeout|timed out|etimedout/i,
   /fetch failed|network|socket|econn|enotfound/i,

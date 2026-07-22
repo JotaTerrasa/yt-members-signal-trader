@@ -15,6 +15,7 @@ import { applySecurityHeaders, authorizeHttpRequest, buildHttpSecurity, createMu
 import { buildHistoricalPnl } from './historicalPnl.js';
 import { PaperTradeStore } from './paperTradeStore.js';
 import { detectPortfolioUrl } from './portfolioDetector.js';
+import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
 import { auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError } from './operationalAudit.js';
@@ -84,6 +85,9 @@ await tradeEventStore.init();
 const executionRetryStore = new ExecutionRetryStore(join(dataDir, 'execution-retries.json'));
 await executionRetryStore.init();
 
+const pnlSnapshotStore = new PnlSnapshotStore(join(dataDir, 'pnl-snapshots.json'));
+await pnlSnapshotStore.init();
+
 const scraper = new YouTubePostsScraper({ profileDir });
 const telegramNotifier = new TelegramNotifier({
   configStore,
@@ -114,7 +118,7 @@ let pnlCache = null;
 let pnlSourcesCache = null;
 let replicaAuditCache = null;
 let pnlLastGood = null;
-let pnlSourcesLastGood = null;
+let pnlSourcesLastGood = pnlSnapshotStore.getSources(currentMonthKey());
 let pnlBackoffUntil = 0;
 let pnlBackoffReason = '';
 let backupTimer = null;
@@ -1510,11 +1514,8 @@ const server = createServer(async (request, response) => {
       const body = await readJson(request);
       const previous = configStore.getBingX();
       const bingx = await configStore.updateBingX(body);
-      pnlCache = null;
-      pnlSourcesCache = null;
-      pnlLastGood = null;
-      pnlSourcesLastGood = null;
-      clearPnlBackoff();
+      const credentialsChanged = Boolean(String(body.apiKey || '').trim() || String(body.apiSecret || '').trim());
+      await clearPnlCaches({ clearSnapshots: credentialsChanged });
       broadcast('bingx', { bingx });
       notifyBingxPauseChange(previous, bingx);
       return sendJson(response, { ok: true, bingx });
@@ -1579,11 +1580,7 @@ const server = createServer(async (request, response) => {
         force: true,
         phase: 'manual_vst_reserve_activation'
       });
-      pnlCache = null;
-      pnlSourcesCache = null;
-      pnlLastGood = null;
-      pnlSourcesLastGood = null;
-      clearPnlBackoff();
+      await clearPnlCaches({ clearSnapshots: true });
       await syncExchangePositions({ reason: 'vst_reserve_activation' }).catch(() => exchangePositionsCache);
       const updated = configStore.getBingX();
       broadcast('bingx', { bingx: updated });
@@ -1648,7 +1645,7 @@ const server = createServer(async (request, response) => {
         clearPnlBackoff();
         const payload = { pnl };
         pnlCache = { months: String(months), at: Date.now(), payload };
-        pnlLastGood = { months: String(months), at: Date.now(), pnl };
+        await rememberPnlSnapshot({ months: String(months), at: Date.now(), pnl });
         return sendJson(response, { ok: true, pnl });
       } catch (error) {
         const cooldownUntil = startPnlBackoff(error);
@@ -1689,7 +1686,8 @@ const server = createServer(async (request, response) => {
           cached: true,
           stale: true,
           warning: cooldown.reason,
-          cooldownUntil: new Date(cooldown.until).toISOString()
+          cooldownUntil: new Date(cooldown.until).toISOString(),
+          lastGoodAt: new Date(pnlSourcesLastGood.at).toISOString()
         } : {
           ok: true,
           month: currentMonthKey(),
@@ -1714,12 +1712,16 @@ const server = createServer(async (request, response) => {
         exchangePnlSource({ key: 'vst', mode: 'demo', label: 'Futuros VST', modeLabel: 'Demo VST', asset: 'VST' }),
         exchangePnlSource({ key: 'live', mode: 'live', label: 'Futuros reales', modeLabel: 'Live real', asset: 'USDT' })
       ]);
-      const sourceWarning = [vst.source?.error, live.source?.error]
-        .filter(Boolean)
-        .find((message) => /frequency|rate|100410|limit/i.test(message));
-      const cooldownUntil = sourceWarning ? startPnlBackoff(new Error(sourceWarning)) : 0;
+      const sourceErrors = {
+        vst: vst.source?.error || '',
+        live: live.source?.error || ''
+      };
+      const sourceWarning = Object.values(sourceErrors).find(Boolean) || '';
+      const cooldownUntil = sourceWarning && isRetryableCloseError(sourceWarning)
+        ? startPnlBackoff(new Error(sourceWarning))
+        : 0;
 
-      const payload = {
+      let payload = {
         ok: true,
         month: currentMonthKey(),
         sources: {
@@ -1733,9 +1735,14 @@ const server = createServer(async (request, response) => {
         warning: sourceWarning || '',
         cooldownUntil: cooldownUntil ? new Date(cooldownUntil).toISOString() : null
       };
+      payload = applyPnlSourcesFallback({
+        payload,
+        sourceErrors,
+        snapshot: pnlSourcesLastGood
+      });
       pnlSourcesCache = { at: Date.now(), payload };
       if (!sourceWarning) {
-        pnlSourcesLastGood = { at: Date.now(), payload };
+        await rememberPnlSourcesSnapshot({ at: Date.now(), payload });
       }
       return sendJson(response, payload);
     }
@@ -2199,7 +2206,13 @@ function currentRealtimeState() {
 }
 
 async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
-  const lastGood = pnlLastGood && pnlLastGood.months === String(months) ? pnlLastGood.pnl : null;
+  const matchingSnapshot = pnlLastGood && pnlLastGood.months === String(months)
+    ? pnlLastGood
+    : pnlSnapshotStore.getPnl(months);
+  if (matchingSnapshot) {
+    pnlLastGood = matchingSnapshot;
+  }
+  const lastGood = matchingSnapshot?.pnl || null;
   if (lastGood) {
     return {
       pnl: {
@@ -2209,7 +2222,7 @@ async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
       warning,
       stale: true,
       cooldownUntil: new Date(cooldownUntil).toISOString(),
-      lastGoodAt: new Date(pnlLastGood.at).toISOString()
+      lastGoodAt: new Date(matchingSnapshot.at).toISOString()
     };
   }
 
@@ -2222,6 +2235,31 @@ async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
   };
 }
 
+async function rememberPnlSnapshot(snapshot) {
+  pnlLastGood = snapshot;
+  await pnlSnapshotStore.setPnl(snapshot).catch((error) => {
+    pushLog({
+      level: 'warn',
+      message: `No se pudo persistir el snapshot PnL: ${safePublicMessage(error.message)}`,
+      at: new Date().toISOString()
+    });
+  });
+}
+
+async function rememberPnlSourcesSnapshot(snapshot) {
+  pnlSourcesLastGood = {
+    ...snapshot,
+    month: snapshot.payload?.month || currentMonthKey()
+  };
+  await pnlSnapshotStore.setSources(pnlSourcesLastGood).catch((error) => {
+    pushLog({
+      level: 'warn',
+      message: `No se pudo persistir el snapshot de fuentes PnL: ${safePublicMessage(error.message)}`,
+      at: new Date().toISOString()
+    });
+  });
+}
+
 async function resetMonthlyAccounting({ resetAt = new Date(), reason = 'manual' } = {}) {
   const date = resetAt instanceof Date ? resetAt : new Date(resetAt);
   const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
@@ -2229,7 +2267,7 @@ async function resetMonthlyAccounting({ resetAt = new Date(), reason = 'manual' 
     resetAt: safeDate,
     month: currentMonthKeyForDate(safeDate)
   });
-  clearPnlCaches();
+  await clearPnlCaches({ clearSnapshots: true });
   broadcast('bingx', { bingx });
   pushLog({
     level: reason.startsWith('auto') ? 'warn' : 'info',
@@ -2267,12 +2305,23 @@ function resetDateForMonthlyCatchUp({ bingx = {}, month, now = new Date() } = {}
   return monthStartDate(now);
 }
 
-function clearPnlCaches() {
+async function clearPnlCaches({ clearSnapshots = false } = {}) {
   pnlCache = null;
   pnlSourcesCache = null;
   pnlLastGood = null;
   pnlSourcesLastGood = null;
   clearPnlBackoff();
+  if (clearSnapshots) {
+    await pnlSnapshotStore.clear().catch((error) => {
+      pushLog({
+        level: 'warn',
+        message: `No se pudo invalidar el snapshot PnL: ${safePublicMessage(error.message)}`,
+        at: new Date().toISOString()
+      });
+    });
+  } else {
+    pnlSourcesLastGood = pnlSnapshotStore.getSources(currentMonthKey());
+  }
 }
 
 function pnlBackoffInfo() {
@@ -4826,6 +4875,7 @@ async function performShutdown() {
     paperStore.flush(),
     tradeEventStore.flush(),
     executionRetryStore.flush(),
+    pnlSnapshotStore.flush(),
     serverClosed
   ]);
   for (const result of results) {

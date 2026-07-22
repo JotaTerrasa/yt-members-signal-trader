@@ -294,6 +294,9 @@ Lectura rápida:
 - En live real, el resumen compara la equity de la cuenta contra el capital inicial configurado del mes.
 - En Demo VST, el resumen utiliza la equity estratégica: equity bruta menos todas las aportaciones técnicas registradas.
 - El ROI mensual sigue usando la base mensual; la línea `Equity vs inicial` ayuda a distinguir balance/equity de PnL realizado.
+- La última respuesta histórica completa de BingX se guarda de forma atómica en `.data/pnl-snapshots.json`.
+- Tras reiniciar, la app restaura ese snapshot antes de consultar BingX. Si una fuente responde `system busy`, rate limit o error transitorio, solo esa fuente usa el último dato bueno y el panel la marca como obsoleta con su hora de lectura.
+- Un reset mensual, un cambio de credenciales o una recarga de reserva VST invalidan el snapshot; los cambios ordinarios de filtros no borran el histórico de respaldo.
 
 Endpoint:
 

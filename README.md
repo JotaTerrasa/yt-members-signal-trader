@@ -42,6 +42,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Reintenta aperturas bloqueadas por una zona temporalmente inválida o por fallos transitorios, sin perseguir precios desfavorables.
 - Asigna a cada apertura un identificador determinista: un timeout o un reinicio no puede convertir un reintento en una segunda posición.
 - Conserva en `.data/execution-retries.json` las aperturas y los cierres pendientes para recuperarlos después de reiniciar el proceso.
+- Conserva en `.data/pnl-snapshots.json` la última lectura histórica válida de BingX. Un reinicio, rate limit o `system busy` ya no sustituye temporalmente fees, cierres y PnL por ceros.
 - Mantiene en Demo VST una reserva técnica de margen antes de cada paquete y descuenta esas aportaciones de la equity estratégica y del ROI.
 - Evalúa en Demo VST un filtro neto de entrada que marca operaciones con coste/riesgo, break-even o R/R desfavorables. Por defecto opera en sombra; solo bloquea si se cambia explícitamente a modo bloqueo.
 - Empareja las entradas marcadas en sombra con sus cierres y muestra su PnL neto estimado. También avisa cuando un umbral marcaría por construcción todas las señales con el apalancamiento observado.
@@ -520,6 +521,7 @@ src/
   futuresTrader.js       Test/demo/live/dual y gestión
   executionReliability.js Identidad idempotente y clasificación de reintentos
   executionRetryStore.js Cola persistente de aperturas y cierres pendientes
+  pnlSnapshotStore.js    Última lectura PnL válida y fallback por fuente
   promotionGate.js       Criterios de promoción sin activación automática
   httpSecurity.js        Autenticación opcional y protecciones HTTP
   bingxClient.js         Cliente REST BingX
@@ -574,6 +576,7 @@ Contenido importante:
 .data/trade-events.json       Eventos de trading
 .data/trade-events.json.journal Diario incremental pendiente de compactación
 .data/paper-trades.json       Simulación local
+.data/pnl-snapshots.json      Último snapshot PnL válido
 .data/backups/                Backups redacted
 .yt-profile/                  Sesiones Chromium
 ```

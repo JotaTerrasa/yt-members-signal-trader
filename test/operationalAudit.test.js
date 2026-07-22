@@ -5,6 +5,7 @@ import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
   assert.equal(isRetryableCloseError('Please try again later.'), true);
+  assert.equal(isRetryableCloseError('The system is currently busy, please try again later.'), true);
   assert.equal(isRetryableCloseError('fetch failed'), true);
   assert.equal(isRetryableCloseError('Invalid API key'), false);
 });

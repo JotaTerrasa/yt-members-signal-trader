@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 
 const rootDir = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.env.PORT || 5178);
+const host = String(process.env.HOST || '127.0.0.1');
 const checks = [];
 
 await check('Node.js 20+', async () => {
@@ -43,11 +44,11 @@ await check('Perfil Chromium .yt-profile', async () => {
 });
 
 await check('Puerto local', async () => {
-  const available = await portAvailable(port);
+  const available = await portAvailable(port, host);
   if (!available) {
-    throw new Error(`ocupado (${port}); correcto si la app ya esta levantada`);
+    throw new Error(`ocupado (${host}:${port}); correcto si la app ya esta levantada`);
   }
-  return `libre (${port})`;
+  return `libre (${host}:${port})`;
 }, { warnOnly: true });
 
 for (const item of checks) {
@@ -76,13 +77,13 @@ async function check(name, action, options = {}) {
   }
 }
 
-function portAvailable(targetPort) {
+function portAvailable(targetPort, targetHost) {
   return new Promise((resolveAvailable) => {
     const server = createServer();
     server.once('error', () => resolveAvailable(false));
     server.once('listening', () => {
       server.close(() => resolveAvailable(true));
     });
-    server.listen(targetPort);
+    server.listen({ port: targetPort, host: targetHost, exclusive: true });
   });
 }

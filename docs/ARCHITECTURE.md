@@ -11,7 +11,7 @@ flowchart TB
 
   subgraph local["Máquina local"]
     server --> static["public/index.html<br/>public/app.js<br/>public/styles.css"]
-    server --> data[".data/*.json<br/>config, posts, eventos,<br/>paper, backups"]
+    server --> data[".data/*.json<br/>config, posts, eventos,<br/>paper, PnL, backups"]
     server --> profile[".yt-profile/<br/>sesiones Chromium"]
   end
 
@@ -100,6 +100,7 @@ flowchart LR
   events[".data/trade-events.json<br/>eventos compactados"] --> server
   journal[".data/trade-events.json.journal<br/>diario incremental"] --> server
   retries[".data/execution-retries.json<br/>cola persistente"] --> server
+  pnlSnapshot[".data/pnl-snapshots.json<br/>última lectura PnL válida"] --> server
   paper[".data/paper-trades.json<br/>paper/test"] --> server
   study[".data/strategy-study/*.json/md<br/>informe runtime"] --> server
   backups[".data/backups/<br/>redactado y cifrado"] --> server
@@ -304,6 +305,7 @@ Detecta posts de portfolio con enlaces nuevos y actualiza la fuente activa.
 .data/trade-events.json  Eventos compactados
 .data/trade-events.json.journal Eventos nuevos pendientes de compactación
 .data/execution-retries.json Cola de reintentos recuperable
+.data/pnl-snapshots.json Última lectura válida de PnL y fuentes BingX
 .yt-profile/             Sesiones Chromium/YouTube/Telegram Web
 ```
 
