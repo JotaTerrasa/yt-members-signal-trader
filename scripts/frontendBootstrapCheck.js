@@ -304,6 +304,23 @@ try {
     throw new Error(`Errores JavaScript en la hoja nativa: ${nativeSheetErrors.join(' | ')}`);
   }
 
+  await nativeSheetPage.click('[data-performance-source="sheet"]');
+  await nativeSheetPage.waitForFunction(() => {
+    const curveStatus = document.querySelector('#pnl-curve-status')?.textContent || '';
+    const openSignal = [...document.querySelectorAll('#historical-signal-list .historical-signal-item')]
+      .find((item) => item.textContent.includes('ETH-USDT'));
+    const openPnl = openSignal?.querySelector('.trade-history-main > span')?.textContent.trim();
+    const simulationRows = [...document.querySelectorAll('#pnl-sim-list .simulation-row')];
+    return curveStatus.includes('1 operaciones simuladas')
+      && curveStatus.includes('1 pendientes sin PnL')
+      && openPnl === '-'
+      && simulationRows.length === 1
+      && !simulationRows.some((row) => row.textContent.includes('ETH-USDT'));
+  }, null, { timeout: 20_000 });
+  if (nativeSheetErrors.length) {
+    throw new Error(`Errores JavaScript al excluir PnL pendiente: ${nativeSheetErrors.join(' | ')}`);
+  }
+
   const manualRefreshPage = await browser.newPage();
   const manualRefreshErrors = [];
   const manualRefreshRequests = {
@@ -405,6 +422,7 @@ try {
     pnlIsolationPassed: true,
     externalSheetNativePassed: true,
     externalSheetOpenRowsPassed: true,
+    externalSheetPendingPnlPassed: true,
     manualPnlRefreshPassed: true
   }));
 } finally {

@@ -3409,15 +3409,17 @@ function renderPnlCurve() {
   const actualSource = source.key === 'live' || source.key === 'vst';
   const positions = actualSource ? source.positions : simulatedPositions(targetNotional, source.positions);
   const items = equityCurveItems(positions);
+  const pendingCount = source.positions.filter((position) => positionPnlValue(position) === null).length;
   const values = [0, ...items.map((item) => item.equity)];
   const finalValue = values.at(-1) || 0;
   const maxValue = Math.max(...values);
   const minValue = Math.min(...values);
   const drawdown = calculateMaxDrawdown(values);
   const chartId = 'pnl-plotly-curve';
+  const pendingSuffix = pendingCount ? ` - ${pendingCount} pendientes sin PnL` : '';
   const curveStatusText = actualSource
-    ? `${items.length} puntos reales/detectados - ${source.label}`
-    : `${items.length} operaciones simuladas - ${source.label}`;
+    ? `${items.length} puntos reales/detectados - ${source.label}${pendingSuffix}`
+    : `${items.length} operaciones simuladas - ${source.label}${pendingSuffix}`;
   const curvePanelStatus = actualSource ? `${items.length} puntos detectados` : curveStatusText;
   elements.pnlCurveStatus.textContent = curveStatusText;
 
@@ -6899,6 +6901,7 @@ function renderHistoricalSignalItem(position, asset = 'USDT') {
   const status = position.status === 'closed'
     ? `cerrada por ${closeReasonLabel(position.closeReason)}`
     : 'abierta';
+  const pnl = positionPnlValue(position);
 
   return `
     <article class="trade-history-item historical-signal-item">
@@ -6907,7 +6910,7 @@ function renderHistoricalSignalItem(position, asset = 'USDT') {
           <strong>${escapeHtml(position.symbol || '-')}</strong>
           <span>${escapeHtml(`${position.direction || '-'} · ${status} · ${formatLeverage(position.leverage)}`)}</span>
         </div>
-        <span class="${amountClass(position.paperPnl)}">${escapeHtml(formatMoney(position.paperPnl, asset))}</span>
+        <span class="${optionalAmountClass(pnl)}">${escapeHtml(formatOptionalMoney(pnl, asset))}</span>
       </div>
       <div class="trade-history-meta">
         <span>${escapeHtml(formatDateTime(position.closedAt || position.openedAt))}</span>
@@ -7301,11 +7304,11 @@ function closedPaperPositions() {
 
 function equityCurveItems(positions = appState.paperTrades || []) {
   const ordered = positions
-    .filter((position) => Number.isFinite(Number(position.paperPnl)))
-    .sort((a, b) => Date.parse(curvePositionTime(a) || 0) - Date.parse(curvePositionTime(b) || 0));
+    .map((position) => ({ position, pnl: positionPnlValue(position) }))
+    .filter((item) => item.pnl !== null)
+    .sort((a, b) => Date.parse(curvePositionTime(a.position) || 0) - Date.parse(curvePositionTime(b.position) || 0));
   let equity = 0;
-  return ordered.map((position) => {
-    const pnl = Number(position.paperPnl || 0);
+  return ordered.map(({ position, pnl }) => {
     equity = roundPnl(equity + pnl);
     return {
       id: position.id,
@@ -7371,7 +7374,10 @@ function renderSimulation() {
   elements.pnlSimMetrics.innerHTML = renderSimulationMetrics(metrics, asset);
 
   if (!positions.length) {
-    elements.pnlSimList.innerHTML = '<div class="simulation-empty">Sin operaciones para simular.</div>';
+    const pendingCount = source.positions.filter((position) => positionPnlValue(position) === null).length;
+    elements.pnlSimList.innerHTML = `<div class="simulation-empty">${escapeHtml(pendingCount
+      ? `${pendingCount} operaciones siguen pendientes de PnL y todavia no se pueden simular.`
+      : 'Sin operaciones para simular.')}</div>`;
     return;
   }
 
@@ -7454,7 +7460,11 @@ function simulatedPositions(targetNotional, sourcePositions = filteredSimulation
   if (!Number.isFinite(targetNotional) || targetNotional <= 0) {
     return [];
   }
-  return sourcePositions.map((position) => {
+  return sourcePositions.flatMap((position) => {
+    const sourcePnl = positionPnlValue(position);
+    if (sourcePnl === null) {
+      return [];
+    }
     const originalNotional = Number(position.notional || 0);
     const scale = originalNotional > 0 ? targetNotional / originalNotional : 0;
     const originalLeverage = Number(position.leverage || 1);
@@ -7464,12 +7474,12 @@ function simulatedPositions(targetNotional, sourcePositions = filteredSimulation
     const feeRate = Math.max(0, Number(elements.pnlSimFee.value || 0)) / 100;
     const exposure = roundPnl(targetNotional * leverage);
     const fee = roundPnl(exposure * feeRate);
-    const grossPaperPnl = roundPnl(Number(position.paperPnl || 0) * scale * leverageScale);
+    const grossPaperPnl = roundPnl(sourcePnl * scale * leverageScale);
     const grossRealizedPnl = roundPnl(Number(position.realizedPnl || 0) * scale * leverageScale);
     const grossUnrealizedPnl = roundPnl(Number(position.unrealizedPnl || 0) * scale * leverageScale);
     const isOpen = position.status === 'open';
     const netPaperPnl = roundPnl(grossPaperPnl - fee);
-    return {
+    return [{
       ...position,
       notional: targetNotional,
       leverage,
@@ -7479,7 +7489,7 @@ function simulatedPositions(targetNotional, sourcePositions = filteredSimulation
       paperPnl: netPaperPnl,
       realizedPnl: isOpen ? 0 : roundPnl(grossRealizedPnl - fee),
       unrealizedPnl: isOpen ? roundPnl(grossUnrealizedPnl - fee) : 0
-    };
+    }];
   });
 }
 
@@ -9486,12 +9496,30 @@ function amountTone(value) {
 }
 
 function calculateWinRate(positions) {
-  const closed = positions.filter((position) => Number.isFinite(Number(position.paperPnl)));
+  const closed = positions.filter((position) => (
+    position.status !== 'open' && positionPnlValue(position) !== null
+  ));
   if (!closed.length) {
     return null;
   }
-  const winners = closed.filter((position) => Number(position.paperPnl || 0) > 0).length;
+  const winners = closed.filter((position) => positionPnlValue(position) > 0).length;
   return (winners / closed.length) * 100;
+}
+
+function positionPnlValue(position = {}) {
+  const candidates = position.status === 'open'
+    ? [position.unrealizedPnl, position.paperPnl]
+    : [position.paperPnl, position.realizedPnl, position.unrealizedPnl];
+  for (const value of candidates) {
+    if (value === null || value === undefined || value === '') {
+      continue;
+    }
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      return number;
+    }
+  }
+  return null;
 }
 
 function roundPnl(value) {
