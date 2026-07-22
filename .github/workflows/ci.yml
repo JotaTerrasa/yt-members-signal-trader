@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 20
+          - 24
+    steps:
+      - name: Obtener el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Comprobar sintaxis
+        run: npm run lint
+
+      - name: Ejecutar pruebas
+        run: npm test
+
+  docker:
+    name: Imagen y arranque Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construir imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: futures-magician:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Comprobar arranque y healthcheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --rm \
+            --name futures-magician-ci \
+            --publish 127.0.0.1:15178:5178 \
+            --env NODE_ENV=production \
+            --env HOST=0.0.0.0 \
+            --env PORT=5178 \
+            --env PLAYWRIGHT_HEADLESS=true \
+            futures-magician:ci
+          trap 'docker rm --force futures-magician-ci >/dev/null 2>&1 || true' EXIT
+
+          for _ in {1..45}; do
+            if curl --fail --silent --show-error http://127.0.0.1:15178/api/health > /tmp/health.json; then
+              if node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8')); process.exit(h.ok === true ? 0 : 1)"; then
+                exit 0
+              fi
+            fi
+            sleep 1
+          done
+
+          echo "La aplicación no alcanzó un estado saludable." >&2
+          docker logs futures-magician-ci || true
+          exit 1

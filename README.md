@@ -174,6 +174,13 @@ Comprobación portable:
 npm run package:check
 ```
 
+Cada push a `main` y cada pull request ejecutan además la validación automática de GitHub Actions:
+
+- instalación reproducible con `npm ci`;
+- comprobación de sintaxis y suite completa en Node.js 20 y 24;
+- construcción de la imagen Docker;
+- arranque aislado y comprobación real de `/api/health`.
+
 Docker:
 
 ```bash

@@ -163,6 +163,17 @@ Valida:
 
 Si el puerto aparece ocupado pero la app ya está levantada, es normal.
 
+## Validación continua
+
+El workflow `.github/workflows/ci.yml` protege la portabilidad del paquete en cada push a `main` y en cada pull request. La validación no usa credenciales ni datos locales y cubre:
+
+1. `npm ci`, sintaxis y pruebas en Node.js 20 y 24.
+2. Construcción completa de la imagen Docker.
+3. Arranque efímero en `127.0.0.1:15178`.
+4. Respuesta satisfactoria de `/api/health` con `ok: true`.
+
+El contenedor de CI no monta `.data` ni `.yt-profile`, por lo que no puede leer ni modificar la operativa de ninguna instalación real.
+
 ## Construcción manual Docker
 
 ```bash
