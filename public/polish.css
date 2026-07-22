@@ -589,6 +589,19 @@ h1 {
   background: #fff7f6;
 }
 
+.log-row.grouped {
+  border-left-color: var(--accent);
+  background: #f7fbfa;
+}
+
+.log-group-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 .list-pagination {
   margin-top: 12px;
   padding: 11px 12px;

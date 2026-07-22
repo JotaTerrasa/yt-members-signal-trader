@@ -57,6 +57,35 @@ try {
     throw new Error(`Errores JavaScript en el arranque: ${pageErrors.join(' | ')}`);
   }
 
+  const logGrouping = await page.evaluate(() => {
+    const refreshMessage = 'Telegram Web refrescado automaticamente cada 30 segundos.';
+    const groups = groupLogsForDisplay([
+      { level: 'info', message: refreshMessage, at: '2026-07-23T10:02:00.000Z' },
+      { level: 'info', message: refreshMessage, at: '2026-07-23T10:01:30.000Z' },
+      { level: 'info', message: refreshMessage, at: '2026-07-23T10:01:00.000Z' },
+      { level: 'error', message: 'Orden rechazada', at: '2026-07-23T10:00:30.000Z' },
+      { level: 'error', message: 'Orden rechazada', at: '2026-07-23T10:00:20.000Z' },
+      { level: 'info', message: refreshMessage, at: '2026-07-23T10:00:00.000Z' },
+      { level: 'info', message: refreshMessage, at: '2026-07-23T09:59:30.000Z' }
+    ]);
+    return groups.map((group) => ({
+      level: group.level,
+      message: group.message,
+      count: group.groupCount,
+      earliestAt: group.groupEarliestAt,
+      latestAt: group.groupLatestAt
+    }));
+  });
+  if (logGrouping.length !== 4
+    || logGrouping[0]?.count !== 3
+    || logGrouping[0]?.earliestAt !== '2026-07-23T10:01:00.000Z'
+    || logGrouping[0]?.latestAt !== '2026-07-23T10:02:00.000Z'
+    || logGrouping[1]?.count !== 1
+    || logGrouping[2]?.count !== 1
+    || logGrouping[3]?.count !== 2) {
+    throw new Error(`La agrupación visual de eventos ocultó o mezcló incidencias: ${JSON.stringify(logGrouping)}.`);
+  }
+
   const realtimePage = await browser.newPage();
   const realtimePageErrors = [];
   let realtimeInjectedFailures = 0;
@@ -752,6 +781,7 @@ try {
     realtimeRecovered: true,
     timeoutInjectedFailures,
     timeoutRecovered: true,
+    logGroupingPassed: true,
     historicalFailures,
     pnlIsolationPassed: true,
     externalSheetNativePassed: true,

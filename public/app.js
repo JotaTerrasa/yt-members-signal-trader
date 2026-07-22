@@ -1656,22 +1656,82 @@ function renderPost(post) {
 
 function renderLogs() {
   const logs = appState.logs || [];
-  const visibleLogs = logs.slice(0, appState.logsVisibleLimit);
-  elements.logsList.innerHTML = visibleLogs.map((log) => `
-    <div class="log-row ${escapeAttribute(log.level || 'info')}">
-      <span class="log-level">${escapeHtml(log.level || 'info')}</span>
-      <span class="log-message">${escapeHtml(log.message || '')}</span>
-      <span class="log-time">${escapeHtml(formatDateTime(log.at))}</span>
-    </div>
-  `).join('') || '<div class="empty-state">Sin eventos todavia.</div>';
+  const displayLogs = groupLogsForDisplay(logs);
+  const visibleLogs = displayLogs.slice(0, appState.logsVisibleLimit);
+  const visibleEvents = visibleLogs.reduce((total, log) => total + Number(log.groupCount || 1), 0);
+  elements.logsList.innerHTML = visibleLogs.map(renderLogRow).join('')
+    || '<div class="empty-state">Sin eventos todavia.</div>';
   renderListPagination({
     container: elements.logsPagination,
     status: elements.logsPaginationStatus,
     button: elements.logsLoadMore,
     visible: visibleLogs.length,
-    total: logs.length,
-    noun: 'eventos'
+    total: displayLogs.length,
+    noun: 'entradas'
   });
+  if (logs.length !== displayLogs.length && visibleLogs.length) {
+    elements.logsPaginationStatus.textContent = `Mostrando ${visibleEvents} de ${logs.length} eventos en ${visibleLogs.length} entradas`;
+  }
+}
+
+function renderLogRow(log = {}) {
+  const groupCount = Number(log.groupCount || 1);
+  const grouped = groupCount > 1;
+  const groupDetail = grouped
+    ? `<small class="log-group-detail">${escapeHtml(`${groupCount} eventos consecutivos agrupados · ${formatDateTime(log.groupEarliestAt)} a ${formatDateTime(log.groupLatestAt)}`)}</small>`
+    : '';
+  return `
+    <div class="log-row ${escapeAttribute(log.level || 'info')}${grouped ? ' grouped' : ''}">
+      <span class="log-level">${escapeHtml(log.level || 'info')}${grouped ? ` · ${groupCount}` : ''}</span>
+      <span class="log-message">${escapeHtml(log.message || '')}${groupDetail}</span>
+      <span class="log-time">${escapeHtml(formatDateTime(log.groupLatestAt || log.at))}</span>
+    </div>
+  `;
+}
+
+function groupLogsForDisplay(logs = []) {
+  const groups = [];
+  for (const log of logs) {
+    const collapsible = isCollapsibleMaintenanceLog(log);
+    const previous = groups.at(-1);
+    const key = `${String(log?.level || 'info').toLowerCase()}\u0000${String(log?.message || '').trim()}`;
+    if (collapsible && previous?.groupKey === key) {
+      previous.groupCount += 1;
+      previous.groupEarliestAt = earlierLogTimestamp(previous.groupEarliestAt, log.at);
+      previous.groupLatestAt = laterLogTimestamp(previous.groupLatestAt, log.at);
+      continue;
+    }
+    groups.push({
+      ...log,
+      groupKey: collapsible ? key : '',
+      groupCount: 1,
+      groupEarliestAt: log?.at || null,
+      groupLatestAt: log?.at || null
+    });
+  }
+  return groups;
+}
+
+function isCollapsibleMaintenanceLog(log = {}) {
+  return String(log.level || 'info').toLowerCase() === 'info'
+    && /^Telegram Web refrescado autom[aá]ticamente cada \d+ segundos\.$/i.test(String(log.message || '').trim());
+}
+
+function earlierLogTimestamp(current, candidate) {
+  return compareLogTimestamps(current, candidate) <= 0 ? current : candidate;
+}
+
+function laterLogTimestamp(current, candidate) {
+  return compareLogTimestamps(current, candidate) >= 0 ? current : candidate;
+}
+
+function compareLogTimestamps(left, right) {
+  const leftTime = Date.parse(left || '');
+  const rightTime = Date.parse(right || '');
+  if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) {
+    return 0;
+  }
+  return leftTime - rightTime;
 }
 
 function renderListPagination({ container, status, button, visible, total, noun }) {

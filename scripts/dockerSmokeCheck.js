@@ -54,6 +54,7 @@ async function main() {
       frontendRecovery: true,
       realtimePayloadRecovery: frontendCheck.realtimeRecovered,
       bootstrapTimeoutRecovery: frontendCheck.timeoutRecovered,
+      logGrouping: frontendCheck.logGroupingPassed,
       pnlSourceIsolation: frontendCheck.pnlIsolationPassed,
       externalSheetNative: frontendCheck.externalSheetNativePassed,
       externalSheetAnchor: frontendCheck.externalSheetAnchorPassed,
@@ -122,6 +123,7 @@ function verifyFrontendBootstrap(container) {
     || !result.realtimeRecovered
     || result.timeoutInjectedFailures !== 1
     || !result.timeoutRecovered
+    || !result.logGroupingPassed
     || result.historicalFailures < 1
     || !result.pnlIsolationPassed
     || !result.externalSheetNativePassed
