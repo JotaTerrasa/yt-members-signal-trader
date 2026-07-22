@@ -32,6 +32,7 @@ La app es un servidor Node.js local con frontend estático:
 - `scripts/systemAudit.js`: auditoría integral reproducible y segura para Git; actualiza `latest.md` y un único snapshot por día.
 - `scripts/secureBackup.js`: backup cifrado verificable y restauración aislada.
 - `scripts/registerWindowsTasks.ps1`: registro reproducible de PM2 y backups en el Programador de tareas.
+- `docs/AUTOMATIONS.md`: contrato de las automatizaciones locales de informes, documentación y Docker.
 - `docs/`: documentación operativa.
 
 ## Archivos que no se suben
@@ -211,3 +212,4 @@ Si el monitor se para:
 - [Formato de señales](docs/SIGNALS.md)
 - [Seguridad](docs/SECURITY.md)
 - [Estudio estratégico](docs/STRATEGY_STUDY.md)
+- [Automatizaciones](docs/AUTOMATIONS.md)

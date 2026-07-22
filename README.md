@@ -739,6 +739,7 @@ curl http://localhost:5178/api/health
 - [Seguridad](docs/SECURITY.md)
 - [Estudio estratégico](docs/STRATEGY_STUDY.md)
 - [Auditoría y mejora](docs/AUDIT_AND_IMPROVEMENT.md)
+- [Automatizaciones de mantenimiento](docs/AUTOMATIONS.md)
 - [Última auditoría integral](docs/audits/latest.md)
 - [Guía para agentes Codex](AGENTS.md)
 

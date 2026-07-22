@@ -405,7 +405,11 @@ npm run windows:tasks
 
 Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y PM2 al iniciar sesión.
 
-## 15. Cohorte y siguiente paquete
+## 15. Automatizaciones de Codex
+
+El informe estratégico se genera a las 09:00 y el mantenimiento de auditoría, documentación y Docker a las 09:30. Ambas tareas exigen `main` limpio, aplican una lista blanca de archivos, validan antes del push y nunca actúan sobre BingX. El contrato completo y los comandos manuales están en [Automatizaciones de mantenimiento](AUTOMATIONS.md).
+
+## 16. Cohorte y siguiente paquete
 
 - `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
