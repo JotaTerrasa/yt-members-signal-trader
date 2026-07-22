@@ -112,6 +112,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - La cola de aperturas y cierres pendientes se guarda en `.data/execution-retries.json` y se recupera después de reiniciar.
 - Antes de reintentar una apertura, la app reconcilia posiciones para resolver respuestas ambiguas sin duplicar exposición.
 - Si la cobertura detecta en Demo una apertura reciente sin evento de ejecución, vuelve a validarla por la misma ruta idempotente. Las ejecuciones procedentes de otra fuente se enlazan y no se cuentan como huecos.
+- Si el contenido actual de una señal difiere del valor conservado en su evento, la auditoría identifica la corrección posterior campo por campo. El fallo histórico permanece en la muestra, pero deja de aparecer como una apertura ausente sin explicación.
 - La puerta de promoción exige muestra, cobertura, seguridad y PnL neto positivo; nunca arma live automáticamente.
 
 ## Cómo ejecutar la auditoría

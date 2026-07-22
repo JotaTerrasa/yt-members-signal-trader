@@ -58,6 +58,8 @@ export function buildSignalCoverage({
     executedOpenings: totals.executedOpenings + item.executedCount,
     pendingOpenings: totals.pendingOpenings + item.pendingCount,
     missingOpenings: totals.missingOpenings + item.missingCount,
+    correctedAfterEventOpenings: totals.correctedAfterEventOpenings + item.correctedAfterEventCount,
+    correctedAfterEventMissingOpenings: totals.correctedAfterEventMissingOpenings + item.correctedAfterEventMissingCount,
     parseFailures: totals.parseFailures + (item.parseFailure ? 1 : 0)
   }), {
     packages: 0,
@@ -68,6 +70,8 @@ export function buildSignalCoverage({
     executedOpenings: 0,
     pendingOpenings: 0,
     missingOpenings: 0,
+    correctedAfterEventOpenings: 0,
+    correctedAfterEventMissingOpenings: 0,
     parseFailures: 0
   });
 
@@ -99,6 +103,7 @@ function buildPackage({ post, detectedAt, expected, parseFailure, events, execut
       .find(Boolean) || null;
     const execution = sent || linked?.target || null;
     const latest = matching.at(-1) || null;
+    const correctionAfterEvent = describeSignalCorrection(signal, latest);
     const retryExpired = matching.some((event) => String(event.status || '').includes('order_retry_expired'));
     const pending = !execution && !retryExpired && ageMs < retryWindowMs;
     return {
@@ -107,6 +112,7 @@ function buildPackage({ post, detectedAt, expected, parseFailure, events, execut
       executionAt: execution?.at || null,
       finalStatus: sent?.status || (linked ? `${executionMode}_order_linked` : latest?.status || ''),
       reason: execution ? '' : latest?.reason || (parseFailure ? 'parser_no_structured_signal' : 'no_execution_event'),
+      correctionAfterEvent,
       linkedExecution: Boolean(linked),
       linkedEventId: linked?.target?.eventId || null
     };
@@ -114,6 +120,8 @@ function buildPackage({ post, detectedAt, expected, parseFailure, events, execut
   const executedCount = signals.filter((signal) => signal.status === 'executed').length;
   const pendingCount = signals.filter((signal) => signal.status === 'pending').length;
   const missingCount = signals.filter((signal) => signal.status === 'missing').length;
+  const correctedAfterEventCount = signals.filter((signal) => signal.correctionAfterEvent).length;
+  const correctedAfterEventMissingCount = signals.filter((signal) => signal.status === 'missing' && signal.correctionAfterEvent).length;
   const status = executedCount === signals.length
     ? 'complete'
     : pendingCount > 0
@@ -133,6 +141,8 @@ function buildPackage({ post, detectedAt, expected, parseFailure, events, execut
     executedCount,
     pendingCount,
     missingCount,
+    correctedAfterEventCount,
+    correctedAfterEventMissingCount,
     signals
   };
 }
@@ -163,6 +173,7 @@ function normalizeExpectedSignal(signal = {}) {
     direction: String(signal.direction || '').toUpperCase(),
     entryPrice: finiteNumber(signal.entry?.price),
     stopLoss: finiteNumber(signal.stopLoss),
+    leverage: finiteNumber(signal.leverage),
     takeProfits: Array.isArray(signal.takeProfits) ? signal.takeProfits.map(finiteNumber).filter(Boolean) : []
   };
 }
@@ -212,6 +223,41 @@ function eventMode(event = {}) {
   }
   const status = String(event.status || '').toLowerCase();
   return status.startsWith('demo_') ? 'demo' : status.startsWith('live_') ? 'live' : '';
+}
+
+function describeSignalCorrection(expected = {}, event = null) {
+  if (!event?.signal) {
+    return null;
+  }
+  const observed = {
+    entryPrice: finiteNumber(event.signal?.entry?.price),
+    stopLoss: finiteNumber(event.signal?.stopLoss),
+    leverage: finiteNumber(event.signal?.leverage)
+  };
+  const changes = {};
+  for (const field of ['entryPrice', 'stopLoss', 'leverage']) {
+    if (numbersDiffer(observed[field], expected[field])) {
+      changes[field] = {
+        processed: observed[field],
+        current: expected[field]
+      };
+    }
+  }
+  if (!Object.keys(changes).length) {
+    return null;
+  }
+  return {
+    eventAt: event.at || null,
+    eventStatus: event.status || null,
+    changes
+  };
+}
+
+function numbersDiffer(left, right) {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return false;
+  }
+  return Math.abs(left - right) > Math.max(1e-8, Math.abs(right) * 1e-8);
 }
 
 function linkedExecution(event = {}, eventsById = new Map(), executionMode = '') {

@@ -4487,6 +4487,7 @@ function renderImprovementCohort(cohort, cohortHistory = []) {
         ${renderReplicaMetric('Neto', formatMoney(summary.bingxNet, 'VST'), 'Resultado observado', amountClass(summary.bingxNet))}
         ${renderReplicaMetric('Cobertura hoja', `${referenceCoverage.comparableRows || 0} comparables`, `${referenceCoverage.outsideCoverageRows || 0} VST posteriores sin referencia`, referenceCoverage.stale ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Paquetes completos', String(coverageSummary.completePackages || 0), `${coverageSummary.incompletePackages || 0} incompletos`, coverageSummary.incompletePackages ? 'amount negative' : 'amount positive')}
+        ${renderReplicaMetric('Correcciones tardías', String(coverageSummary.correctedAfterEventMissingOpenings || 0), coverageSummary.correctedAfterEventMissingOpenings ? 'Fallo histórico explicado; la recuperación actual ya está activa' : 'Ningún faltante causado por una edición posterior', coverageSummary.correctedAfterEventMissingOpenings ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : 'Esperando', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin señales nuevas', latestPackage?.status === 'complete' ? 'amount positive' : latestPackage?.status === 'incomplete' ? 'amount negative' : 'warn')}
       </div>
     </section>

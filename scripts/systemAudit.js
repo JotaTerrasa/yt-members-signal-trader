@@ -286,13 +286,24 @@ function buildFindings(report) {
   }
   if (report.runtime.signalCoverage?.summary?.missingOpenings) {
     const missingOpenings = report.runtime.signalCoverage.summary.missingOpenings;
-    findings.push({
-      severity: 'critical',
-      code: 'incomplete_signal_packages',
-      detail: missingOpenings === 1
-        ? '1 apertura falta en paquetes posteriores a las mejoras.'
-        : `${missingOpenings} aperturas faltan en paquetes posteriores a las mejoras.`
-    });
+    const correctedAfterEvent = Number(report.runtime.signalCoverage.summary.correctedAfterEventMissingOpenings || 0);
+    const unexplainedOpenings = Math.max(0, missingOpenings - correctedAfterEvent);
+    if (correctedAfterEvent) {
+      findings.push({
+        severity: unexplainedOpenings ? 'critical' : 'high',
+        code: 'post_correction_miss',
+        detail: `${correctedAfterEvent} apertura${correctedAfterEvent === 1 ? '' : 's'} faltó tras procesar una versión anterior del post. La cohorte conserva el fallo histórico; las correcciones recientes ya se recuperan por la ruta idempotente.`
+      });
+    }
+    if (unexplainedOpenings) {
+      findings.push({
+        severity: 'critical',
+        code: 'incomplete_signal_packages',
+        detail: unexplainedOpenings === 1
+          ? '1 apertura falta en paquetes posteriores a las mejoras sin una corrección posterior que la explique.'
+          : `${unexplainedOpenings} aperturas faltan en paquetes posteriores a las mejoras sin una corrección posterior que las explique.`
+      });
+    }
   }
   if (report.replica && Math.abs(report.replica.fees) > 0 && !report.replica.commissionRebateDetected) {
     findings.push({ severity: 'info', code: 'rebate_not_detected', detail: 'BingX no acredita ninguna devolución de comisiones en el histórico consultado.' });
@@ -422,6 +433,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Comisiones: ${money(summary.fees)} VST`,
     `- Paquetes completos: ${packages.completePackages || 0} de ${packages.packages || 0}`,
     `- Aperturas esperadas / ejecutadas / faltantes: ${packages.expectedOpenings || 0} / ${packages.executedOpenings || 0} / ${packages.missingOpenings || 0}`,
+    `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,
     `- Clasificación: ${JSON.stringify(summary.issueCounts || {})}`
   ];
