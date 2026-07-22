@@ -343,9 +343,7 @@ function extractQuotes(message) {
         midPrice,
         spreadAbsolute: askPrice - bidPrice,
         spreadPercent: midPrice > 0 ? ((askPrice - bidPrice) / midPrice) * 100 : null,
-        exchangeAt: Number.isFinite(exchangeTimestamp) && exchangeTimestamp > 0
-          ? new Date(exchangeTimestamp).toISOString()
-          : null
+        exchangeAt: normalizeExchangeTimestamp(exchangeTimestamp)
       };
     })
     .filter(Boolean);
@@ -387,6 +385,19 @@ function firstFiniteNumber(...values) {
     }
   }
   return NaN;
+}
+
+function normalizeExchangeTimestamp(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+  const milliseconds = numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+  const date = new Date(milliseconds);
+  const year = date.getUTCFullYear();
+  return Number.isFinite(date.getTime()) && year >= 2000 && year <= 2100
+    ? date.toISOString()
+    : null;
 }
 
 function messageChannel(message) {

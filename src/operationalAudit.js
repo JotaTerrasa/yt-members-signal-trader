@@ -929,6 +929,7 @@ function closeExecutionPoint(row, eventId) {
   const closeSignalAt = validTimestamp(row?.vst?.closeSignalAt);
   const orderRequestStartedAt = validTimestamp(telemetry?.orderRequest?.startedAt);
   const fillAt = validTimestamp(row?.vst?.closingAt);
+  const quoteTiming = executionQuoteTiming(topOfBook, orderRequestStartedAt, quoteAvailable);
   return {
     eventId,
     symbol: row?.symbol || 'UNKNOWN',
@@ -942,6 +943,7 @@ function closeExecutionPoint(row, eventId) {
     executableQuote: quoteAvailable ? executableQuote : null,
     spreadPercent: quoteAvailable ? nullableNumber(topOfBook?.spreadPercent) : null,
     quoteAgeMs: quoteAvailable ? nullableNumber(topOfBook?.ageMs) : null,
+    ...quoteTiming,
     lastToExecutableAdversePercent: quoteAvailable
       ? closeAdverseDeviationPercent({ actual: executableQuote, reference: lastPrice, direction })
       : null,
@@ -1064,6 +1066,7 @@ function entryExecutionPoint(row, eventId) {
   const totalLatencySeconds = detectedToFillSeconds
     ?? (validQueueTiming ? (successfulAttemptAt - detectedAt) / 1000 : null);
   const attribution = executionPriceChainRowAttribution(row);
+  const quoteTiming = executionQuoteTiming(topOfBook, orderRequestStartedAt, quoteAvailable);
   const entryImpact = attribution
     ? sumFinite([
         attribution.values.entry_reference,
@@ -1096,6 +1099,7 @@ function entryExecutionPoint(row, eventId) {
     executableQuote: quoteAvailable ? executableQuote : null,
     spreadPercent: quoteAvailable ? nullableNumber(topOfBook?.spreadPercent) : null,
     quoteAgeMs: quoteAvailable ? nullableNumber(topOfBook?.ageMs) : null,
+    ...quoteTiming,
     lastToExecutableAdversePercent: quoteAvailable
       ? entryAdverseDeviationPercent({ actual: executableQuote, reference: quote, direction })
       : null,
@@ -1253,6 +1257,9 @@ function summarizeEntryMicrostructure(points = []) {
   const tickerRoundTrip = entryValueStats(points.map((point) => point.tickerRoundTripMs), { allowNegative: false });
   const orderRequestRoundTrip = entryValueStats(points.map((point) => point.orderRequestRoundTripMs), { allowNegative: false });
   const packageQueueWait = entryValueStats(points.map((point) => point.packageQueueWaitMs), { allowNegative: false });
+  const exchangeToReceipt = entryValueStats(points.map((point) => point.exchangeToLocalReceiptMs));
+  const receiptToRequest = entryValueStats(points.map((point) => point.localReceiptToRequestMs), { allowNegative: false });
+  const exchangeToRequest = entryValueStats(points.map((point) => point.exchangeToRequestMs));
   return {
     instrumented,
     topOfBookMeasured,
@@ -1269,12 +1276,44 @@ function summarizeEntryMicrostructure(points = []) {
     quoteAgeMs: quoteAge,
     tickerRoundTripMs: tickerRoundTrip,
     orderRequestRoundTripMs: orderRequestRoundTrip,
+    exchangeClock: {
+      measured: points.filter((point) => point.exchangeTimestampCaptured).length,
+      possibleClockSkew: points.filter((point) => (
+        point.exchangeTimestampCaptured && Number(point.exchangeToLocalReceiptMs) < 0
+      )).length,
+      exchangeToLocalReceiptMs: exchangeToReceipt,
+      localReceiptToRequestMs: receiptToRequest,
+      exchangeToRequestMs: exchangeToRequest
+    },
     packageQueue: {
       startQuoteMeasured: packageStartQuoteMeasured,
       staleStartQuotes: points.filter((point) => point.packageStartQuoteStale).length,
       waitMs: packageQueueWait,
       executableMove: entryTelemetryStageStats(points, 'packageStartToPreOrder')
     }
+  };
+}
+
+function executionQuoteTiming(quote, requestStartedAt, quoteAvailable) {
+  const exchangeAt = validTimestamp(quote?.exchangeAt);
+  const receivedAt = validTimestamp(quote?.receivedAt);
+  const captured = Boolean(quoteAvailable) && [exchangeAt, receivedAt].every(Number.isFinite);
+  if (!captured) {
+    return {
+      exchangeTimestampCaptured: false,
+      exchangeToLocalReceiptMs: null,
+      localReceiptToRequestMs: null,
+      exchangeToRequestMs: null
+    };
+  }
+  const receiptToRequest = Number.isFinite(requestStartedAt) && requestStartedAt >= receivedAt
+    ? requestStartedAt - receivedAt
+    : null;
+  return {
+    exchangeTimestampCaptured: true,
+    exchangeToLocalReceiptMs: receivedAt - exchangeAt,
+    localReceiptToRequestMs: receiptToRequest,
+    exchangeToRequestMs: Number.isFinite(requestStartedAt) ? requestStartedAt - exchangeAt : null
   };
 }
 

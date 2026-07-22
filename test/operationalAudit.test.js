@@ -536,7 +536,15 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
     fillAt: '2026-07-20T08:00:02.000Z',
     telemetry: {
       preOrderMarketRead: { price: 100.1, roundTripMs: 40 },
-      topOfBook: { available: true, bidPrice: 100.09, askPrice: 100.11, spreadPercent: 0.01998, ageMs: 75 },
+      topOfBook: {
+        available: true,
+        bidPrice: 100.09,
+        askPrice: 100.11,
+        spreadPercent: 0.01998,
+        receivedAt: '2026-07-20T08:00:01.425Z',
+        exchangeAt: '2026-07-20T08:00:01.450Z',
+        ageMs: 75
+      },
       packageObservation: {
         startedAt: '2026-07-20T08:00:00.000Z',
         size: 2,
@@ -560,7 +568,15 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
     fillAt: '2026-07-20T12:00:02.000Z',
     telemetry: {
       preOrderMarketRead: { price: 99.95, roundTripMs: 50 },
-      topOfBook: { available: true, bidPrice: 99.94, askPrice: 99.96, spreadPercent: 0.02001, ageMs: 125 },
+      topOfBook: {
+        available: true,
+        bidPrice: 99.94,
+        askPrice: 99.96,
+        spreadPercent: 0.02001,
+        receivedAt: '2026-07-20T12:00:01.375Z',
+        exchangeAt: '2026-07-20T12:00:01.300Z',
+        ageMs: 125
+      },
       packageObservation: {
         startedAt: '2026-07-20T12:00:00.000Z',
         size: 2,
@@ -606,6 +622,11 @@ test('localiza la desviación de entrada por fase, activo, paquete, microestruct
   assert.equal(analysis.totals.microstructure.executableToFill.measured, 2);
   assert.equal(analysis.totals.microstructure.orderRequestRoundTripMs.average, 130);
   assert.equal(analysis.totals.microstructure.tickerRoundTripMs.average, 45);
+  assert.equal(analysis.totals.microstructure.exchangeClock.measured, 2);
+  assert.equal(analysis.totals.microstructure.exchangeClock.exchangeToLocalReceiptMs.average, 25);
+  assert.equal(analysis.totals.microstructure.exchangeClock.localReceiptToRequestMs.average, 100);
+  assert.equal(analysis.totals.microstructure.exchangeClock.exchangeToRequestMs.average, 125);
+  assert.equal(analysis.totals.microstructure.exchangeClock.possibleClockSkew, 1);
   assert.equal(analysis.totals.microstructure.packageQueue.startQuoteMeasured, 2);
   assert.equal(analysis.totals.microstructure.packageQueue.executableMove.measured, 2);
   assert.equal(analysis.totals.microstructure.packageQueue.waitMs.average, 1500);
@@ -635,6 +656,8 @@ test('separa spread y fill en la microestructura prospectiva de los cierres', ()
           bidPrice,
           askPrice,
           spreadPercent: Math.abs(askPrice - bidPrice) / ((askPrice + bidPrice) / 2) * 100,
+          receivedAt: '2026-07-22T12:00:00.420Z',
+          exchangeAt: '2026-07-22T12:00:00.400Z',
           ageMs: 80,
           stale: false
         },
@@ -658,6 +681,10 @@ test('separa spread y fill en la microestructura prospectiva de los cierres', ()
   assert.equal(analysis.totals.microstructure.lastToExecutable.measured, 2);
   assert.equal(analysis.totals.microstructure.executableToFill.measured, 2);
   assert.equal(analysis.totals.microstructure.orderRequestRoundTripMs.average, 150);
+  assert.equal(analysis.totals.microstructure.exchangeClock.measured, 2);
+  assert.equal(analysis.totals.microstructure.exchangeClock.exchangeToLocalReceiptMs.average, 20);
+  assert.equal(analysis.totals.microstructure.exchangeClock.localReceiptToRequestMs.average, 80);
+  assert.equal(analysis.totals.microstructure.exchangeClock.exchangeToRequestMs.average, 100);
   assert.equal(analysis.bySymbol.length, 2);
 });
 

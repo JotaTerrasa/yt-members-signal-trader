@@ -245,7 +245,7 @@ La posición no es una causa aislada: suele coincidir con el activo, ya que BTC 
 
 ### Captura prospectiva de microestructura
 
-Para resolver esa última ambigüedad sin alterar la operativa, la aplicación suscribe el canal público `bookTicker` de BingX junto a `lastPrice`. Cada apertura nueva conservará el mejor bid y ask recibido antes del envío, el spread, la antigüedad de la instantánea, el RTT de la lectura de precio y el RTT local de la petición de orden. En LONG se toma el ask como precio ejecutable; en SHORT, el bid.
+Para resolver esa última ambigüedad sin alterar la operativa, la aplicación suscribe el canal público `bookTicker` de BingX junto a `lastPrice`. Cada apertura nueva conservará el mejor bid y ask recibido antes del envío, el spread, la antigüedad de la instantánea, el RTT de la lectura de precio y el RTT local de la petición de orden. En LONG se toma el ask como precio ejecutable; en SHORT, el bid. La marca temporal del mensaje permite medir además `BingX → recepción local` y `recepción local → envío`. Como los relojes pueden no estar perfectamente sincronizados, el primer tramo se etiqueta como diferencia observada y no como latencia de red pura.
 
 La siguiente instrumentación separa además la secuencia interna del paquete. Los activos vistos en aperturas de los últimos 30 días se mantienen suscritos, con un límite de 24, y al comenzar a procesar una publicación se conserva una fotografía simultánea del lado ejecutable de todos ellos. Cada señal guarda la hora de inicio, el tamaño del paquete y su posición exacta. La lectura `inicio del paquete → preenvío` mostrará cuánto se esperó y cuánto se movió el precio mientras se atendían las señales anteriores.
 

@@ -3159,6 +3159,44 @@ summary.dashboard-section-title {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.entry-diagnosis-clock-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  border-top: 1px solid rgba(19, 123, 109, 0.2);
+  border-bottom: 1px solid rgba(19, 123, 109, 0.2);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.entry-diagnosis-clock-strip > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.entry-diagnosis-clock-strip > div + div {
+  border-left: 1px solid rgba(19, 123, 109, 0.2);
+}
+
+.entry-diagnosis-clock-strip span,
+.entry-diagnosis-clock-note {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.entry-diagnosis-clock-strip strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.entry-diagnosis-clock-note {
+  display: block;
+}
+
 .entry-diagnosis-microstructure > p {
   margin: 0;
   color: var(--muted);
@@ -5780,6 +5818,18 @@ h1 {
 
   .entry-diagnosis-micro-grid {
     grid-template-columns: 1fr;
+  }
+
+  .entry-diagnosis-clock-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .entry-diagnosis-clock-strip > div:nth-child(3) {
+    border-left: 0;
+  }
+
+  .entry-diagnosis-clock-strip > div:nth-child(n + 3) {
+    border-top: 1px solid rgba(19, 123, 109, 0.2);
   }
 
   .entry-diagnosis-row {

@@ -816,6 +816,7 @@ function renderEntryDiagnosisLines(diagnosis) {
     `- Cobertura bid/ask prospectiva: ${microstructure.topOfBookMeasured || 0}/${diagnosis.summary.currentOpenings || 0} aperturas; ${microstructure.staleQuotes || 0} instantáneas caducadas.`,
     `- Spread medio observado: ${percent(microstructure.spread?.averagePercent)}; last a precio ejecutable ${percent(microstructure.lastToExecutable?.averageAdversePercent)}; precio ejecutable a fill ${percent(microstructure.executableToFill?.averageAdversePercent)}.`,
     `- RTT local medio: ticker ${milliseconds(microstructure.tickerRoundTripMs?.average)}; orden ${milliseconds(microstructure.orderRequestRoundTripMs?.average)}; antigüedad mediana de la cotización ${milliseconds(microstructure.quoteAgeMs?.median)}.`,
+    `- Reloj de bookTicker: ${microstructure.exchangeClock?.measured || 0}/${microstructure.topOfBookMeasured || 0} con marca BingX; BingX a recepción local ${milliseconds(microstructure.exchangeClock?.exchangeToLocalReceiptMs?.median)} de mediana; recepción local a envío ${milliseconds(microstructure.exchangeClock?.localReceiptToRequestMs?.median)}; ${microstructure.exchangeClock?.possibleClockSkew || 0} con desfase aparente.`,
     `- Secuencia del paquete: ${packageQueue.startQuoteMeasured || 0}/${diagnosis.summary.currentOpenings || 0} con cotización inicial; espera media hasta el envío ${milliseconds(packageQueue.waitMs?.average)}; movimiento adverso durante la cola ${percent(packageQueue.executableMove?.averageAdversePercent)}.`
   ];
   return [
@@ -853,6 +854,7 @@ function renderCloseExecutionLines(analysis) {
     `- Cobertura bid/ask prospectiva: ${totals.topOfBookMeasured || 0}/${totals.closes || 0} cierres; ${microstructure.staleQuotes || 0} instantáneas caducadas.`,
     `- Spread medio observado: ${percent(microstructure.spread?.averagePercent)}; último precio a ejecutable ${percent(microstructure.lastToExecutable?.averageAdversePercent)}; ejecutable a fill ${percent(microstructure.executableToFill?.averageAdversePercent)}.`,
     `- RTT local medio: ticker ${milliseconds(microstructure.tickerRoundTripMs?.average)}; orden ${milliseconds(microstructure.orderRequestRoundTripMs?.average)}; antigüedad mediana de la cotización ${milliseconds(microstructure.quoteAgeMs?.median)}.`,
+    `- Reloj de bookTicker: ${microstructure.exchangeClock?.measured || 0}/${microstructure.topOfBookMeasured || 0} con marca BingX; BingX a recepción local ${milliseconds(microstructure.exchangeClock?.exchangeToLocalReceiptMs?.median)} de mediana; recepción local a envío ${milliseconds(microstructure.exchangeClock?.localReceiptToRequestMs?.median)}; ${microstructure.exchangeClock?.possibleClockSkew || 0} con desfase aparente.`,
     ...symbolLines
   ];
 }

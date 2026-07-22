@@ -5102,6 +5102,7 @@ function renderEntryDiagnosis(diagnosis) {
   const microstructureOpenings = Number(summary.currentOpenings || 0);
   const packageQueue = microstructure.packageQueue || {};
   const packageQueueMeasured = Number(packageQueue.executableMove?.measured || 0);
+  const exchangeClockStrip = renderExchangeClockStrip(microstructure.exchangeClock, microstructureMeasured);
   const microstructurePanel = `
     <div class="entry-diagnosis-microstructure">
       <div class="entry-diagnosis-subheading">
@@ -5154,6 +5155,7 @@ function renderEntryDiagnosis(diagnosis) {
           <b>Inicio a preenvío</b>
         </div>
       </div>
+      ${exchangeClockStrip}
       <p>${escapeHtml(microstructureMeasured
         ? 'Esta muestra separa la espera secuencial del paquete, el spread y el movimiento posterior hasta el fill.'
         : 'La captura ya está preparada. Los históricos anteriores no contienen bid/ask ni fotografía inicial del paquete; la lectura empezará con la próxima apertura.')}</p>
@@ -5219,6 +5221,7 @@ function renderCloseExecutionMicrostructure(analysis) {
   const microstructure = totals.microstructure || {};
   const measured = Number(totals.topOfBookMeasured || 0);
   const closes = Number(totals.closes || 0);
+  const exchangeClockStrip = renderExchangeClockStrip(microstructure.exchangeClock, measured);
   const symbolRows = (analysis.bySymbol || [])
     .filter((group) => Number(group.topOfBookMeasured || 0) > 0)
     .map((group) => `
@@ -5266,6 +5269,7 @@ function renderCloseExecutionMicrostructure(analysis) {
             <b>Observación pasiva</b>
           </div>
         </div>
+        ${exchangeClockStrip}
         <p>${escapeHtml(measured
           ? 'La salida queda separada entre spread, movimiento hasta el lado ejecutable del libro y movimiento posterior hasta el fill.'
           : 'Los cierres históricos no contienen bid/ask. La lectura comenzará con el próximo cierre explícito y no alterará su ejecución.')}</p>
@@ -5278,6 +5282,32 @@ function renderCloseExecutionMicrostructure(analysis) {
         <div class="entry-diagnosis-slices">${symbolRows}</div>
       ` : ''}
     </section>
+  `;
+}
+
+function renderExchangeClockStrip(clock = {}, quoteCount = 0) {
+  const measured = Number(clock?.measured || 0);
+  const possibleClockSkew = Number(clock?.possibleClockSkew || 0);
+  return `
+    <div class="entry-diagnosis-clock-strip" aria-label="Tiempos de la cotización de BingX">
+      <div>
+        <span>Marca BingX</span>
+        <strong>${escapeHtml(`${measured}/${Number(quoteCount || 0)}`)}</strong>
+      </div>
+      <div>
+        <span>BingX a local</span>
+        <strong>${escapeHtml(formatTelemetryMilliseconds(clock?.exchangeToLocalReceiptMs?.median))}</strong>
+      </div>
+      <div>
+        <span>Local a envío</span>
+        <strong>${escapeHtml(formatTelemetryMilliseconds(clock?.localReceiptToRequestMs?.median))}</strong>
+      </div>
+      <div>
+        <span>BingX a envío</span>
+        <strong>${escapeHtml(formatTelemetryMilliseconds(clock?.exchangeToRequestMs?.median))}</strong>
+      </div>
+    </div>
+    <small class="entry-diagnosis-clock-note">${escapeHtml(`La marca de BingX y el reloj local pueden diferir; no equivale a latencia de red pura.${possibleClockSkew ? ` ${possibleClockSkew} muestra(s) presentan desfase aparente.` : ''}`)}</small>
   `;
 }
 

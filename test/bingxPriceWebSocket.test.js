@@ -59,3 +59,20 @@ test('conserva una instantánea fresca de bid/ask y solo emite price para lastPr
   assert.equal(prices.length, 1);
   assert.equal(prices[0].price, 66000.2);
 });
+
+test('normaliza timestamps de bookTicker expresados en segundos', () => {
+  const feed = new BingXPriceWebSocket();
+  feed.symbols.add('ETH-USDT');
+
+  feed.handleMessage(Buffer.from(JSON.stringify({
+    dataType: 'ETH-USDT@bookTicker',
+    data: {
+      s: 'ETH-USDT',
+      b: '3500.1',
+      a: '3500.2',
+      T: 1784721600
+    }
+  })));
+
+  assert.equal(feed.quoteSnapshot('ETH-USDT')?.exchangeAt, '2026-07-22T12:00:00.000Z');
+});
