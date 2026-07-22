@@ -29,7 +29,7 @@ La devolución del 22% es un escenario. No se suma a la equity real hasta que Bi
 
 La pestaña `PnL` usa `/api/replica-audit` como fuente única para la comparación entre la hoja, la réplica teórica y BingX VST. En esta línea base histórica se observaron **88/103 aperturas emparejables** y **15 no ejecutadas**.
 
-La lectura actual separa tres grupos: filas emparejadas, operaciones realmente ausentes y aperturas VST posteriores a la última operación disponible en la hoja. El tercer grupo queda como `Fuera de cobertura de la hoja` y no se considera una desalineación hasta que la referencia se actualice. Para las cohortes, las fuentes se acotan a su ventana antes de emparejar, evitando cruces falsos con operaciones anteriores.
+La lectura actual separa tres grupos: filas emparejadas, operaciones realmente ausentes y aperturas VST posteriores al último día disponible en la hoja. El tercer grupo queda como `Fuera de cobertura de la hoja` y no se considera una desalineación hasta que la referencia se actualice. El emparejador no permite que una apertura de días posteriores rellene un hueco antiguo. Para las cohortes, las fuentes se acotan a su ventana antes de emparejar, evitando cruces falsos con operaciones anteriores.
 
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 

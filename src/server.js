@@ -19,7 +19,7 @@ import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, scopeReplicaCohortInputs } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, scopeReplicaCohortInputs } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4404,7 +4404,8 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], d
     closeEvents: auditCloseEvents(events),
     openingFees: auditFeeRows(incomeRows, 'opening'),
     closingFees: auditFeeRows(incomeRows, 'closing'),
-    fundingRows: auditIncomeByType(incomeRows, 'FUNDING_FEE')
+    fundingRows: auditIncomeByType(incomeRows, 'FUNDING_FEE'),
+    sheetCoverageEndTime: referenceCoverageEndTime(sheetRows)
   });
   const sequences = new Map();
   const rows = aligned.map((record) => {

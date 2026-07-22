@@ -407,7 +407,7 @@ Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y 
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
 - `GET /api/promotion-gate` devuelve cada criterio de forma auditable.
 - `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
-- La comparación distingue entre filas emparejables y aperturas VST posteriores a la última operación disponible en la hoja. Estas últimas quedan como `Fuera de cobertura de la hoja` hasta que la referencia se actualice.
+- La comparación distingue entre filas emparejables y aperturas VST posteriores al último día disponible en la hoja. Estas últimas quedan como `Fuera de cobertura de la hoja` hasta que la referencia se actualice y nunca se utilizan para rellenar huecos anteriores.
 - La cobertura compara la señal actual con el evento procesado. Si una entrada, un stop o el apalancamiento se corrigieron después de un bloqueo, muestra ambos valores y conserva la apertura como fallo histórico explicado.
 - `Nueva cohorte` conserva las fronteras de hasta doce cohortes anteriores y mueve únicamente el punto de inicio comparativo.
 - La auditoría separa réplica bruta, réplica neta estimada con órdenes de mercado, escenario con entrada maker y devolución acreditada.

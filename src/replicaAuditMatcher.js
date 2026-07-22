@@ -10,7 +10,8 @@ export function alignReplicaAuditRecords({
   closeEvents = [],
   openingFees = [],
   closingFees = [],
-  fundingRows = []
+  fundingRows = [],
+  sheetCoverageEndTime = null
 } = {}) {
   const lifecycles = buildExecutionLifecycles({
     openings,
@@ -20,7 +21,7 @@ export function alignReplicaAuditRecords({
     closingFees,
     fundingRows
   });
-  const aligned = alignBySymbol(sheetRows, lifecycles);
+  const aligned = alignBySymbol(sheetRows, lifecycles, sheetCoverageEndTime);
   const matchedRealized = new Set(aligned.map((item) => item.realizedSource || item.realized).filter(Boolean));
 
   for (const realized of realizedRows) {
@@ -42,16 +43,25 @@ export function alignReplicaAuditRecords({
   return aligned;
 }
 
-function alignBySymbol(sheetRows, lifecycles) {
+function alignBySymbol(sheetRows, lifecycles, sheetCoverageEndTime = null) {
   const sheetBySymbol = groupBySymbol(sheetRows, (row) => normalizeSymbol(row?.symbol));
   const lifecycleBySymbol = groupBySymbol(lifecycles, (row) => eventSymbol(row?.opening));
   const symbols = new Set([...sheetBySymbol.keys(), ...lifecycleBySymbol.keys()]);
   const aligned = [];
+  const hasCoverageBoundary = Number.isFinite(sheetCoverageEndTime);
   for (const symbol of symbols) {
+    const symbolLifecycles = (lifecycleBySymbol.get(symbol) || []).sort(compareLifecycleTime);
+    const comparableLifecycles = hasCoverageBoundary
+      ? symbolLifecycles.filter((item) => !Number.isFinite(eventTime(item?.opening)) || eventTime(item?.opening) <= sheetCoverageEndTime)
+      : symbolLifecycles;
+    const outsideCoverageLifecycles = hasCoverageBoundary
+      ? symbolLifecycles.filter((item) => Number.isFinite(eventTime(item?.opening)) && eventTime(item?.opening) > sheetCoverageEndTime)
+      : [];
     aligned.push(...alignSequences(
       (sheetBySymbol.get(symbol) || []).sort(compareSheetOrder),
-      (lifecycleBySymbol.get(symbol) || []).sort(compareLifecycleTime)
+      comparableLifecycles
     ));
+    aligned.push(...outsideCoverageLifecycles.map((item) => ({ sheet: null, ...item })));
   }
   return aligned.sort((left, right) => {
     const leftOrder = Number(left.sheet?.orderNumber || Number.POSITIVE_INFINITY);

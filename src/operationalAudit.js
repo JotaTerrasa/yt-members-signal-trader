@@ -158,14 +158,15 @@ export function cohortAuditRowHasOrigin(row = {}) {
 
 export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { staleAfterHours = 24 } = {}) {
   const latestSheetTime = latestTimestamp(sheetRows.flatMap((row) => [row?.openedAt, row?.closedAt]));
+  const coverageEndTime = referenceCoverageEndTime(sheetRows);
   const latestVstTime = latestTimestamp(rows.map((row) => row?.vst?.openingAt));
   let outsideCoverageRows = 0;
   const annotatedRows = rows.map((row) => {
     const openingTime = Date.parse(row?.vst?.openingAt || 0);
     if (row?.cause !== 'Extra en VST'
-      || !Number.isFinite(latestSheetTime)
+      || !Number.isFinite(coverageEndTime)
       || !Number.isFinite(openingTime)
-      || openingTime <= latestSheetTime) {
+      || openingTime <= coverageEndTime) {
       return row;
     }
     outsideCoverageRows += 1;
@@ -176,14 +177,15 @@ export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { st
       severity: 'warn'
     };
   });
-  const lagHours = Number.isFinite(latestSheetTime) && Number.isFinite(latestVstTime) && latestVstTime > latestSheetTime
-    ? roundMoney((latestVstTime - latestSheetTime) / 3_600_000)
+  const lagHours = Number.isFinite(coverageEndTime) && Number.isFinite(latestVstTime) && latestVstTime > coverageEndTime
+    ? roundMoney((latestVstTime - coverageEndTime) / 3_600_000)
     : 0;
 
   return {
     rows: annotatedRows,
     coverage: {
       latestSheetAt: Number.isFinite(latestSheetTime) ? new Date(latestSheetTime).toISOString() : null,
+      coverageThroughAt: Number.isFinite(coverageEndTime) ? new Date(coverageEndTime).toISOString() : null,
       latestVstAt: Number.isFinite(latestVstTime) ? new Date(latestVstTime).toISOString() : null,
       lagHours,
       staleAfterHours,
@@ -192,6 +194,15 @@ export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { st
       comparableRows: Math.max(0, annotatedRows.length - outsideCoverageRows)
     }
   };
+}
+
+export function referenceCoverageEndTime(sheetRows = []) {
+  const latestSheetTime = latestTimestamp(sheetRows.flatMap((row) => [row?.openedAt, row?.closedAt]));
+  if (!Number.isFinite(latestSheetTime)) {
+    return NaN;
+  }
+  const date = new Date(latestSheetTime);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1) - 1;
 }
 
 export function monitorHealthFinding(health = {}) {

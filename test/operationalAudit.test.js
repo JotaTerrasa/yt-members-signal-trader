@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, scopeReplicaCohortInputs } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, scopeReplicaCohortInputs } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -119,6 +119,11 @@ test('separa extras reales de operaciones posteriores a la cobertura de la hoja'
       vst: { openingAt: '2026-07-15T11:00:00.000Z' }
     },
     {
+      id: 'same-day',
+      cause: 'Extra en VST',
+      vst: { openingAt: '2026-07-15T20:00:00.000Z' }
+    },
+    {
       id: 'after',
       cause: 'Extra en VST',
       vst: { openingAt: '2026-07-17T12:00:00.000Z' }
@@ -126,13 +131,22 @@ test('separa extras reales de operaciones posteriores a la cobertura de la hoja'
   ], [{ openedAt: '2026-07-15T12:00:00.000Z' }]);
 
   assert.equal(result.rows[0].cause, 'Extra en VST');
-  assert.equal(result.rows[1].cause, 'Fuera de cobertura de la hoja');
+  assert.equal(result.rows[1].cause, 'Extra en VST');
+  assert.equal(result.rows[2].cause, 'Fuera de cobertura de la hoja');
   assert.equal(result.coverage.latestSheetAt, '2026-07-15T12:00:00.000Z');
+  assert.equal(result.coverage.coverageThroughAt, '2026-07-15T23:59:59.999Z');
   assert.equal(result.coverage.latestVstAt, '2026-07-17T12:00:00.000Z');
-  assert.equal(result.coverage.lagHours, 48);
+  assert.equal(result.coverage.lagHours, 36.00000028);
   assert.equal(result.coverage.stale, true);
   assert.equal(result.coverage.outsideCoverageRows, 1);
-  assert.equal(result.coverage.comparableRows, 1);
+  assert.equal(result.coverage.comparableRows, 2);
+});
+
+test('extiende la cobertura de una fecha de hoja hasta el final de ese dia UTC', () => {
+  assert.equal(
+    referenceCoverageEndTime([{ openedAt: '2026-07-15T12:00:00.000Z' }]),
+    Date.parse('2026-07-15T23:59:59.999Z')
+  );
 });
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {

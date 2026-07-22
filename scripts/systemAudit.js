@@ -281,7 +281,7 @@ function buildFindings(report) {
     findings.push({
       severity: 'info',
       code: 'sheet_reference_stale',
-      detail: `${referenceCoverage.outsideCoverageRows || 0} aperturas VST son posteriores a la última operación disponible en la hoja (${referenceCoverage.latestSheetAt || 'sin fecha'}). No se clasifican como extras mientras falte esa referencia.`
+      detail: `${referenceCoverage.outsideCoverageRows || 0} aperturas VST son posteriores al último día disponible en la hoja (cobertura hasta ${referenceCoverage.coverageThroughAt || referenceCoverage.latestSheetAt || 'sin fecha'}). No se clasifican como extras mientras falte esa referencia.`
     });
   }
   if (report.runtime.signalCoverage?.summary?.missingOpenings) {
@@ -366,6 +366,7 @@ function renderMarkdown(report) {
     `- Neto hipotético tras devolución estimada: ${money(r.netAfterEstimatedRebate)} VST`,
     `- Ciclos con entradas agregadas: ${r.aggregatedCycles ?? 0} (${r.aggregatedRows ?? 0} filas)`,
     `- Última operación disponible en la hoja: ${r.referenceCoverage?.latestSheetAt || 'sin fecha'}`,
+    `- Cobertura temporal asumida hasta: ${r.referenceCoverage?.coverageThroughAt || 'sin fecha'}`,
     `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
     `- Aperturas VST posteriores sin referencia: ${r.referenceCoverage?.outsideCoverageRows ?? 0}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,

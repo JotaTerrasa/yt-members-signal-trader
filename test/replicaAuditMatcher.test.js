@@ -119,6 +119,29 @@ test('un reintento tardío de un activo no cruza los paquetes de otros activos',
   ]);
 });
 
+test('una apertura posterior a la cobertura de la hoja no rellena un hueco anterior', () => {
+  const lateOpening = opening('2026-07-16T09:00:00Z', 'BTC-USDT', 110);
+  const rows = alignReplicaAuditRecords({
+    sheetRows: [
+      { orderNumber: 1, symbol: 'BTC-USDT', direction: 'LONG', entryPrice: 100 },
+      { orderNumber: 2, symbol: 'BTC-USDT', direction: 'LONG', entryPrice: 110 }
+    ],
+    openings: [
+      opening('2026-07-15T10:00:00Z', 'BTC-USDT', 100),
+      lateOpening
+    ],
+    sheetCoverageEndTime: Date.parse('2026-07-15T23:59:59.999Z')
+  });
+
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].sheet.orderNumber, 1);
+  assert.equal(rows[0].opening.entryPrice, 100);
+  assert.equal(rows[1].sheet.orderNumber, 2);
+  assert.equal(rows[1].opening, null);
+  assert.equal(rows[2].sheet, null);
+  assert.equal(rows[2].opening, lateOpening);
+});
+
 test('reparte un cierre de una posición agregada entre todas sus aperturas', () => {
   const first = {
     ...opening('2026-07-01T10:00:00Z', 'BTC-USDT', 100),
