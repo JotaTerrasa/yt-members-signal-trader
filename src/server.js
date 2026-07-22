@@ -1709,7 +1709,8 @@ const server = createServer(async (request, response) => {
       }
 
       const months = requestUrl.searchParams.get('months') || 3;
-      if (pnlCache && pnlCache.months === String(months) && Date.now() - pnlCache.at < PNL_CACHE_TTL_MS) {
+      const forceRefresh = readRefreshRequested(requestUrl);
+      if (!forceRefresh && pnlCache && pnlCache.months === String(months) && Date.now() - pnlCache.at < PNL_CACHE_TTL_MS) {
         return sendJson(response, { ok: true, ...pnlCache.payload, cached: true });
       }
 
@@ -1737,7 +1738,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/bingx/pnl-sources' && request.method === 'GET') {
-      if (pnlSourcesCache && Date.now() - pnlSourcesCache.at < PNL_CACHE_TTL_MS) {
+      const forceRefresh = readRefreshRequested(requestUrl);
+      if (!forceRefresh && pnlSourcesCache && Date.now() - pnlSourcesCache.at < PNL_CACHE_TTL_MS) {
         return sendJson(response, { ...pnlSourcesCache.payload, cached: true });
       }
 
@@ -1852,7 +1854,8 @@ const server = createServer(async (request, response) => {
       });
       const historical = await applyReferenceLedger(parsedHistorical, {
         month: requestUrl.searchParams.get('month') || currentMonthKey(),
-        portfolioUrl: referencePortfolioUrl
+        portfolioUrl: referencePortfolioUrl,
+        forceRefresh: readRefreshRequested(requestUrl)
       });
       return sendJson(response, { ok: true, historical });
     }
@@ -1860,16 +1863,21 @@ const server = createServer(async (request, response) => {
     if (requestUrl.pathname === '/api/reference-ledger' && request.method === 'GET') {
       const month = requestUrl.searchParams.get('month') || currentMonthKey();
       const portfolio = configStore.getPortfolio();
-      const reference = await loadReferenceLedger({ month, portfolioUrl: portfolioSourceForReference(portfolio) });
+      const reference = await loadReferenceLedger({
+        month,
+        portfolioUrl: portfolioSourceForReference(portfolio),
+        forceRefresh: readRefreshRequested(requestUrl)
+      });
       return sendJson(response, { ok: true, reference });
     }
 
     if (requestUrl.pathname === '/api/replica-audit' && request.method === 'GET') {
       const month = requestUrl.searchParams.get('month') || currentMonthKey();
-      if (replicaAuditCache?.month === month && Date.now() - replicaAuditCache.at < PNL_CACHE_TTL_MS) {
+      const forceRefresh = readRefreshRequested(requestUrl);
+      if (!forceRefresh && replicaAuditCache?.month === month && Date.now() - replicaAuditCache.at < PNL_CACHE_TTL_MS) {
         return sendJson(response, { ok: true, audit: replicaAuditCache.audit, cached: true });
       }
-      const audit = await buildReplicaAudit({ month });
+      const audit = await buildReplicaAudit({ month, forceRefresh });
       replicaAuditCache = { month, at: Date.now(), audit };
       state.promotionGate = buildCurrentPromotionGate();
       broadcast('state', state);
@@ -4247,6 +4255,10 @@ function sendJson(response, payload, status = 200) {
   response.end(JSON.stringify(payload));
 }
 
+function readRefreshRequested(requestUrl) {
+  return String(requestUrl.searchParams.get('refresh') || '').trim() === '1';
+}
+
 async function serveStatic(pathname, request, response) {
   const vendorFilePath = vendorAssets.get(pathname);
   let filePath = vendorFilePath;
@@ -4547,12 +4559,16 @@ function emptyPnlSource(key, label, modeLabel, asset, error = '') {
   };
 }
 
-async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
+async function buildReplicaAudit({ month = currentMonthKey(), forceRefresh = false } = {}) {
   const portfolio = configStore.getPortfolio();
   let reference = null;
   let referenceError = null;
   try {
-    reference = await loadReferenceLedger({ month, portfolioUrl: portfolioSourceForReference(portfolio) });
+    reference = await loadReferenceLedger({
+      month,
+      portfolioUrl: portfolioSourceForReference(portfolio),
+      forceRefresh
+    });
   } catch (error) {
     referenceError = error.message;
   }
@@ -4566,7 +4582,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
   const [incomeRows, commissionRate, orderHistory] = await Promise.all([
     demoIncomeRows({ config, monthWindow }),
     demoCommissionRate({ config }).catch(() => null),
-    demoOrderHistory({ config, monthWindow })
+    demoOrderHistory({ config, monthWindow, forceRefresh })
   ]);
   const windowEvents = tradeEventStore.list()
     .filter(Boolean)
@@ -4693,14 +4709,14 @@ async function demoCommissionRate({ config }) {
   return response?.data?.commission || response?.data || null;
 }
 
-async function demoOrderHistory({ config, monthWindow }) {
+async function demoOrderHistory({ config, monthWindow, forceRefresh = false }) {
   if (!config.apiKey || !config.apiSecret) {
     return { rows: [], available: false, stale: false, fetchedAt: null, throughTime: null, error: 'Credenciales VST no configuradas.' };
   }
   const now = Date.now();
   const endTime = Math.min(Number(monthWindow.endTime || now), now);
   const cacheKey = `${Number(monthWindow.startTime || 0)}|${String(config.apiKey).slice(-8)}`;
-  if (demoOrderHistoryCache?.key === cacheKey && now - demoOrderHistoryCache.at < PNL_CACHE_TTL_MS) {
+  if (!forceRefresh && demoOrderHistoryCache?.key === cacheKey && now - demoOrderHistoryCache.at < PNL_CACHE_TTL_MS) {
     return { ...demoOrderHistoryCache.value, cached: true };
   }
   const previous = demoOrderHistoryCache?.key === cacheKey ? demoOrderHistoryCache.value : null;

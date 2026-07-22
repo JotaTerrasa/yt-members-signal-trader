@@ -3,6 +3,7 @@ const cacheMs = 5 * 60 * 1000;
 const cache = new Map();
 const sourceCache = new Map();
 const sheetNamesCache = new Map();
+const pendingLedgerLoads = new Map();
 
 const spanishMonths = [
   'ENERO',
@@ -25,10 +26,10 @@ export function clearReferenceLedgerCache() {
   sheetNamesCache.clear();
 }
 
-export async function resolvePortfolioSource(portfolioUrl = fallbackPortfolioUrl) {
+export async function resolvePortfolioSource(portfolioUrl = fallbackPortfolioUrl, { forceRefresh = false } = {}) {
   const requestedUrl = String(portfolioUrl || fallbackPortfolioUrl).trim();
   const cached = sourceCache.get(requestedUrl);
-  if (cached && Date.now() - cached.at < cacheMs) {
+  if (!forceRefresh && cached && Date.now() - cached.at < cacheMs) {
     return cached.value;
   }
 
@@ -105,23 +106,40 @@ function portfolioSource({ originalUrl, resolvedUrl, spreadsheetId }) {
   };
 }
 
-export async function loadReferenceLedger({ month = currentMonthKey(), portfolioUrl = fallbackPortfolioUrl } = {}) {
-  const source = await resolvePortfolioSource(portfolioUrl);
+export async function loadReferenceLedger({ month = currentMonthKey(), portfolioUrl = fallbackPortfolioUrl, forceRefresh = false } = {}) {
+  const source = await resolvePortfolioSource(portfolioUrl, { forceRefresh });
   const cacheKey = `${month}:${source.spreadsheetId}`;
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.at < cacheMs) {
+  if (!forceRefresh && cached && Date.now() - cached.at < cacheMs) {
     return cached.value;
   }
 
+  const pending = pendingLedgerLoads.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const load = fetchReferenceLedger({ month, source, forceRefresh });
+  pendingLedgerLoads.set(cacheKey, load);
+  try {
+    const value = await load;
+    cache.set(cacheKey, { at: Date.now(), value });
+    return value;
+  } finally {
+    pendingLedgerLoads.delete(cacheKey);
+  }
+}
+
+async function fetchReferenceLedger({ month, source, forceRefresh }) {
   const requestedSheetName = sheetNameForMonth(month);
   let sheetName = requestedSheetName;
-  let rows = await fetchSheetRows(source.spreadsheetId, sheetName);
+  let rows = await fetchSheetRows(source.spreadsheetId, sheetName, { forceRefresh });
   let positions = positionsFromRows(rows, month, sheetName);
 
   if (!positions.length) {
-    const alternatives = await compatibleSheetNames(source.spreadsheetId, requestedSheetName, month);
+    const alternatives = await compatibleSheetNames(source.spreadsheetId, requestedSheetName, month, { forceRefresh });
     for (const alternative of alternatives) {
-      const alternativeRows = await fetchSheetRows(source.spreadsheetId, alternative);
+      const alternativeRows = await fetchSheetRows(source.spreadsheetId, alternative, { forceRefresh });
       const alternativePositions = positionsFromRows(alternativeRows, month, alternative);
       if (alternativePositions.length) {
         sheetName = alternative;
@@ -138,7 +156,7 @@ export async function loadReferenceLedger({ month = currentMonthKey(), portfolio
 
   const row = summaryRow(month, positions);
   const equity = parseNumber(rows[0]?.[10]);
-  const value = {
+  return {
     month,
     sheetName,
     spreadsheetUrl: source.spreadsheetUrl,
@@ -157,15 +175,12 @@ export async function loadReferenceLedger({ month = currentMonthKey(), portfolio
       spreadsheetId: source.spreadsheetId
     }
   };
-
-  cache.set(cacheKey, { at: Date.now(), value });
-  return value;
 }
 
-export async function applyReferenceLedger(historical, { month = currentMonthKey(), portfolioUrl = fallbackPortfolioUrl } = {}) {
+export async function applyReferenceLedger(historical, { month = currentMonthKey(), portfolioUrl = fallbackPortfolioUrl, forceRefresh = false } = {}) {
   let reference;
   try {
-    reference = await loadReferenceLedger({ month, portfolioUrl });
+    reference = await loadReferenceLedger({ month, portfolioUrl, forceRefresh });
   } catch (error) {
     return {
       ...historical,
@@ -208,9 +223,14 @@ export async function applyReferenceLedger(historical, { month = currentMonthKey
   };
 }
 
-async function fetchSheetRows(spreadsheetId, sheetName) {
+async function fetchSheetRows(spreadsheetId, sheetName, { forceRefresh = false } = {}) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
-  const response = await fetch(url);
+  const response = await fetch(url, forceRefresh ? {
+    headers: {
+      'cache-control': 'no-cache',
+      pragma: 'no-cache'
+    }
+  } : undefined);
   if (!response.ok) {
     throw new Error(`No se pudo leer ${sheetName}: HTTP ${response.status}`);
   }
@@ -225,14 +245,14 @@ function positionsFromRows(rows, month, sheetName) {
     .filter(Boolean);
 }
 
-async function compatibleSheetNames(spreadsheetId, requestedSheetName, month) {
+async function compatibleSheetNames(spreadsheetId, requestedSheetName, month, { forceRefresh = false } = {}) {
   const [year, monthNumber] = month.split('-').map(Number);
   const label = spanishMonths[monthNumber - 1];
   if (!year || !label) {
     return [];
   }
 
-  const names = await listSpreadsheetSheetNames(spreadsheetId);
+  const names = await listSpreadsheetSheetNames(spreadsheetId, { forceRefresh });
   const matching = names.filter((name) => (
     normalizeSheetName(name).startsWith(normalizeSheetName(`FUTUROS ${label}`))
     && normalizeSheetName(name) !== normalizeSheetName(requestedSheetName)
@@ -249,9 +269,9 @@ async function compatibleSheetNames(spreadsheetId, requestedSheetName, month) {
   });
 }
 
-async function listSpreadsheetSheetNames(spreadsheetId) {
+async function listSpreadsheetSheetNames(spreadsheetId, { forceRefresh = false } = {}) {
   const cached = sheetNamesCache.get(spreadsheetId);
-  if (cached && Date.now() - cached.at < cacheMs) {
+  if (!forceRefresh && cached && Date.now() - cached.at < cacheMs) {
     return cached.value;
   }
 

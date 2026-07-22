@@ -56,6 +56,7 @@ async function main() {
       bootstrapTimeoutRecovery: frontendCheck.timeoutRecovered,
       pnlSourceIsolation: frontendCheck.pnlIsolationPassed,
       externalSheetNative: frontendCheck.externalSheetNativePassed,
+      manualPnlRefresh: frontendCheck.manualPnlRefreshPassed,
       persistedVolumes: probes.length,
       uid
     }, null, 2));
@@ -114,7 +115,8 @@ function verifyFrontendBootstrap(container) {
     || !result.timeoutRecovered
     || result.historicalFailures < 1
     || !result.pnlIsolationPassed
-    || !result.externalSheetNativePassed) {
+    || !result.externalSheetNativePassed
+    || !result.manualPnlRefreshPassed) {
     throw new Error(`El frontend no recupero su carga parcial: ${output}`);
   }
   return result;

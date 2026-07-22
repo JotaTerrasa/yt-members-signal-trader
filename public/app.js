@@ -583,7 +583,7 @@ function bindEvents() {
   });
   elements.refreshPnl.addEventListener('click', async () => {
     await runAction(async () => {
-      await loadPnl();
+      await loadPnl({ force: true });
     });
   });
   elements.monthReset.addEventListener('click', async () => {
@@ -941,7 +941,7 @@ async function loadBingx(options = {}) {
   }
 }
 
-async function loadPnl() {
+async function loadPnl({ force = false } = {}) {
   if (appState.referenceRefreshPromise) {
     await appState.referenceRefreshPromise;
   }
@@ -959,9 +959,9 @@ async function loadPnl() {
 
   try {
     const [historicalResult, sourcesResult, replicaAuditResult] = await Promise.allSettled([
-      fetchJson('/api/historical-pnl?months=72', { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
-      fetchJson('/api/bingx/pnl-sources', { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
-      fetchJson('/api/replica-audit', { timeoutMs: PNL_REQUEST_TIMEOUT_MS })
+      fetchJson(readRefreshUrl('/api/historical-pnl?months=72', force), { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
+      fetchJson(readRefreshUrl('/api/bingx/pnl-sources', force), { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
+      fetchJson(readRefreshUrl('/api/replica-audit', force), { timeoutMs: PNL_REQUEST_TIMEOUT_MS })
     ]);
 
     let historical = appState.pnl?.historical || null;
@@ -1027,7 +1027,7 @@ async function loadPnl() {
 
     if (appState.bingx?.apiKeyConfigured && appState.bingx?.apiSecretConfigured) {
       try {
-        const response = await fetchJson('/api/bingx/pnl?months=3', {
+        const response = await fetchJson(readRefreshUrl('/api/bingx/pnl?months=3', force), {
           timeoutMs: PNL_REQUEST_TIMEOUT_MS
         });
         const pnlWarning = response.warning || response.pnl?.warning || '';
@@ -1074,6 +1074,13 @@ async function loadPnl() {
     appState.externalSheetLoading = false;
     renderPnl();
   }
+}
+
+function readRefreshUrl(url, force = false) {
+  if (!force) {
+    return url;
+  }
+  return `${url}${url.includes('?') ? '&' : '?'}refresh=1`;
 }
 
 function startReferenceRefreshLoop() {

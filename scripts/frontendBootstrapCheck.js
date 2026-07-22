@@ -275,6 +275,93 @@ try {
     throw new Error(`Errores JavaScript en la hoja nativa: ${nativeSheetErrors.join(' | ')}`);
   }
 
+  const manualRefreshPage = await browser.newPage();
+  const manualRefreshErrors = [];
+  const manualRefreshRequests = {
+    historical: [],
+    sources: [],
+    audit: [],
+    pnl: []
+  };
+  manualRefreshPage.on('pageerror', (error) => manualRefreshErrors.push(error.message));
+  await manualRefreshPage.route('**/api/bingx', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        bingx: {
+          enabled: false,
+          mode: 'demo',
+          apiKeyConfigured: true,
+          apiSecretConfigured: true
+        },
+        trades: [],
+        paperTrades: [],
+        exchangePositions: [],
+        exchangeSafety: {},
+        risk: {}
+      })
+    });
+  });
+  await manualRefreshPage.route('**/api/historical-pnl?**', async (route) => {
+    manualRefreshRequests.historical.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ historical: { source: {}, months: [], positions: [] } })
+    });
+  });
+  await manualRefreshPage.route('**/api/bingx/pnl-sources**', async (route) => {
+    manualRefreshRequests.sources.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, month: fixtureMonth, sources: {}, positions: { vst: [], live: [] } })
+    });
+  });
+  await manualRefreshPage.route('**/api/replica-audit**', async (route) => {
+    manualRefreshRequests.audit.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, audit: { month: fixtureMonth, summary: {}, rows: [] } })
+    });
+  });
+  await manualRefreshPage.route('**/api/bingx/pnl?**', async (route) => {
+    manualRefreshRequests.pnl.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, pnl: { months: [], paper: { positions: [] } } })
+    });
+  });
+
+  await manualRefreshPage.goto(`${baseUrl}/?manual-pnl-refresh-check=${Date.now()}#external-sheet-panel`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await manualRefreshPage.waitForFunction(() => {
+    const button = document.querySelector('#refresh-pnl');
+    return button && !button.disabled;
+  }, null, { timeout: 20_000 });
+
+  Object.values(manualRefreshRequests).forEach((requests) => requests.splice(0));
+  await manualRefreshPage.locator('#refresh-pnl').click();
+  await manualRefreshPage.waitForFunction(() => {
+    const button = document.querySelector('#refresh-pnl');
+    return button && !button.disabled;
+  }, null, { timeout: 20_000 });
+
+  const missingForcedRefresh = Object.entries(manualRefreshRequests)
+    .filter(([, requests]) => !requests.some((url) => new URL(url).searchParams.get('refresh') === '1'))
+    .map(([key]) => key);
+  if (missingForcedRefresh.length) {
+    throw new Error(`El boton Actualizar no forzo estas fuentes: ${missingForcedRefresh.join(', ')}.`);
+  }
+  if (manualRefreshErrors.length) {
+    throw new Error(`Errores JavaScript en el refresco manual: ${manualRefreshErrors.join(' | ')}`);
+  }
+
   console.log(JSON.stringify({
     ok: true,
     injectedFailures,
@@ -287,7 +374,8 @@ try {
     timeoutRecovered: true,
     historicalFailures,
     pnlIsolationPassed: true,
-    externalSheetNativePassed: true
+    externalSheetNativePassed: true,
+    manualPnlRefreshPassed: true
   }));
 } finally {
   await browser?.close().catch(() => {});
