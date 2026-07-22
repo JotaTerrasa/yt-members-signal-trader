@@ -19,7 +19,7 @@ import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4403,6 +4403,7 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], d
     realizedRows: auditIncomeByType(incomeRows, 'REALIZED_PNL'),
     closeEvents: auditCloseEvents(events),
     openingFailures: buildOpeningFailureAttempts(events),
+    closeFailures: buildCloseFailureAttempts(events),
     openingFees: auditFeeRows(incomeRows, 'opening'),
     closingFees: auditFeeRows(incomeRows, 'closing'),
     fundingRows: auditIncomeByType(incomeRows, 'FUNDING_FEE'),
@@ -4441,6 +4442,7 @@ function replicaAuditRow({
   closingFee,
   funding,
   openingFailure,
+  closeFailures = [],
   unmatchedClose,
   aggregatedOpenings,
   defaultNotional
@@ -4481,6 +4483,7 @@ function replicaAuditRow({
     entryDiffPercent,
     closeDiffPercent,
     stopAlignment,
+    closeFailures,
     openingFailure,
     unmatchedClose
   });
@@ -4521,6 +4524,13 @@ function replicaAuditRow({
       closeStatus: closeEvent?.status || '',
       closeReason: closeEvent?.reason || '',
       stopAlignment,
+      closeFailures: closeFailures.map((failure) => ({
+        status: failure.status || 'error',
+        reason: failure.reason || '',
+        category: failure.category || 'exchange_close_error',
+        at: failure.at || null,
+        postUrl: failure.postUrl || ''
+      })),
       aggregatedOpenings: Number(aggregatedOpenings || 1),
       postUrl: opening?.postUrl || openingFailure?.postUrl || closeEvent?.postUrl || ''
     },
@@ -4566,6 +4576,7 @@ function auditRowStatus({
   entryDiffPercent,
   closeDiffPercent,
   stopAlignment,
+  closeFailures = [],
   openingFailure,
   unmatchedClose
 }) {
@@ -4586,6 +4597,14 @@ function auditRowStatus({
     return { cause: 'Abierta o sin cierre', detail: 'La señal entró, pero no hay cierre realizado emparejado en BingX.', severity: 'warn' };
   }
   if (stopAlignment === 'divergent') {
+    if (closeFailures.length) {
+      const runtimeGuardFailures = closeFailures.filter((failure) => failure.category === 'close_guard_runtime_error').length;
+      return {
+        cause: 'Cierre fallido antes del stop',
+        detail: `${closeFailures.length} señal${closeFailures.length === 1 ? '' : 'es'} de cierre ${closeFailures.length === 1 ? 'falló' : 'fallaron'} antes del stop${runtimeGuardFailures ? `; ${runtimeGuardFailures} por el fallo histórico del guard` : ''}.`,
+        severity: 'negative'
+      };
+    }
     return { cause: 'Stop antes del cierre', detail: 'BingX cerró por stop, pero la operación equivalente de la hoja terminó con el signo contrario.', severity: 'negative' };
   }
   if (stopAlignment === 'slippage') {

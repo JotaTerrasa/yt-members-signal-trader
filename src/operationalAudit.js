@@ -246,6 +246,23 @@ export function buildOpeningFailureAttempts(events = []) {
   return attempts.sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
 }
 
+export function buildCloseFailureAttempts(events = []) {
+  return (events || [])
+    .filter((event) => String(event?.signal?.action || '').toUpperCase() === 'CLOSE')
+    .filter((event) => isCloseFailureStatus(event?.status))
+    .map((event) => ({
+      eventId: event.eventId || null,
+      at: event.at || null,
+      status: event.status || 'error',
+      reason: String(event.reason || event.error || 'Motivo no registrado.'),
+      category: closeFailureCategory(event),
+      postId: event.postId || null,
+      postUrl: event.postUrl || null,
+      signal: event.signal || null
+    }))
+    .sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
+}
+
 export function replicaStopAlignment({
   closeStatus = '',
   replicaPnl = null,
@@ -283,6 +300,13 @@ export function summarizeReplicaStops(rows = []) {
     divergent: comparable.filter((row) => row.vst.stopAlignment === 'divergent').length,
     slippage: comparable.filter((row) => row.vst.stopAlignment === 'slippage').length,
     unknown: stopRows.filter((row) => row.vst.stopAlignment === 'unknown').length,
+    closeFailureDivergent: comparable.filter((row) => (
+      row.vst.stopAlignment === 'divergent' && Number(row.vst.closeFailures?.length || 0) > 0
+    )).length,
+    runtimeGuardFailureDivergent: comparable.filter((row) => (
+      row.vst.stopAlignment === 'divergent'
+      && row.vst.closeFailures?.some((failure) => failure.category === 'close_guard_runtime_error')
+    )).length,
     aggregatedDivergent: comparable.filter((row) => (
       row.vst.stopAlignment === 'divergent' && Number(row.vst.aggregatedOpenings || 1) > 1
     )).length
@@ -316,6 +340,30 @@ function isOpeningFailureStatus(status = '') {
     || value === 'demo_order_retry_expired'
     || value === 'demo_order_failed'
     || value === 'demo_order_rejected';
+}
+
+function isCloseFailureStatus(status = '') {
+  const value = String(status || '').toLowerCase();
+  return value === 'error'
+    || value === 'blocked'
+    || value === 'demo_close_guarded'
+    || value === 'demo_close_guard_expired'
+    || value === 'demo_close_retry_expired';
+}
+
+function closeFailureCategory(event = {}) {
+  const status = String(event.status || '').toLowerCase();
+  const reason = String(event.reason || event.error || '');
+  if (/CLOSE_GUARD_MIN_NET_PNL|close_guard_error|ReferenceError|is not defined/i.test(reason)) {
+    return 'close_guard_runtime_error';
+  }
+  if (/close_price_slippage/i.test(reason) || status === 'demo_close_guarded') {
+    return 'close_slippage_guard';
+  }
+  if (status.includes('expired')) {
+    return 'close_retry_expired';
+  }
+  return 'exchange_close_error';
 }
 
 function openingFailureCategory(reason = '') {

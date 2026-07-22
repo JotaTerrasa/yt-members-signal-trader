@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { alignReplicaAuditRecords, alignSequences } from '../src/replicaAuditMatcher.js';
+import { alignReplicaAuditRecords, alignSequences, attachCloseFailures } from '../src/replicaAuditMatcher.js';
 
 function opening(at, symbol, price, direction = 'LONG') {
   return {
@@ -173,6 +173,33 @@ test('enlaza un fallo solo con la fila ausente del mismo dia, activo, direccion 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].opening, null);
   assert.equal(rows[0].openingFailure, matchedFailure);
+});
+
+test('enlaza un cierre fallido solo durante la vida de la posición del mismo activo', () => {
+  const openingEvent = opening('2026-07-10T15:20:24Z', 'BTC-USDT', 64037);
+  const stopEvent = {
+    at: '2026-07-13T01:56:35Z',
+    status: 'exchange_stop_closed',
+    signal: { symbol: 'BTC-USDT', direction: 'LONG' }
+  };
+  const relevantFailure = {
+    at: '2026-07-11T17:47:15Z',
+    signal: { action: 'CLOSE', symbol: 'BTC-USDT' },
+    status: 'error',
+    reason: 'CLOSE_GUARD_MIN_NET_PNL is not defined'
+  };
+  const records = attachCloseFailures([{
+    opening: openingEvent,
+    closeEvent: stopEvent,
+    realized: { time: Date.parse('2026-07-13T01:55:52Z') }
+  }], [
+    { ...relevantFailure, at: '2026-07-10T14:00:00Z' },
+    relevantFailure,
+    { ...relevantFailure, signal: { action: 'CLOSE', symbol: 'ETH-USDT' } },
+    { ...relevantFailure, at: '2026-07-13T02:10:00Z' }
+  ]);
+
+  assert.deepEqual(records[0].closeFailures, [relevantFailure]);
 });
 
 test('reparte un cierre de una posición agregada entre todas sus aperturas', () => {

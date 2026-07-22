@@ -13,6 +13,7 @@ export function alignReplicaAuditRecords({
   closingFees = [],
   fundingRows = [],
   openingFailures = [],
+  closeFailures = [],
   sheetCoverageEndTime = null
 } = {}) {
   const lifecycles = buildExecutionLifecycles({
@@ -45,7 +46,7 @@ export function alignReplicaAuditRecords({
     });
   }
 
-  return aligned;
+  return attachCloseFailures(aligned, closeFailures);
 }
 
 export function attachOpeningFailures(records = [], failures = []) {
@@ -79,6 +80,31 @@ export function attachOpeningFailures(records = [], failures = []) {
     }
     used.add(match.failure);
     return { ...record, openingFailure: match.failure };
+  });
+}
+
+export function attachCloseFailures(records = [], failures = []) {
+  const candidates = [...(failures || [])].sort((left, right) => eventTime(left) - eventTime(right));
+  return (records || []).map((record) => {
+    const openingAt = eventTime(record?.opening);
+    const closingAt = Math.min(
+      eventTime(record?.closeEvent),
+      incomeTime(record?.realizedSource || record?.realized)
+    );
+    if (!Number.isFinite(openingAt) || !Number.isFinite(closingAt)) {
+      return record;
+    }
+    const direction = normalizeDirection(record?.opening?.signal?.direction);
+    const symbol = eventSymbol(record?.opening);
+    const matches = candidates.filter((failure) => {
+      const failureAt = eventTime(failure);
+      const failureDirection = normalizeDirection(failure?.signal?.direction);
+      return eventSymbol(failure) === symbol
+        && failureAt >= openingAt
+        && failureAt <= closingAt
+        && (!direction || !failureDirection || direction === failureDirection);
+    });
+    return matches.length ? { ...record, closeFailures: matches } : record;
   });
 }
 

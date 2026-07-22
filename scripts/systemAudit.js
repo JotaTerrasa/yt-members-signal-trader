@@ -281,10 +281,12 @@ function buildFindings(report) {
   if (report.replica?.stopAnalysis?.divergent) {
     const stops = report.replica.stopAnalysis;
     const aggregated = Number(stops.aggregatedDivergent || 0);
+    const failedCloses = Number(stops.closeFailureDivergent || 0);
+    const runtimeGuardFailures = Number(stops.runtimeGuardFailureDivergent || 0);
     findings.push({
       severity: 'high',
       code: 'reference_stop_divergence',
-      detail: `${stops.divergent} stops cerraron con signo contrario a la hoja; ${stops.aligned} de ${stops.total} stops comparables sí quedaron alineados${aggregated ? ` y ${aggregated} divergencias pertenecen a posiciones agregadas` : ''}.`
+      detail: `${stops.divergent} stops cerraron con signo contrario a la hoja; ${stops.aligned} de ${stops.total} stops comparables sí quedaron alineados${failedCloses ? `, ${failedCloses} divergencias estuvieron precedidas por cierres fallidos` : ''}${runtimeGuardFailures ? ` por el fallo histórico del guard` : ''}${aggregated ? ` y esas ${aggregated} posiciones terminaron agregadas` : ''}.`
     });
   }
   if (report.replica?.referenceCoverage?.stale) {
@@ -383,6 +385,8 @@ function renderMarkdown(report) {
     `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
     `- Stops comparables alineados / divergentes / con deslizamiento: ${r.stopAnalysis?.aligned ?? 0} / ${r.stopAnalysis?.divergent ?? 0} / ${r.stopAnalysis?.slippage ?? 0}`,
     `- Stops observados sin hoja comparable: ${r.stopAnalysis?.unknown ?? 0}`,
+    `- Stops divergentes precedidos por cierres fallidos: ${r.stopAnalysis?.closeFailureDivergent ?? 0}`,
+    `- Stops divergentes por el fallo histórico del guard: ${r.stopAnalysis?.runtimeGuardFailureDivergent ?? 0}`,
     `- Stops divergentes en posiciones agregadas: ${r.stopAnalysis?.aggregatedDivergent ?? 0}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
     '',
@@ -454,6 +458,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
     `- Stops comparables alineados / divergentes: ${summary.stopAnalysis?.aligned || 0} / ${summary.stopAnalysis?.divergent || 0}`,
+    `- Divergencias precedidas por cierres fallidos: ${summary.stopAnalysis?.closeFailureDivergent || 0}`,
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,
     `- Clasificación: ${JSON.stringify(summary.issueCounts || {})}`
   ];

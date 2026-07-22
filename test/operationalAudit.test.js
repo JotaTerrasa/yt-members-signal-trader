@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -224,7 +224,7 @@ test('distingue un stop alineado de uno realmente contrario a la hoja', () => {
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {
   const summary = summarizeReplicaStops([
     { vst: { stopAlignment: 'aligned', aggregatedOpenings: 1 } },
-    { vst: { stopAlignment: 'divergent', aggregatedOpenings: 3 } },
+    { vst: { stopAlignment: 'divergent', aggregatedOpenings: 3, closeFailures: [{ category: 'close_guard_runtime_error' }] } },
     { vst: { stopAlignment: 'unknown', aggregatedOpenings: 1 } },
     { vst: { stopAlignment: 'not_stop', aggregatedOpenings: 1 } }
   ]);
@@ -236,8 +236,33 @@ test('resume solo los stops comparables y separa los que no tienen hoja', () => 
     divergent: 1,
     slippage: 0,
     unknown: 1,
+    closeFailureDivergent: 1,
+    runtimeGuardFailureDivergent: 1,
     aggregatedDivergent: 1
   });
+});
+
+test('extrae el fallo histórico de una señal de cierre demo', () => {
+  const failures = buildCloseFailureAttempts([
+    {
+      eventId: 'btc-close-error',
+      at: '2026-07-11T17:47:15.558Z',
+      status: 'error',
+      executionMode: 'demo',
+      reason: 'CLOSE_GUARD_MIN_NET_PNL is not defined',
+      signal: { action: 'CLOSE', symbol: 'BTC-USDT' }
+    },
+    {
+      eventId: 'btc-open',
+      at: '2026-07-11T16:18:46.805Z',
+      status: 'demo_order_sent',
+      signal: { symbol: 'BTC-USDT', direction: 'LONG', entry: { price: 64141 } }
+    }
+  ]);
+
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].eventId, 'btc-close-error');
+  assert.equal(failures[0].category, 'close_guard_runtime_error');
 });
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {

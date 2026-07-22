@@ -4531,13 +4531,32 @@ function formatStopAnalysis(analysis = {}) {
     `${Number(analysis.divergent || 0)} divergentes`,
     `${Number(analysis.slippage || 0)} con deslizamiento`
   ];
+  if (Number(analysis.closeFailureDivergent || 0) > 0) {
+    parts.push(`${Number(analysis.closeFailureDivergent)} tras cierre fallido`);
+  }
   if (Number(analysis.aggregatedDivergent || 0) > 0) {
-    parts.push(`${Number(analysis.aggregatedDivergent)} por posición agregada`);
+    parts.push(`${Number(analysis.aggregatedDivergent)} en posición agregada`);
   }
   if (Number(analysis.unknown || 0) > 0) {
     parts.push(`${Number(analysis.unknown)} observados sin hoja comparable`);
   }
   return parts.join(' · ');
+}
+
+function formatCloseFailureEvidence(failures = []) {
+  const list = Array.isArray(failures) ? failures : [];
+  const last = list.at(-1);
+  if (!last) {
+    return '';
+  }
+  const categories = new Set(list.map((failure) => failure.category));
+  const count = list.length;
+  const label = categories.size === 1 && categories.has('close_slippage_guard')
+    ? `${count} reintento${count === 1 ? '' : 's'} protegido${count === 1 ? '' : 's'}`
+    : categories.has('close_guard_runtime_error')
+      ? `${count} cierre${count === 1 ? '' : 's'} fallido${count === 1 ? '' : 's'}`
+      : `${count} intento${count === 1 ? '' : 's'} de cierre no completado${count === 1 ? '' : 's'}`;
+  return `${label} · ${truncateText(last.reason || '', 96)}`;
 }
 
 function formatRatePercent(value) {
@@ -4573,7 +4592,7 @@ function replicaIssueClass(label = '') {
   if (/stop alineado/i.test(label)) {
     return 'positive';
   }
-  if (/no ejecutada|stop|signo|fees/i.test(label)) {
+  if (/no ejecutada|stop|signo|fees|cierre fallido/i.test(label)) {
     return 'negative';
   }
   if (/desviada|extra|abierta|diferencia|fuera de cobertura/i.test(label)) {
@@ -4595,6 +4614,10 @@ function renderReplicaAuditRow(row = {}) {
     : '';
   const failureEvidence = row.failure
     ? `<span>${escapeHtml(`${row.failure.status || 'error'} · ${truncateText(row.failure.reason || '', 96)}`)}</span>`
+    : '';
+  const lastCloseFailure = Array.isArray(vst.closeFailures) ? vst.closeFailures.at(-1) : null;
+  const closeFailureEvidence = lastCloseFailure
+    ? `<span>${escapeHtml(formatCloseFailureEvidence(vst.closeFailures))}</span>`
     : '';
   return `
     <tr class="${escapeAttribute(row.severity || 'neutral')}">
@@ -4627,6 +4650,7 @@ function renderReplicaAuditRow(row = {}) {
         <strong>${escapeHtml(row.cause || '-')}</strong>
         <span>${escapeHtml(row.detail || '')}</span>
         ${failureEvidence}
+        ${closeFailureEvidence}
         ${postLink}
       </td>
     </tr>
