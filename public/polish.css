@@ -1013,7 +1013,7 @@ summary:focus-visible,
 
 .reliability-summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   border: 1px solid var(--line);
   border-radius: 7px;
   overflow: hidden;
@@ -1042,6 +1042,19 @@ summary:focus-visible,
 .reliability-summary strong {
   color: var(--ink);
   font-size: 1.05rem;
+}
+
+.reliability-summary .clock-ok strong {
+  color: var(--accent-strong);
+}
+
+.reliability-summary .clock-warn strong,
+.reliability-summary .clock-unavailable strong {
+  color: var(--gold);
+}
+
+.reliability-summary .clock-critical strong {
+  color: var(--danger);
 }
 
 .net-entry-audit {

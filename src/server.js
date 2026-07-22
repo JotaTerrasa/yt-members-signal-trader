@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { ConfigStore } from './configStore.js';
 import { buildCohortComparison } from './cohortComparison.js';
 import { coverageRecoveryCandidates } from './coverageRecovery.js';
+import { BingXClient } from './bingxClient.js';
+import { estimateBingXClockSample } from './bingxClock.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
 import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
 import { ExecutionRetryStore } from './executionRetryStore.js';
@@ -73,6 +75,8 @@ const SIGNAL_COVERAGE_CHECK_MS = 60_000;
 const ENTRY_QUOTE_WATCH_MS = 10 * 60 * 1000;
 const ENTRY_QUOTE_HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const ENTRY_QUOTE_HISTORY_MAX_SYMBOLS = 24;
+const BINGX_CLOCK_POLL_MS = 5 * 60 * 1000;
+const BINGX_CLOCK_STALE_MS = 15 * 60 * 1000;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -134,6 +138,18 @@ let pnlBackoffUntil = 0;
 let pnlBackoffReason = '';
 let backupTimer = null;
 let signalCoverageTimer = null;
+let bingxClockTimer = null;
+let bingxClockInFlight = null;
+let bingxClockStatus = {
+  available: false,
+  source: 'bingx_server_time',
+  environment: null,
+  checkedAt: null,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  error: null,
+  observationalOnly: true
+};
 let lastBackupStatus = {
   lastRunAt: null,
   nextRunAt: null,
@@ -222,7 +238,7 @@ scraper.on('posts', (payload) => {
 });
 
 priceFeed.on('status', (status) => {
-  state.priceFeed = status;
+  state.priceFeed = priceFeedState(status);
   broadcast('state', state);
 });
 
@@ -1567,6 +1583,7 @@ const server = createServer(async (request, response) => {
       await clearPnlCaches({ clearSnapshots: credentialsChanged });
       broadcast('bingx', { bingx });
       notifyBingxPauseChange(previous, bingx);
+      measureBingXClock({ reason: 'config_changed' }).catch(() => {});
       return sendJson(response, { ok: true, bingx });
     }
 
@@ -1807,7 +1824,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/price-feed' && request.method === 'GET') {
-      return sendJson(response, { ok: true, priceFeed: priceFeed.status() });
+      return sendJson(response, { ok: true, priceFeed: priceFeedState() });
     }
 
     if (requestUrl.pathname === '/api/historical-pnl' && request.method === 'GET') {
@@ -1959,6 +1976,7 @@ const server = createServer(async (request, response) => {
         incidents: buildIncidentSnapshot(),
         backup: lastBackupStatus,
         pnlBackoff: pnlBackoffInfo(),
+        priceFeed: priceFeedState(),
         signalCoverage: state.signalCoverage,
         promotionGate: buildCurrentPromotionGate()
       });
@@ -2059,6 +2077,7 @@ server.listen(port, host, () => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
     syncPriceSubscriptions();
   });
+  measureBingXClock({ reason: 'startup' }).catch(() => {});
   resumeMonitorOnStartup().catch((error) => {
     pushLog({ level: 'error', message: `Auto-resume monitor: ${error.message}`, at: new Date().toISOString() });
   });
@@ -2085,6 +2104,11 @@ setInterval(() => {
     pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
   });
 }, MONTHLY_RESET_CHECK_MS).unref();
+
+bingxClockTimer = setInterval(() => {
+  measureBingXClock({ reason: 'poll' }).catch(() => {});
+}, BINGX_CLOCK_POLL_MS);
+bingxClockTimer.unref();
 
 signalCoverageTimer = setInterval(() => {
   refreshSignalCoverage({ notify: true, recover: true }).catch((error) => {
@@ -2203,7 +2227,7 @@ async function startScraperMonitor(input = {}, { persistMonitor = false } = {}) 
 
 function currentState() {
   state.health = buildHealth();
-  state.priceFeed = priceFeed.status();
+  state.priceFeed = priceFeedState();
   state.promotionGate = buildCurrentPromotionGate();
   state.netEntryFilterAudit = buildNetEntryShadowAudit({
     events: tradeEventStore.list(),
@@ -2252,6 +2276,105 @@ function currentPromotionEconomics() {
 function currentRealtimeState() {
   const { logs, trades, ...realtime } = currentState();
   return realtime;
+}
+
+function priceFeedState(feedStatus = priceFeed.status()) {
+  return {
+    ...feedStatus,
+    clock: currentBingXClockStatus()
+  };
+}
+
+function currentBingXClockStatus(nowMs = Date.now()) {
+  const lastSuccessMs = Date.parse(bingxClockStatus.lastSuccessAt || '');
+  const ageMs = bingxClockStatus.available && Number.isFinite(lastSuccessMs)
+    ? Math.max(0, nowMs - lastSuccessMs)
+    : null;
+  const stale = ageMs === null || ageMs > BINGX_CLOCK_STALE_MS;
+  const sampleLevel = bingxClockStatus.sampleLevel || bingxClockStatus.level || 'unavailable';
+  return {
+    ...bingxClockStatus,
+    ageMs,
+    stale,
+    sampleLevel,
+    level: !bingxClockStatus.available ? 'unavailable' : stale ? 'stale' : sampleLevel
+  };
+}
+
+async function measureBingXClock({ reason = 'poll' } = {}) {
+  if (bingxClockInFlight) {
+    return bingxClockInFlight;
+  }
+
+  const task = (async () => {
+    const environment = bingxClockEnvironment();
+    const client = new BingXClient({ environment });
+    const requestedAtMs = Date.now();
+    try {
+      const response = await client.getServerTime();
+      const receivedAtMs = Date.now();
+      const serverTime = response?.data?.serverTime
+        ?? response?.serverTime
+        ?? (typeof response?.data === 'number' ? response.data : null);
+      const sample = estimateBingXClockSample({
+        serverTime,
+        requestedAtMs,
+        receivedAtMs,
+        environment
+      });
+      const recoveredFromError = Boolean(bingxClockStatus.error);
+      bingxClockStatus = {
+        ...sample,
+        sampleLevel: sample.level,
+        lastAttemptAt: sample.receivedAt,
+        lastSuccessAt: sample.receivedAt,
+        reason,
+        error: null
+      };
+      if (recoveredFromError) {
+        pushLog({
+          level: 'info',
+          message: 'Reloj BingX REST recuperado.',
+          at: sample.receivedAt
+        });
+      }
+    } catch (error) {
+      const at = new Date().toISOString();
+      const message = error?.message || String(error);
+      const isNewError = bingxClockStatus.error !== message;
+      bingxClockStatus = {
+        ...bingxClockStatus,
+        environment,
+        lastAttemptAt: at,
+        reason,
+        error: message
+      };
+      if (isNewError) {
+        pushLog({
+          level: 'warn',
+          message: `Reloj BingX REST: ${message}`,
+          at
+        });
+      }
+    }
+
+    state.priceFeed = priceFeedState();
+    broadcast('state', state);
+    return currentBingXClockStatus();
+  })();
+
+  bingxClockInFlight = task;
+  try {
+    return await task;
+  } finally {
+    if (bingxClockInFlight === task) {
+      bingxClockInFlight = null;
+    }
+  }
+}
+
+function bingxClockEnvironment() {
+  return configStore.getBingX().mode === 'demo' ? 'prod-vst' : 'prod-live';
 }
 
 async function cachedOrPaperPnlPayload({ months, warning, cooldownUntil }) {
@@ -2753,7 +2876,7 @@ function syncPriceSubscriptions(exchangePositionsOrSymbols) {
     ...recentSignalSymbols,
     ...watchedSymbols
   ]);
-  state.priceFeed = priceFeed.status();
+  state.priceFeed = priceFeedState();
   scheduleEntryQuoteWatchCleanup();
 }
 
@@ -5629,6 +5752,10 @@ async function performShutdown() {
   }
   if (signalCoverageTimer) {
     clearInterval(signalCoverageTimer);
+  }
+  if (bingxClockTimer) {
+    clearInterval(bingxClockTimer);
+    bingxClockTimer = null;
   }
   for (const item of pendingStopLossRetries.values()) {
     if (item.timer) {

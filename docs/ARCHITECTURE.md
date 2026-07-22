@@ -29,10 +29,12 @@ flowchart TB
     trader --> bingxClient["BingXClient<br/>REST firmado"]
     trader --> paper["PaperTradeStore<br/>test/paper local"]
     server --> priceWs["BingXPriceWebSocket<br/>lastPrice + bid/ask"]
+    server --> clock["bingxClock<br/>offset REST pasivo"]
   end
 
   bingxClient <--> bingx["BingX Futures<br/>demo VST / live USDT"]
   priceWs <--> bingx
+  clock --> bingx
 
   subgraph reference["Referencia y estudio"]
     server --> ledger["referenceLedger<br/>Google Sheet"]
@@ -264,10 +266,16 @@ Cliente REST firmado con HMAC para BingX:
 
 Los IDs largos de orden, posición, operación y órdenes relacionadas se parsean como string antes de llamar a `JSON.parse`, evitando el redondeo silencioso de JavaScript.
 
+La misma clase expone la hora pública de BingX sin credenciales. `src/server.js` la consulta fuera del camino de ejecución, una vez al arrancar y después cada cinco minutos.
+
 Entornos:
 
 - `prod-live`: BingX real.
 - `prod-vst`: BingX Demo VST.
+
+### `src/bingxClock.js`
+
+Calcula el desfase aparente entre el reloj local y el reloj REST de BingX mediante el punto medio de la petición. Expone offset, RTT, incertidumbre, antigüedad y nivel, y marca siempre la muestra como `observationalOnly`. Un error conserva la última lectura válida y una lectura de más de quince minutos queda caducada. Esta telemetría no cambia señales, guards, tamaños, reintentos, stops ni cierres.
 
 ### `src/bingxPriceWebSocket.js`
 
@@ -306,7 +314,7 @@ Lee Google Sheets vía endpoint `gviz` y transforma la hoja mensual a posiciones
 
 La auditoría acota las fuentes a la ventana temporal antes de emparejar operaciones. Además, separa las aperturas VST posteriores a la última fila disponible de la hoja: se muestran como pendientes de referencia y no como operaciones extra ni como desalineaciones demostradas.
 
-También resuelve enlaces acortados de portfolio que embeben Google Sheets en iframe.
+También resuelve enlaces acortados de portfolio. El frontend presenta las posiciones descargadas por `gviz` en una tabla nativa con scroll y conserva un enlace al documento original; no depende de que Google permita cargar una sesión dentro de un `iframe`.
 
 ### `src/portfolioDetector.js`
 

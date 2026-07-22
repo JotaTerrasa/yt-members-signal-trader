@@ -32,6 +32,10 @@ export class BingXClient {
     return this.publicRequest('/openApi/swap/v2/quote/ticker', { symbol });
   }
 
+  async getServerTime() {
+    return this.publicRequest('/openApi/swap/v2/server/time');
+  }
+
   async getPositions(symbol) {
     return this.request('GET', '/openApi/swap/v2/user/positions', symbol ? { symbol } : {});
   }
@@ -142,6 +146,9 @@ export class BingXClient {
       try {
         const response = await fetch(url, {
           method: 'GET',
+          headers: {
+            'X-SOURCE-KEY': 'BX-AI-SKILL'
+          },
           signal: AbortSignal.timeout(10000)
         });
 

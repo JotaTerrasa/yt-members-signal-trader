@@ -893,19 +893,33 @@
                     <tbody id="my-ledger-body"></tbody>
                   </table>
                 </div>
-                <div class="external-sheet-panel">
+                <div class="external-sheet-panel" id="external-sheet-panel" aria-busy="false">
                   <div class="trade-section-header">
                     <h3>Hoja externa en vivo</h3>
-                    <span id="external-sheet-status">Sin hoja</span>
+                    <span id="external-sheet-status" role="status" aria-live="polite">Sin hoja</span>
                   </div>
-                  <iframe
-                    id="external-sheet-frame"
-                    class="external-sheet-frame hidden"
-                    title="Hoja externa en vivo"
-                    loading="lazy"
-                  ></iframe>
-                  <div id="external-sheet-empty" class="empty-state compact">
-                    No hay una hoja externa cargada todavia.
+                  <div id="external-sheet-native" class="external-sheet-native hidden">
+                    <div id="external-sheet-summary" class="external-sheet-summary"></div>
+                    <div class="external-sheet-table-wrap" tabindex="0" aria-label="Operaciones de la hoja externa">
+                      <table class="external-sheet-table">
+                        <caption>Operaciones importadas de la hoja externa</caption>
+                        <thead>
+                          <tr>
+                            <th># / Fecha</th>
+                            <th>Activo</th>
+                            <th>Entrada</th>
+                            <th>Salida</th>
+                            <th>PnL</th>
+                            <th>ROI</th>
+                            <th>Resultado</th>
+                          </tr>
+                        </thead>
+                        <tbody id="external-sheet-body"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div id="external-sheet-empty" class="empty-state compact" role="status" aria-live="polite">
+                    No hay una hoja externa cargada todavía.
                   </div>
                 </div>
               </div>

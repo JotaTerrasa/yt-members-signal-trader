@@ -77,6 +77,8 @@ flowchart LR
 
   api --> priceWs["Precios y bid/ask WebSocket<br/>src/bingxPriceWebSocket.js"]
   priceWs <--> bingx
+  api --> clock["Reloj REST pasivo<br/>src/bingxClock.js"]
+  clock --> bingx
   api --> reconcile["Reconciliación real<br/>posiciones, SL/TP y órdenes huérfanas"]
   reconcile <--> bingx
 
@@ -358,6 +360,7 @@ Incluye:
 - ROI mensual.
 - Equity frente al capital inicial en Demo VST y live real.
 - Simulador de capital inicial para Google Sheet.
+- Hoja de Google en vista nativa, con resumen, cabecera fija y scroll; el enlace original permanece disponible.
 - Desviación de entrada y salida, operaciones agregadas y causas de desalineación con la hoja.
 - Fiabilidad de ejecución: cobertura, paquetes completos, reintentos pendientes y puerta de promoción.
 - Guardia nocturna.
@@ -479,6 +482,8 @@ Dentro de ese bloque, `Dónde se deterioran las entradas` descompone el desplaza
 
 La sección `Microestructura prospectiva` suscribe también el canal público `bookTicker` de BingX. Para cada apertura nueva conserva el mejor bid y ask, el spread, la antigüedad de la instantánea, el tiempo de la consulta de precio y el tiempo de ida y vuelta de la orden. Así puede separar `lastPrice → precio ejecutable` de `precio ejecutable → fill`. También compara la marca temporal de BingX con la recepción local y con el envío de la orden; esa diferencia incluye el posible desfase entre relojes y no se presenta como latencia de red pura. Los eventos históricos anteriores no se rellenan con estimaciones: aparecen fuera de cobertura hasta que exista una muestra nueva.
 
+El panel de fiabilidad contrasta además el reloj local con el endpoint público de hora de BingX cada cinco minutos. Usa el punto medio de la petición REST, muestra offset, RTT, antigüedad y entorno, y conserva la última lectura válida durante fallos transitorios. Esta comprobación es observacional: no sincroniza Windows, no bloquea señales y nunca se ejecuta dentro del camino crítico de una orden.
+
 Los símbolos con señales de apertura observadas durante los últimos 30 días permanecen suscritos, con un máximo de 24. Al comenzar un paquete se guarda además una fotografía ejecutable simultánea para todos sus activos y la posición exacta de cada señal. La auditoría puede separar así la espera secuencial hasta el envío del movimiento posterior de mercado, sin añadir esperas ni consultas REST.
 
 El panel `Microestructura de los cierres` aplica el mismo criterio a cada salida explícita nueva. Para cerrar una posición LONG usa el bid como precio ejecutable y, para cerrar una SHORT, el ask. Separa `último precio → precio ejecutable` de `precio ejecutable → fill`, conserva el RTT de la solicitud y muestra el resultado por activo cuando existe evidencia suficiente. Los cierres por stop siguen auditándose con el histórico firmado de BingX y no se mezclan con esta muestra prospectiva de órdenes explícitas.
@@ -516,6 +521,7 @@ Endpoints:
 | `GET /api/state` | Estado completo de app y monitor. |
 | `GET /api/audit` | Snapshot auditable. |
 | `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
+| `GET /api/price-feed` | Estado WebSocket, cotizaciones y diagnóstico pasivo del reloj de BingX. |
 | `GET /api/execution-packages` | Paquetes detectados, reintentos persistentes y estado de promoción. |
 | `GET /api/promotion-gate` | Criterios objetivos de muestra, cobertura, seguridad y resultado neto. |
 | `GET /api/bingx/positions` | Reconciliación de posiciones. |
@@ -547,6 +553,7 @@ src/
   promotionGate.js       Criterios de promoción sin activación automática
   httpSecurity.js        Autenticación opcional y protecciones HTTP
   bingxClient.js         Cliente REST BingX
+  bingxClock.js          Desfase pasivo del reloj REST de BingX
   bingxPriceWebSocket.js WebSocket de precios y bid/ask
   referenceLedger.js     hoja de Google de referencia
   replicaAuditMatcher.js Emparejamiento hoja/apertura/cierre/fees

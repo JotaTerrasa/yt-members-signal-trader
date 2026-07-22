@@ -45,6 +45,7 @@ const report = {
   runtime: {
     health: pickHealth(operationalPayload?.health),
     exchangeSafety: pickExchangeSafety(operationalPayload?.exchangeSafety),
+    bingxClock: pickBingXClock(operationalPayload?.priceFeed?.clock),
     incidents24h: operationalPayload?.incidents?.counts || null,
     risk: pickRisk(riskPayload?.risk),
     configuration: pickConfig(riskPayload?.bingx, telegramSourcePayload?.telegramSource),
@@ -602,6 +603,7 @@ function renderMarkdown(report) {
     `- Recarga Telegram: ${report.runtime.configuration?.telegramRefreshSeconds || '-'} s`,
     `- Puerta de promoción: ${report.runtime.promotionGate?.label || 'sin datos'}`,
     `- Criterios pendientes: ${(report.runtime.promotionGate?.criteria || []).filter((item) => !item.ok).map((item) => item.label).join(', ') || 'ninguno'}`,
+    `- Reloj REST BingX: ${clockStatus(report.runtime.bingxClock)}`,
     '',
     '## Interpretación',
     '',
@@ -1035,6 +1037,13 @@ function finite(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  return finite(value);
+}
+
 function sum(values) {
   return values.reduce((total, value) => total + Number(value || 0), 0);
 }
@@ -1050,6 +1059,32 @@ function round(value) {
 
 function money(value) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(4) : '-';
+}
+
+function pickBingXClock(clock = {}) {
+  return {
+    available: Boolean(clock.available),
+    level: clock.level || 'unavailable',
+    environment: clock.environment || '',
+    offsetMs: finiteOrNull(clock.offsetMs),
+    roundTripMs: finiteOrNull(clock.roundTripMs),
+    uncertaintyMs: finiteOrNull(clock.uncertaintyMs),
+    ageMs: finiteOrNull(clock.ageMs),
+    stale: Boolean(clock.stale),
+    checkedAt: clock.checkedAt || null,
+    error: clock.error || null,
+    observationalOnly: clock.observationalOnly !== false
+  };
+}
+
+function clockStatus(clock = {}) {
+  if (!clock.available) {
+    return clock.error ? `sin medición (${clock.error})` : 'sin medición';
+  }
+  const offset = Number(clock.offsetMs);
+  const sign = offset > 0 ? '+' : '';
+  const age = clock.ageMs === null ? '-' : seconds(clock.ageMs / 1000);
+  return `${sign}${milliseconds(offset)} de offset; RTT ${milliseconds(clock.roundTripMs)}; antigüedad ${age}; ${clock.level}${clock.stale ? ' (caducado)' : ''}; solo observación`;
 }
 
 function seconds(value) {

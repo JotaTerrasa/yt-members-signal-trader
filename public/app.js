@@ -154,8 +154,11 @@ const elements = {
   myLedgerBody: document.querySelector('#my-ledger-body'),
   myLedgerResultSort: document.querySelector('#my-ledger-result-sort'),
   myLedgerResultSortState: document.querySelector('#my-ledger-result-sort-state'),
+  externalSheetPanel: document.querySelector('#external-sheet-panel'),
   externalSheetStatus: document.querySelector('#external-sheet-status'),
-  externalSheetFrame: document.querySelector('#external-sheet-frame'),
+  externalSheetNative: document.querySelector('#external-sheet-native'),
+  externalSheetSummary: document.querySelector('#external-sheet-summary'),
+  externalSheetBody: document.querySelector('#external-sheet-body'),
   externalSheetEmpty: document.querySelector('#external-sheet-empty'),
   externalSheetLink: document.querySelector('#external-sheet-link'),
   tradeHistoryStatus: document.querySelector('#trade-history-status'),
@@ -271,6 +274,10 @@ const appState = {
   performanceRange: '1D',
   ledgerFilter: 'ops',
   ledgerResultSort: '',
+  externalSheetRenderKey: '',
+  externalSheetLoading: false,
+  externalSheetError: '',
+  externalSheetLoadedAt: null,
   sheetSimCapital: storedSheetSimCapital(),
   sheetSimTouched: false,
   pnlLoading: false,
@@ -802,6 +809,8 @@ async function loadPnl() {
 
   appState.pnlLoading = true;
   appState.pnlError = '';
+  appState.externalSheetLoading = true;
+  appState.externalSheetError = '';
   renderPnl();
 
   try {
@@ -820,6 +829,7 @@ async function loadPnl() {
       }))
     ]);
     const historical = historicalResponse.historical;
+    appState.externalSheetLoadedAt = new Date().toISOString();
     appState.pnlSources = sourcesResponse;
     appState.replicaAudit = replicaAuditResponse.audit || {
       error: replicaAuditResponse.error || ''
@@ -873,8 +883,10 @@ async function loadPnl() {
     }
   } catch (error) {
     appState.pnlError = error.message;
+    appState.externalSheetError = error.message;
   } finally {
     appState.pnlLoading = false;
+    appState.externalSheetLoading = false;
     renderPnl();
   }
 }
@@ -1424,6 +1436,7 @@ function renderReliabilityPanel() {
   const latestPackage = appState.state?.signalCoverage?.latestPackage || null;
   const openingRetries = appState.state?.openingRetryQueue || appState.state?.stopLossRetryQueue || [];
   const closeRetries = appState.state?.closeRetryQueue || appState.state?.closeGuardRetryQueue || [];
+  const clockMetric = reliabilityClockMetric(appState.state?.priceFeed?.clock || {});
   const tone = gate.status === 'eligible_for_review'
     ? 'positive'
     : gate.status === 'blocked' ? 'negative' : 'warn';
@@ -1436,7 +1449,8 @@ function renderReliabilityPanel() {
     renderReliabilityMetric('Cobertura', formatPercent(metrics.coveragePercent || 0), `${metrics.executedOpenings || 0}/${metrics.expectedOpenings || 0} aperturas`),
     renderReliabilityMetric('Completos', formatPercent(metrics.completePercent || 0), `${metrics.completePackages || 0} paquetes completos`),
     renderReliabilityMetric('Pendientes', String(openingRetries.length + closeRetries.length), `${openingRetries.length} aperturas · ${closeRetries.length} cierres`),
-    renderReliabilityMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : '-', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin paquete reciente')
+    renderReliabilityMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : '-', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin paquete reciente'),
+    renderReliabilityMetric('Reloj BingX', clockMetric.value, clockMetric.detail, clockMetric.tone)
   ].join('');
   renderNetEntryFilterAudit(appState.state?.netEntryFilterAudit || {});
   elements.reliabilityCriteria.innerHTML = (gate.criteria || []).map((item) => `
@@ -1495,9 +1509,51 @@ function netEntryReasonLabel(reason = '') {
   }[reason] || String(reason || '-').replaceAll('_', ' ');
 }
 
-function renderReliabilityMetric(label, value, detail) {
+function reliabilityClockMetric(clock = {}) {
+  if (!clock.available) {
+    return {
+      value: 'Sin medición',
+      detail: clock.error ? 'Último intento fallido' : 'Esperando reloj REST',
+      tone: 'clock-unavailable'
+    };
+  }
+
+  const offset = Number(clock.offsetMs);
+  const roundTrip = Number(clock.roundTripMs);
+  const value = Number.isFinite(offset) ? formatSignedMilliseconds(offset) : '-';
+  const age = Number.isFinite(Number(clock.ageMs))
+    ? `hace ${formatMilliseconds(Math.max(0, Number(clock.ageMs)))}`
+    : 'antigüedad desconocida';
+  const detail = [
+    Number.isFinite(roundTrip) ? `RTT ${Math.round(roundTrip)} ms` : 'RTT -',
+    age,
+    clock.stale ? 'caducado' : '',
+    clock.error ? 'último intento fallido' : ''
+  ].filter(Boolean).join(' · ');
+  const level = clock.level === 'critical'
+    ? 'critical'
+    : clock.level === 'ok' ? 'ok' : 'warn';
+  return {
+    value,
+    detail,
+    tone: `clock-${level}`
+  };
+}
+
+function formatSignedMilliseconds(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  const rounded = Math.round(number);
+  const normalized = Object.is(rounded, -0) ? 0 : rounded;
+  const prefix = normalized > 0 ? '+' : '';
+  return `${prefix}${normalized.toLocaleString('es-ES')} ms`;
+}
+
+function renderReliabilityMetric(label, value, detail, tone = '') {
   return `
-    <div>
+    <div class="${escapeAttribute(tone)}">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
       <small>${escapeHtml(detail)}</small>
@@ -7154,29 +7210,123 @@ function renderMyLedgerRow(row) {
 }
 
 function renderExternalSheetEmbed() {
-  if (!elements.externalSheetFrame || !elements.externalSheetLink) {
+  if (!elements.externalSheetPanel || !elements.externalSheetNative || !elements.externalSheetSummary || !elements.externalSheetBody || !elements.externalSheetLink) {
     return;
   }
 
   const source = externalSheetSource();
-  elements.externalSheetStatus.textContent = source.label;
+  const reference = currentReferenceLedger();
+  const positions = [...(reference?.positions || [])]
+    .sort((left, right) => Number(right.orderNumber || 0) - Number(left.orderNumber || 0));
+  const loadState = appState.externalSheetError
+    ? 'error'
+    : appState.externalSheetLoading
+      ? 'loading'
+      : positions.length
+        ? 'ready'
+        : 'empty';
+  const updatedLabel = appState.externalSheetLoadedAt
+    ? formatShortDateTime(appState.externalSheetLoadedAt)
+    : '';
+  elements.externalSheetPanel.dataset.sheetState = loadState;
+  elements.externalSheetPanel.setAttribute('aria-busy', appState.externalSheetLoading ? 'true' : 'false');
+  elements.externalSheetStatus.textContent = positions.length
+    ? appState.externalSheetError
+      ? `${positions.length} filas · fallo al actualizar`
+      : appState.externalSheetLoading
+        ? `${positions.length} filas · actualizando...`
+        : `${positions.length} filas${updatedLabel ? ` · ${updatedLabel}` : ''}`
+    : appState.externalSheetLoading
+      ? 'Cargando hoja...'
+      : appState.externalSheetError
+        ? 'No disponible'
+        : source.label;
   elements.externalSheetLink.classList.toggle('hidden', !source.href);
   if (source.href) {
     elements.externalSheetLink.href = source.href;
   }
 
-  if (!source.embedUrl) {
-    elements.externalSheetFrame.removeAttribute('src');
-    elements.externalSheetFrame.classList.add('hidden');
-    elements.externalSheetEmpty?.classList.remove('hidden');
+  if (!positions.length) {
+    appState.externalSheetRenderKey = '';
+    elements.externalSheetSummary.innerHTML = '';
+    elements.externalSheetBody.innerHTML = '';
+    elements.externalSheetNative.classList.add('hidden');
+    if (elements.externalSheetEmpty) {
+      elements.externalSheetEmpty.textContent = externalSheetEmptyMessage(source);
+      elements.externalSheetEmpty.classList.toggle('error', Boolean(appState.externalSheetError));
+      elements.externalSheetEmpty.classList.remove('hidden');
+    }
     return;
   }
 
-  if (elements.externalSheetFrame.getAttribute('src') !== source.embedUrl) {
-    elements.externalSheetFrame.setAttribute('src', source.embedUrl);
+  const winners = positions.filter((position) => Number(position.realizedPnl ?? position.paperPnl ?? 0) > 0).length;
+  const total = Number(reference?.row?.total ?? positions.reduce((sum, position) => (
+    sum + Number(position.realizedPnl ?? position.paperPnl ?? 0)
+  ), 0));
+  const renderKey = externalSheetDataKey(reference, positions);
+  if (appState.externalSheetRenderKey !== renderKey) {
+    elements.externalSheetSummary.innerHTML = `
+      <div><span>Hoja</span><strong>${escapeHtml(reference?.label || source.label)}</strong></div>
+      <div><span>Operaciones</span><strong>${positions.length}</strong></div>
+      <div><span>Win rate</span><strong>${escapeHtml(formatPercent(positions.length ? (winners / positions.length) * 100 : 0))}</strong></div>
+      <div><span>Resultado</span><strong class="${escapeAttribute(amountClass(total))}">${escapeHtml(formatMoney(total, 'USDT'))}</strong></div>
+      <div><span>Equity</span><strong>${escapeHtml(reference?.equity == null ? '-' : formatMoney(reference.equity, 'USDT'))}</strong></div>
+    `;
+    elements.externalSheetBody.innerHTML = positions.map(renderExternalSheetRow).join('');
+    appState.externalSheetRenderKey = renderKey;
   }
-  elements.externalSheetFrame.classList.remove('hidden');
+  elements.externalSheetNative.classList.remove('hidden');
   elements.externalSheetEmpty?.classList.add('hidden');
+}
+
+function externalSheetEmptyMessage(source) {
+  if (appState.externalSheetLoading) {
+    return 'Cargando las operaciones de la hoja...';
+  }
+  if (appState.externalSheetError) {
+    return `No se pudo actualizar la hoja: ${friendlyBingxError(appState.externalSheetError)}`;
+  }
+  if (source.href) {
+    return `La hoja está enlazada, pero no contiene operaciones de ${formatMonth(currentMonthKey())}.`;
+  }
+  return 'No hay una hoja externa configurada.';
+}
+
+function externalSheetDataKey(reference, positions) {
+  const rows = positions.map((position) => [
+    position.id,
+    position.orderNumber,
+    position.entryPrice,
+    position.closePrice ?? position.currentPrice,
+    position.realizedPnl ?? position.paperPnl,
+    position.outcome
+  ].join(':')).join('|');
+  return `${reference?.label || ''}:${reference?.equity ?? ''}:${reference?.row?.total ?? ''}:${rows}`;
+}
+
+function renderExternalSheetRow(position) {
+  const pnl = Number(position.realizedPnl ?? position.paperPnl ?? 0);
+  const margin = Number(position.notional || 0);
+  const roi = margin > 0 ? (pnl / margin) * 100 : null;
+  const outcome = position.outcome || (pnl > 0 ? 'GANADA' : pnl < 0 ? 'PERDIDA' : 'PLANA');
+  const outcomeClass = pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : 'neutral';
+  return `
+    <tr>
+      <td>
+        <strong>${escapeHtml(position.orderNumber || '-')}</strong>
+        <span>${escapeHtml(formatShortDateTime(position.closedAt || position.openedAt))}</span>
+      </td>
+      <td>
+        <strong>${escapeHtml(position.symbol || '-')}</strong>
+        <span>${escapeHtml(`${position.direction || '-'} · ${formatLeverage(position.leverage)}`)}</span>
+      </td>
+      <td>${escapeHtml(formatPrice(position.entryPrice))}</td>
+      <td>${escapeHtml(formatPrice(position.closePrice ?? position.currentPrice))}</td>
+      <td class="${escapeAttribute(amountClass(pnl))}"><strong>${escapeHtml(formatMoney(pnl, 'USDT'))}</strong></td>
+      <td class="${escapeAttribute(amountClass(roi))}">${escapeHtml(roi == null ? '-' : formatPercent(roi))}</td>
+      <td><span class="ledger-status ${escapeAttribute(outcomeClass)}">${escapeHtml(outcome)}</span></td>
+    </tr>
+  `;
 }
 
 function externalSheetSource() {
@@ -7187,14 +7337,12 @@ function externalSheetSource() {
   if (spreadsheetId) {
     return {
       href: href || `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit`,
-      embedUrl: `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/preview`,
       label: reference?.label ? `En vivo - ${reference.label}` : 'En vivo'
     };
   }
 
   return {
     href,
-    embedUrl: '',
     label: href ? 'Enlace externo' : 'Sin hoja'
   };
 }
