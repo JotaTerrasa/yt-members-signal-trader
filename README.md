@@ -49,7 +49,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Empareja las entradas marcadas en sombra con sus cierres y muestra su PnL neto estimado. También avisa cuando un umbral marcaría por construcción todas las señales con el apalancamiento observado.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
-- Limita el trabajo visual de Posts y Eventos mediante paginación progresiva, y mantiene el canal SSE compacto durante el monitor continuo.
+- Limita el trabajo visual de Posts, Eventos y las tablas extensas de Rendimiento mediante paginación progresiva. Los totales y diagnósticos siguen usando la muestra completa, mientras el canal SSE se mantiene compacto durante el monitor continuo.
 - Guarda los JSON locales mediante escrituras en cola y reemplazo atómico para no dejar archivos parciales ante reinicios.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
 - Genera backups redactados para soporte y backups cifrados restaurables de los datos locales.

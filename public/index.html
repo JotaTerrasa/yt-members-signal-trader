@@ -894,6 +894,13 @@
                     <tbody id="my-ledger-body"></tbody>
                   </table>
                 </div>
+                <div id="my-ledger-pagination" class="list-pagination table-pagination hidden">
+                  <span id="my-ledger-pagination-status" role="status" aria-live="polite">0 operaciones</span>
+                  <button id="my-ledger-load-more" class="button secondary" type="button">
+                    <i data-lucide="chevrons-down"></i>
+                    <span>Mostrar más</span>
+                  </button>
+                </div>
                 <div class="external-sheet-panel" id="external-sheet-panel" aria-busy="false">
                   <div class="trade-section-header">
                     <h3>Hoja externa en vivo</h3>
@@ -931,6 +938,13 @@
                         </thead>
                         <tbody id="external-sheet-body"></tbody>
                       </table>
+                    </div>
+                    <div id="external-sheet-pagination" class="list-pagination table-pagination hidden">
+                      <span id="external-sheet-pagination-status" role="status" aria-live="polite">0 operaciones</span>
+                      <button id="external-sheet-load-more" class="button secondary" type="button">
+                        <i data-lucide="chevrons-down"></i>
+                        <span>Mostrar más</span>
+                      </button>
                     </div>
                   </div>
                   <div id="external-sheet-empty" class="empty-state compact" role="status" aria-live="polite">

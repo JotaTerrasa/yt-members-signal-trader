@@ -155,6 +155,9 @@ const elements = {
   myLedgerBody: document.querySelector('#my-ledger-body'),
   myLedgerResultSort: document.querySelector('#my-ledger-result-sort'),
   myLedgerResultSortState: document.querySelector('#my-ledger-result-sort-state'),
+  myLedgerPagination: document.querySelector('#my-ledger-pagination'),
+  myLedgerPaginationStatus: document.querySelector('#my-ledger-pagination-status'),
+  myLedgerLoadMore: document.querySelector('#my-ledger-load-more'),
   externalSheetPanel: document.querySelector('#external-sheet-panel'),
   externalSheetStatus: document.querySelector('#external-sheet-status'),
   externalSheetNative: document.querySelector('#external-sheet-native'),
@@ -162,6 +165,9 @@ const elements = {
   externalSheetBody: document.querySelector('#external-sheet-body'),
   externalSheetEmpty: document.querySelector('#external-sheet-empty'),
   externalSheetLink: document.querySelector('#external-sheet-link'),
+  externalSheetPagination: document.querySelector('#external-sheet-pagination'),
+  externalSheetPaginationStatus: document.querySelector('#external-sheet-pagination-status'),
+  externalSheetLoadMore: document.querySelector('#external-sheet-load-more'),
   tradeHistoryStatus: document.querySelector('#trade-history-status'),
   tradeHistoryEmpty: document.querySelector('#trade-history-empty'),
   tradeHistoryList: document.querySelector('#trade-history-list'),
@@ -254,6 +260,9 @@ const PLOTLY_CDN_SOURCES = [
 let plotlyLoadPromise = null;
 const POSTS_PAGE_SIZE = 12;
 const LOGS_PAGE_SIZE = 60;
+const LEDGER_PAGE_SIZE = 30;
+const EXTERNAL_SHEET_PAGE_SIZE = 40;
+const REPLICA_AUDIT_PAGE_SIZE = 40;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
@@ -280,6 +289,9 @@ const appState = {
   performanceRange: '1D',
   ledgerFilter: 'ops',
   ledgerResultSort: '',
+  ledgerVisibleLimit: LEDGER_PAGE_SIZE,
+  externalSheetVisibleLimit: EXTERNAL_SHEET_PAGE_SIZE,
+  replicaAuditVisibleLimit: REPLICA_AUDIT_PAGE_SIZE,
   externalSheetRenderKey: '',
   externalSheetLoading: false,
   externalSheetError: '',
@@ -416,14 +428,27 @@ function bindEvents() {
       return;
     }
     appState.ledgerFilter = button.dataset.ledgerFilter || 'all';
+    appState.ledgerVisibleLimit = LEDGER_PAGE_SIZE;
     renderMyLedger();
   });
   elements.myLedgerResultSort?.addEventListener('click', () => {
     appState.ledgerResultSort = appState.ledgerResultSort === 'asc' ? 'desc' : 'asc';
+    appState.ledgerVisibleLimit = LEDGER_PAGE_SIZE;
+    renderMyLedger();
+  });
+  elements.myLedgerLoadMore?.addEventListener('click', () => {
+    appState.ledgerVisibleLimit += LEDGER_PAGE_SIZE;
     renderMyLedger();
   });
   const alignmentPanel = document.querySelector('#sheet-vst-alignment');
   alignmentPanel?.addEventListener('click', async (event) => {
+    const loadMoreButton = event.target.closest('[data-replica-load-more]');
+    if (loadMoreButton) {
+      appState.replicaAuditVisibleLimit += REPLICA_AUDIT_PAGE_SIZE;
+      renderReplicaControlPreservingScroll(appState.replicaAudit);
+      window.lucide?.createIcons();
+      return;
+    }
     const cohortButton = event.target.closest('[data-start-improvement-cohort]');
     if (cohortButton) {
       const confirmed = window.confirm('¿Iniciar una cohorte nueva desde este momento? El histórico anterior se conserva.');
@@ -458,6 +483,12 @@ function bindEvents() {
     wrap.scrollLeft += event.deltaX;
   }, { passive: false });
   elements.externalSheetPanel?.addEventListener('click', (event) => {
+    const loadMoreButton = event.target.closest('#external-sheet-load-more');
+    if (loadMoreButton) {
+      appState.externalSheetVisibleLimit += EXTERNAL_SHEET_PAGE_SIZE;
+      renderExternalSheetEmbed();
+      return;
+    }
     const button = event.target.closest('[data-external-sheet-scroll]');
     if (!button) {
       return;
@@ -5152,6 +5183,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
 
   const summary = audit.summary || {};
   const rows = audit.rows || [];
+  const visibleRows = rows.slice(0, appState.replicaAuditVisibleLimit);
   const criticalRows = rows.filter((row) => row.severity === 'negative').length;
   const warningRows = rows.filter((row) => row.severity === 'warn').length;
   const bingxFees = Number(summary.bingxFees || 0);
@@ -5232,10 +5264,19 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
             </tr>
           </thead>
           <tbody>
-            ${rows.length ? rows.slice(0, 160).map(renderReplicaAuditRow).join('') : '<tr><td colspan="7">Sin filas auditables todavia.</td></tr>'}
+            ${visibleRows.length ? visibleRows.map(renderReplicaAuditRow).join('') : '<tr><td colspan="7">Sin filas auditables todavía.</td></tr>'}
           </tbody>
         </table>
       </div>
+      ${rows.length ? `
+        <div class="list-pagination table-pagination replica-audit-pagination">
+          <span role="status" aria-live="polite">Mostrando ${visibleRows.length} de ${rows.length} operaciones</span>
+          <button class="button secondary ${visibleRows.length >= rows.length ? 'hidden' : ''}" type="button" data-replica-load-more ${visibleRows.length >= rows.length ? 'disabled' : ''}>
+            <i data-lucide="chevrons-down"></i>
+            <span>Mostrar más</span>
+          </button>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -7151,15 +7192,24 @@ function renderMyLedger() {
 
   const allRows = myLedgerRows();
   const rows = sortMyLedgerRows(filterMyLedgerRows(allRows, appState.ledgerFilter));
+  const visibleRows = rows.slice(0, appState.ledgerVisibleLimit);
   const openCount = allRows.filter((row) => row.rawStatus === 'open').length;
   const reviewCount = allRows.filter((row) => row.statusClass === 'negative' || row.statusClass === 'warn').length;
   elements.myLedgerStatus.textContent = allRows.length
     ? `${rows.length}/${allRows.length} filas - ${openCount} abiertas${reviewCount ? ` - ${reviewCount} revisar` : ''}`
     : '0 filas';
   elements.myLedgerEmpty.classList.toggle('hidden', rows.length > 0);
-  elements.myLedgerBody.innerHTML = rows.length
-    ? rows.slice(0, 120).map(renderMyLedgerRow).join('')
+  elements.myLedgerBody.innerHTML = visibleRows.length
+    ? visibleRows.map(renderMyLedgerRow).join('')
     : '';
+  renderListPagination({
+    container: elements.myLedgerPagination,
+    status: elements.myLedgerPaginationStatus,
+    button: elements.myLedgerLoadMore,
+    visible: visibleRows.length,
+    total: rows.length,
+    noun: 'operaciones'
+  });
   renderMyLedgerTabs(allRows);
   renderMyLedgerSummary(allRows);
   renderMyLedgerSortControl();
@@ -7544,6 +7594,14 @@ function renderExternalSheetEmbed() {
     appState.externalSheetRenderKey = '';
     elements.externalSheetSummary.innerHTML = '';
     elements.externalSheetBody.innerHTML = '';
+    renderListPagination({
+      container: elements.externalSheetPagination,
+      status: elements.externalSheetPaginationStatus,
+      button: elements.externalSheetLoadMore,
+      visible: 0,
+      total: 0,
+      noun: 'operaciones'
+    });
     elements.externalSheetNative.classList.add('hidden');
     if (elements.externalSheetEmpty) {
       elements.externalSheetEmpty.textContent = externalSheetEmptyMessage(source);
@@ -7554,10 +7612,11 @@ function renderExternalSheetEmbed() {
   }
 
   const winners = positions.filter((position) => Number(position.realizedPnl ?? position.paperPnl ?? 0) > 0).length;
+  const visiblePositions = positions.slice(0, appState.externalSheetVisibleLimit);
   const total = Number(reference?.row?.total ?? positions.reduce((sum, position) => (
     sum + Number(position.realizedPnl ?? position.paperPnl ?? 0)
   ), 0));
-  const renderKey = externalSheetDataKey(reference, positions);
+  const renderKey = `${externalSheetDataKey(reference, positions)}:${visiblePositions.length}`;
   if (appState.externalSheetRenderKey !== renderKey) {
     elements.externalSheetSummary.innerHTML = `
       <div><span>Hoja</span><strong>${escapeHtml(reference?.label || source.label)}</strong></div>
@@ -7566,9 +7625,17 @@ function renderExternalSheetEmbed() {
       <div><span>Resultado</span><strong class="${escapeAttribute(amountClass(total))}">${escapeHtml(formatMoney(total, 'USDT'))}</strong></div>
       <div><span>Equity</span><strong>${escapeHtml(reference?.equity == null ? '-' : formatMoney(reference.equity, 'USDT'))}</strong></div>
     `;
-    elements.externalSheetBody.innerHTML = positions.map(renderExternalSheetRow).join('');
+    elements.externalSheetBody.innerHTML = visiblePositions.map(renderExternalSheetRow).join('');
     appState.externalSheetRenderKey = renderKey;
   }
+  renderListPagination({
+    container: elements.externalSheetPagination,
+    status: elements.externalSheetPaginationStatus,
+    button: elements.externalSheetLoadMore,
+    visible: visiblePositions.length,
+    total: positions.length,
+    noun: 'operaciones'
+  });
   elements.externalSheetNative.classList.remove('hidden');
   elements.externalSheetEmpty?.classList.add('hidden');
 }
