@@ -219,6 +219,8 @@ Solo si necesitas ver la app desde móvil fuera de la red local:
 cloudflared tunnel --url http://localhost:5178
 ```
 
+La aplicación comprime automáticamente los recursos estáticos con Brotli o gzip. No hace falta configurar compresión adicional en el túnel.
+
 Precauciones:
 
 - No publiques la URL sin autenticación básica o Cloudflare Access.

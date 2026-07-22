@@ -107,12 +107,31 @@ async function verifyStaticAssets(port) {
   for (const asset of assets) {
     const response = await fetch(`http://127.0.0.1:${port}${asset}`, {
       method: 'HEAD',
+      headers: { 'accept-encoding': 'br, gzip' },
       signal: AbortSignal.timeout(5_000)
     });
     const contentType = String(response.headers.get('content-type') || '');
     const cacheControl = String(response.headers.get('cache-control') || '');
-    if (!response.ok || !contentType.includes('text/javascript') || !cacheControl.includes('immutable')) {
+    const etag = String(response.headers.get('etag') || '');
+    const encoding = String(response.headers.get('content-encoding') || '');
+    if (!response.ok
+      || !contentType.includes('text/javascript')
+      || !cacheControl.includes('immutable')
+      || !etag
+      || encoding !== 'br') {
       throw new Error(`Recurso visual no disponible en Docker: ${asset} (HTTP ${response.status})`);
+    }
+
+    const conditional = await fetch(`http://127.0.0.1:${port}${asset}`, {
+      method: 'HEAD',
+      headers: {
+        'accept-encoding': 'br, gzip',
+        'if-none-match': etag
+      },
+      signal: AbortSignal.timeout(5_000)
+    });
+    if (conditional.status !== 304) {
+      throw new Error(`El recurso visual no responde 304 en Docker: ${asset} (HTTP ${conditional.status})`);
     }
   }
 }

@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { constants as zlibConstants, createBrotliCompress, createGzip } from 'node:zlib';
 import { ConfigStore } from './configStore.js';
 import { buildCohortComparison } from './cohortComparison.js';
 import { coverageRecoveryCandidates } from './coverageRecovery.js';
@@ -27,6 +28,7 @@ import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildClo
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
+import { etagMatches, isCompressibleStatic, selectStaticEncoding, staticEtag } from './staticDelivery.js';
 import { TelegramNotifier } from './telegramNotifier.js';
 import { TradeEventStore } from './tradeEventStore.js';
 import { YouTubePostsScraper, normalizePostsUrl, normalizeTelegramWebUrl } from './youtubeScraper.js';
@@ -2052,7 +2054,7 @@ const server = createServer(async (request, response) => {
       return sendJson(response, { ok: true });
     }
 
-    return serveStatic(requestUrl.pathname, response);
+    return serveStatic(requestUrl.pathname, request, response);
   } catch (error) {
     pushLog({ level: 'error', message: error.message, at: new Date().toISOString() });
     return sendJson(response, { error: error.message }, Number(error.statusCode || 500));
@@ -4229,7 +4231,7 @@ function sendJson(response, payload, status = 200) {
   response.end(JSON.stringify(payload));
 }
 
-async function serveStatic(pathname, response) {
+async function serveStatic(pathname, request, response) {
   const vendorFilePath = vendorAssets.get(pathname);
   let filePath = vendorFilePath;
 
@@ -4249,16 +4251,58 @@ async function serveStatic(pathname, response) {
   }
 
   const extension = extname(filePath);
-  const stream = createReadStream(filePath);
-  response.writeHead(200, {
-    'content-type': mimeType(extension),
-    'cache-control': vendorFilePath
-      ? 'public, max-age=31536000, immutable'
-      : extension === '.html'
-        ? 'no-store'
-        : 'no-cache'
+  const cacheControl = vendorFilePath
+    ? 'public, max-age=31536000, immutable'
+    : extension === '.html'
+      ? 'no-store'
+      : 'no-cache';
+  const etag = staticEtag(info);
+  const compressible = isCompressibleStatic(extension, info.size);
+  const encoding = selectStaticEncoding(request.headers['accept-encoding'], {
+    extension,
+    size: info.size
   });
-  stream.pipe(response);
+  const commonHeaders = {
+    'content-type': mimeType(extension),
+    'cache-control': cacheControl,
+    etag,
+    'last-modified': info.mtime.toUTCString()
+  };
+  if (compressible) {
+    commonHeaders.vary = 'Accept-Encoding';
+  }
+
+  if (cacheControl !== 'no-store' && etagMatches(request.headers['if-none-match'], etag)) {
+    response.writeHead(304, commonHeaders);
+    return response.end();
+  }
+
+  const headers = { ...commonHeaders };
+  if (encoding) {
+    headers['content-encoding'] = encoding;
+  } else {
+    headers['content-length'] = info.size;
+  }
+  response.writeHead(200, headers);
+  if (request.method === 'HEAD') {
+    return response.end();
+  }
+
+  const stream = createReadStream(filePath);
+  stream.on('error', (error) => response.destroy(error));
+  if (encoding === 'br') {
+    const encoder = createBrotliCompress({
+      params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 }
+    });
+    encoder.on('error', (error) => response.destroy(error));
+    return stream.pipe(encoder).pipe(response);
+  }
+  if (encoding === 'gzip') {
+    const encoder = createGzip({ level: 6 });
+    encoder.on('error', (error) => response.destroy(error));
+    return stream.pipe(encoder).pipe(response);
+  }
+  return stream.pipe(response);
 }
 
 function mimeType(extension) {
