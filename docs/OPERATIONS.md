@@ -84,6 +84,7 @@ Persistencia:
 - Si PM2 o Node reinician la app, el monitor live se rearma automáticamente con la última URL, intervalo y fuente de Telegram Web guardados.
 - Pulsar `Parar` desactiva ese auto-resume, para que un stop manual siga siendo manual.
 - Las sustituciones atómicas de JSON reintentan durante menos de dos segundos los bloqueos transitorios de Windows. Si aparece `EPERM`, `EBUSY` o `EACCES`, conserva el diario y el último archivo válido hasta completar el siguiente intento.
+- En Windows, `FuturesMagicianPM2Startup` es la única vía de autoarranque. `npm run windows:tasks` retira el acceso directo heredado de la carpeta Inicio y `startPm2.ps1` impide que dos restauraciones simultáneas compitan por el puerto `5178`.
 
 ## 4. Telegram de alertas
 

@@ -7,11 +7,16 @@ $user = "$env:USERDOMAIN\$env:USERNAME"
 $backupScript = Join-Path $PSScriptRoot 'secureBackup.js'
 $startupScript = Join-Path $PSScriptRoot 'startPm2.ps1'
 $profileScript = Join-Path $PSScriptRoot 'profileBackup.ps1'
+$legacyStartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'yt-members-signal-trader-pm2-resurrect.lnk'
 
 Set-Location -LiteralPath $repo
 & $node $backupScript init-key | Out-Null
 if ($LASTEXITCODE -ne 0) {
   throw "No se pudo inicializar la clave de backup."
+}
+
+if (Test-Path -LiteralPath $legacyStartupShortcut -PathType Leaf) {
+  [IO.File]::Delete([IO.Path]::GetFullPath($legacyStartupShortcut))
 }
 
 $settings = New-ScheduledTaskSettingsSet `
