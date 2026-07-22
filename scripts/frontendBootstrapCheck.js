@@ -229,60 +229,7 @@ try {
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({
-        historical: {
-          source: {
-            alignedMonth: fixtureMonth,
-            referenceLedger: {
-              label: 'HOJA QA',
-              url: 'https://docs.google.com/spreadsheets/d/qa/edit'
-            }
-          },
-          months: [{
-            month: fixtureMonth,
-            asset: 'USDT',
-            total: 15,
-            realized: 15,
-            closedTrades: 1,
-            openPaperTrades: 1
-          }],
-          positions: [
-            {
-              id: 'sheet-qa-1',
-              orderNumber: 1,
-              status: 'closed',
-              referenceLedger: true,
-              symbol: 'BTC-USDT',
-              direction: 'LONG',
-              leverage: 25,
-              openedAt: fixtureAt.toISOString(),
-              closedAt: fixtureAt.toISOString(),
-              entryPrice: 100,
-              closePrice: 101,
-              realizedPnl: 15,
-              notional: 1500,
-              outcome: 'GANADA'
-            },
-            {
-              id: 'sheet-qa-2',
-              orderNumber: 2,
-              status: 'open',
-              referenceLedger: true,
-              symbol: 'ETH-USDT',
-              direction: 'LONG',
-              leverage: 25,
-              openedAt: fixtureOpenAt.toISOString(),
-              closedAt: null,
-              entryPrice: 200,
-              stopLoss: 195,
-              realizedPnl: null,
-              paperPnl: null,
-              notional: 1500,
-              outcome: 'ABIERTA'
-            }
-          ]
-        }
-      })
+      body: JSON.stringify(nativeSheetFixturePayload(fixtureMonth, fixtureAt, fixtureOpenAt))
     });
   });
 
@@ -334,6 +281,140 @@ try {
   }
   if (nativeSheetErrors.length) {
     throw new Error(`Errores JavaScript en la hoja nativa: ${nativeSheetErrors.join(' | ')}`);
+  }
+
+  const mobileSheetPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const mobileSheetErrors = [];
+  const mobileSheetFixture = nativeSheetFixturePayload(fixtureMonth, fixtureAt, fixtureOpenAt);
+  mobileSheetFixture.historical.positions = Array.from({ length: 45 }, (_, index) => ({
+    ...mobileSheetFixture.historical.positions[0],
+    id: `sheet-mobile-${index + 1}`,
+    orderNumber: index + 1,
+    symbol: ['BTC-USDT', 'ETH-USDT', 'SOL-USDT'][index % 3],
+    openedAt: new Date(fixtureAt.getTime() + (index * 60_000)).toISOString(),
+    closedAt: new Date(fixtureAt.getTime() + (index * 60_000)).toISOString(),
+    entryPrice: 100 + index,
+    closePrice: 101 + index,
+    realizedPnl: index % 4 === 0 ? -5 : 15,
+    outcome: index % 4 === 0 ? 'PERDIDA' : 'GANADA'
+  }));
+  mobileSheetFixture.historical.months[0] = {
+    ...mobileSheetFixture.historical.months[0],
+    total: 435,
+    realized: 435,
+    closedTrades: 45,
+    openPaperTrades: 0
+  };
+  mobileSheetPage.on('pageerror', (error) => mobileSheetErrors.push(error.message));
+  await mobileSheetPage.route('**/api/historical-pnl?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(mobileSheetFixture)
+    });
+  });
+  await mobileSheetPage.goto(`${baseUrl}/?mobile-sheet-check=${Date.now()}#external-sheet-panel`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await mobileSheetPage.waitForFunction(() => (
+    document.querySelector('#external-sheet-panel')?.dataset.sheetState !== 'loading'
+      && document.querySelectorAll('#external-sheet-body tr').length === 40
+      && document.querySelectorAll('#reliability-domains .reliability-domain').length === 5
+  ), null, { timeout: 20_000 });
+  await mobileSheetPage.click('[data-external-sheet-scroll="right"]');
+  await mobileSheetPage.click('[data-external-sheet-scroll="down"]');
+  await mobileSheetPage.waitForFunction(() => {
+    const wrap = document.querySelector('.external-sheet-table-wrap');
+    return wrap && wrap.scrollLeft > 0 && wrap.scrollTop > 0;
+  }, null, { timeout: 5_000 });
+  const mobileSheetState = await mobileSheetPage.evaluate(() => {
+    const panel = document.querySelector('#external-sheet-panel');
+    const wrap = document.querySelector('.external-sheet-table-wrap');
+    const domainGrid = document.querySelector('#reliability-domains');
+    const panelRect = panel?.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    return {
+      viewportWidth,
+      pageOverflowX: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - viewportWidth,
+      panelLeft: panelRect?.left ?? null,
+      panelRight: panelRect?.right ?? null,
+      rowCount: document.querySelectorAll('#external-sheet-body tr').length,
+      tableClientWidth: wrap?.clientWidth ?? 0,
+      tableScrollWidth: wrap?.scrollWidth ?? 0,
+      tableClientHeight: wrap?.clientHeight ?? 0,
+      tableScrollHeight: wrap?.scrollHeight ?? 0,
+      tableScrollLeft: wrap?.scrollLeft ?? 0,
+      tableScrollTop: wrap?.scrollTop ?? 0,
+      tableOverflowX: wrap ? getComputedStyle(wrap).overflowX : '',
+      tableOverflowY: wrap ? getComputedStyle(wrap).overflowY : '',
+      domainCount: domainGrid?.children.length ?? 0,
+      domainColumns: domainGrid ? getComputedStyle(domainGrid).gridTemplateColumns.split(' ').filter(Boolean).length : 0,
+      clippedDomains: domainGrid
+        ? [...domainGrid.children].filter((item) => item.scrollWidth > item.clientWidth + 1).length
+        : -1
+    };
+  });
+  if (mobileSheetState.viewportWidth !== 390
+    || mobileSheetState.pageOverflowX > 1
+    || mobileSheetState.panelLeft == null
+    || mobileSheetState.panelLeft < 0
+    || mobileSheetState.panelRight > mobileSheetState.viewportWidth + 1
+    || mobileSheetState.rowCount !== 40
+    || mobileSheetState.tableScrollWidth <= mobileSheetState.tableClientWidth
+    || mobileSheetState.tableScrollHeight <= mobileSheetState.tableClientHeight
+    || mobileSheetState.tableScrollLeft <= 0
+    || mobileSheetState.tableScrollTop <= 0
+    || mobileSheetState.tableOverflowX !== 'auto'
+    || mobileSheetState.tableOverflowY !== 'auto'
+    || mobileSheetState.domainCount !== 5
+    || mobileSheetState.domainColumns !== 1
+    || mobileSheetState.clippedDomains !== 0) {
+    throw new Error(`La vista móvil no conserva scroll y lectura completa: ${JSON.stringify(mobileSheetState)}.`);
+  }
+  if (mobileSheetErrors.length) {
+    throw new Error(`Errores JavaScript en la vista móvil: ${mobileSheetErrors.join(' | ')}`);
+  }
+
+  await mobileSheetPage.setViewportSize({ width: 768, height: 1024 });
+  await mobileSheetPage.waitForTimeout(100);
+  const tabletSheetState = await mobileSheetPage.evaluate(() => {
+    const panel = document.querySelector('#external-sheet-panel');
+    const wrap = document.querySelector('.external-sheet-table-wrap');
+    const domainGrid = document.querySelector('#reliability-domains');
+    const panelRect = panel?.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    return {
+      viewportWidth,
+      pageOverflowX: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - viewportWidth,
+      panelLeft: panelRect?.left ?? null,
+      panelRight: panelRect?.right ?? null,
+      tableClientWidth: wrap?.clientWidth ?? 0,
+      tableScrollWidth: wrap?.scrollWidth ?? 0,
+      tableClientHeight: wrap?.clientHeight ?? 0,
+      tableScrollHeight: wrap?.scrollHeight ?? 0,
+      tableOverflowX: wrap ? getComputedStyle(wrap).overflowX : '',
+      tableOverflowY: wrap ? getComputedStyle(wrap).overflowY : '',
+      domainCount: domainGrid?.children.length ?? 0,
+      domainColumns: domainGrid ? getComputedStyle(domainGrid).gridTemplateColumns.split(' ').filter(Boolean).length : 0,
+      clippedDomains: domainGrid
+        ? [...domainGrid.children].filter((item) => item.scrollWidth > item.clientWidth + 1).length
+        : -1
+    };
+  });
+  if (tabletSheetState.viewportWidth !== 768
+    || tabletSheetState.pageOverflowX > 1
+    || tabletSheetState.panelLeft == null
+    || tabletSheetState.panelLeft < 0
+    || tabletSheetState.panelRight > tabletSheetState.viewportWidth + 1
+    || tabletSheetState.tableScrollWidth <= tabletSheetState.tableClientWidth
+    || tabletSheetState.tableScrollHeight <= tabletSheetState.tableClientHeight
+    || tabletSheetState.tableOverflowX !== 'auto'
+    || tabletSheetState.tableOverflowY !== 'auto'
+    || tabletSheetState.domainCount !== 5
+    || tabletSheetState.domainColumns !== 3
+    || tabletSheetState.clippedDomains !== 0) {
+    throw new Error(`La vista de tableta no conserva scroll y lectura completa: ${JSON.stringify(tabletSheetState)}.`);
   }
 
   await nativeSheetPage.evaluate(() => {
@@ -672,6 +753,10 @@ try {
     externalSheetOpenRowsPassed: true,
     externalSheetPendingPnlPassed: true,
     externalSheetNavigationPassed: true,
+    mobileSheetResponsivePassed: true,
+    mobileReliabilityResponsivePassed: true,
+    tabletSheetResponsivePassed: true,
+    tabletReliabilityResponsivePassed: true,
     outcomeImpactPanelPassed: true,
     manualPnlRefreshPassed: true
   }));
@@ -686,6 +771,63 @@ function optionValue(name) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function nativeSheetFixturePayload(fixtureMonth, fixtureAt, fixtureOpenAt) {
+  return {
+    historical: {
+      source: {
+        alignedMonth: fixtureMonth,
+        referenceLedger: {
+          label: 'HOJA QA',
+          url: 'https://docs.google.com/spreadsheets/d/qa/edit'
+        }
+      },
+      months: [{
+        month: fixtureMonth,
+        asset: 'USDT',
+        total: 15,
+        realized: 15,
+        closedTrades: 1,
+        openPaperTrades: 1
+      }],
+      positions: [
+        {
+          id: 'sheet-qa-1',
+          orderNumber: 1,
+          status: 'closed',
+          referenceLedger: true,
+          symbol: 'BTC-USDT',
+          direction: 'LONG',
+          leverage: 25,
+          openedAt: fixtureAt.toISOString(),
+          closedAt: fixtureAt.toISOString(),
+          entryPrice: 100,
+          closePrice: 101,
+          realizedPnl: 15,
+          notional: 1500,
+          outcome: 'GANADA'
+        },
+        {
+          id: 'sheet-qa-2',
+          orderNumber: 2,
+          status: 'open',
+          referenceLedger: true,
+          symbol: 'ETH-USDT',
+          direction: 'LONG',
+          leverage: 25,
+          openedAt: fixtureOpenAt.toISOString(),
+          closedAt: null,
+          entryPrice: 200,
+          stopLoss: 195,
+          realizedPnl: null,
+          paperPnl: null,
+          notional: 1500,
+          outcome: 'ABIERTA'
+        }
+      ]
+    }
+  };
 }
 
 function localMonthKey(value = new Date()) {
