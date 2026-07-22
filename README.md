@@ -179,13 +179,20 @@ Cada push a `main` y cada pull request ejecutan además la validación automáti
 - instalación reproducible con `npm ci`;
 - comprobación de sintaxis y suite completa en Node.js 20 y 24;
 - construcción de la imagen Docker;
-- arranque aislado y comprobación real de `/api/health`.
+- arranque aislado y comprobación real de `/api/health`;
+- recreación del contenedor y persistencia de datos, perfil e informes.
 
 Docker:
 
 ```bash
 cp .env.example .env
 npm run docker:up
+```
+
+Después de construir una imagen también puedes ejecutar el smoke test portable sin usar datos reales:
+
+```bash
+npm run docker:check -- --image futures-magician:local
 ```
 
 Docker publica el puerto únicamente en `127.0.0.1` de forma predeterminada. Para proteger un acceso mediante Cloudflare Tunnel, define `APP_BASIC_USER` y `APP_BASIC_PASSWORD` en `.env`; no publiques el puerto directamente en internet.

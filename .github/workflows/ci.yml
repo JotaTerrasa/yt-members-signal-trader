@@ -49,8 +49,16 @@ jobs:
       - name: Obtener el repositorio
         uses: actions/checkout@v7
 
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
       - name: Preparar Docker Buildx
         uses: docker/setup-buildx-action@v4
+
+      - name: Validar Docker Compose
+        run: docker compose config --quiet
 
       - name: Construir imagen
         uses: docker/build-push-action@v7
@@ -62,29 +70,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Comprobar arranque y healthcheck
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --detach --rm \
-            --name futures-magician-ci \
-            --publish 127.0.0.1:15178:5178 \
-            --env NODE_ENV=production \
-            --env HOST=0.0.0.0 \
-            --env PORT=5178 \
-            --env PLAYWRIGHT_HEADLESS=true \
-            futures-magician:ci
-          trap 'docker rm --force futures-magician-ci >/dev/null 2>&1 || true' EXIT
-
-          for _ in {1..45}; do
-            if curl --fail --silent --show-error http://127.0.0.1:15178/api/health > /tmp/health.json; then
-              if node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8')); process.exit(h.ok === true ? 0 : 1)"; then
-                exit 0
-              fi
-            fi
-            sleep 1
-          done
-
-          echo "La aplicación no alcanzó un estado saludable." >&2
-          docker logs futures-magician-ci || true
-          exit 1
+      - name: Comprobar arranque, healthcheck y persistencia
+        run: npm run docker:check -- --image futures-magician:ci --port 15178

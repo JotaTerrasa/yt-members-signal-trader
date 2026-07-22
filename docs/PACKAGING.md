@@ -171,8 +171,9 @@ El workflow `.github/workflows/ci.yml` protege la portabilidad del paquete en ca
 2. Construcción completa de la imagen Docker.
 3. Arranque efímero en `127.0.0.1:15178`.
 4. Respuesta satisfactoria de `/api/health` con `ok: true`.
+5. Recreación del contenedor conservando `.data`, `.yt-profile`, informes y auditorías.
 
-El contenedor de CI no monta `.data` ni `.yt-profile`, por lo que no puede leer ni modificar la operativa de ninguna instalación real.
+El contenedor de CI usa volúmenes con nombres únicos y no monta los directorios `.data` ni `.yt-profile` de ninguna instalación real, por lo que no puede leer ni modificar su operativa.
 
 ## Construcción manual Docker
 
@@ -186,6 +187,14 @@ La imagen expone `5178` y define healthcheck contra:
 ```text
 /api/health
 ```
+
+Para comprobar el arranque y los cuatro volúmenes con recursos desechables:
+
+```bash
+npm run docker:check -- --image futures-magician:local
+```
+
+El comando crea contenedores y volúmenes con nombres únicos, verifica `/api/health`, recrea el contenedor, comprueba las cuatro marcas de persistencia y elimina todos los recursos temporales. No monta `.data` ni `.yt-profile` de la instalación activa.
 
 La persistencia depende de los volúmenes de `.data`, `.yt-profile`, `docs/strategy-reports` y `docs/audits`. Un `docker compose down` no debe borrar esos directorios. La validación recomendada consiste en crear datos, reiniciar el contenedor y comprobar que siguen disponibles.
 

@@ -171,7 +171,7 @@ jotaterrasa <165782559+JotaTerrasa@users.noreply.github.com>
 ```
 
 9. Si tocaste persistencia, verificaste un backup y una restauración en ruta aislada.
-10. Si tocaste Docker, verificaste healthcheck y persistencia después de reiniciar el contenedor.
+10. Si tocaste Docker, ejecutaste `npm run docker:check -- --image futures-magician:local` después de construir la imagen.
 
 ## Git y publicación
 
