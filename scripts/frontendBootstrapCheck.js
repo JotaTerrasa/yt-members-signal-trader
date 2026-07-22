@@ -484,10 +484,10 @@ try {
     };
   });
   if (!outcomeImpactState.total.includes('-39')
-    || !outcomeImpactState.categories.some((row) => row.includes('Signo distinto antes de costes') && row.includes('2'))
+    || !outcomeImpactState.categories.some((row) => row.includes('Signo distinto antes de costes') && row.includes('-24') && row.includes('7,7%'))
     || !outcomeImpactState.categories.some((row) => row.includes('Ganancia absorbida por costes') && row.includes('1'))
     || !outcomeImpactState.categories.some((row) => row.includes('Mismo signo neto') && row.includes('3'))
-    || !outcomeImpactState.symbols.some((row) => row.includes('SOL-USDT') && row.includes('-15'))
+    || !outcomeImpactState.symbols.some((row) => row.includes('SOL-USDT') && row.includes('-13') && row.includes('13,3%') && row.includes('-15'))
     || outcomeImpactState.horizontalRange <= 0
     || outcomeImpactState.horizontalPosition <= 0) {
     throw new Error(`El impacto económico no se representó correctamente: ${JSON.stringify(outcomeImpactState)}.`);
@@ -750,23 +750,25 @@ function economicImpactAuditFixture(month) {
           rows: 6,
           replicaPnl: 55,
           bingxGross: 23,
+          grossGapVsReplica: -32,
           fees: -6.5,
           funding: -0.5,
           costs: -7,
+          costShareOfGapPercent: 17.94871795,
           bingxNet: 16,
           gapVsReplica: -39,
           residual: 0,
           reconciled: true,
           groups: [
-            { key: 'market_driven_mismatch', label: labels.market_driven_mismatch, rows: 2, netMismatch: 2, replicaPnl: 20, bingxGross: -4, costs: -2, bingxNet: -6, gapVsReplica: -26 },
-            { key: 'cost_driven_mismatch', label: labels.cost_driven_mismatch, rows: 1, netMismatch: 1, replicaPnl: 5, bingxGross: 1, costs: -2, bingxNet: -1, gapVsReplica: -6 },
-            { key: 'same_net_sign', label: labels.same_net_sign, rows: 3, sameNetSign: 3, netMismatch: 0, replicaPnl: 30, bingxGross: 26, costs: -3, bingxNet: 23, gapVsReplica: -7 }
+            { key: 'market_driven_mismatch', label: labels.market_driven_mismatch, rows: 2, netMismatch: 2, replicaPnl: 20, bingxGross: -4, grossGapVsReplica: -24, costs: -2, costShareOfGapPercent: 7.69230769, bingxNet: -6, gapVsReplica: -26 },
+            { key: 'cost_driven_mismatch', label: labels.cost_driven_mismatch, rows: 1, netMismatch: 1, replicaPnl: 5, bingxGross: 1, grossGapVsReplica: -4, costs: -2, costShareOfGapPercent: 33.33333333, bingxNet: -1, gapVsReplica: -6 },
+            { key: 'same_net_sign', label: labels.same_net_sign, rows: 3, sameNetSign: 3, netMismatch: 0, replicaPnl: 30, bingxGross: 26, grossGapVsReplica: -4, costs: -3, costShareOfGapPercent: 42.85714286, bingxNet: 23, gapVsReplica: -7 }
           ],
           bySymbol: [
-            { key: 'SOL-USDT', label: 'SOL-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 1, costDrivenNetMismatch: 0, gapVsReplica: -15 },
-            { key: 'SUI-USDT', label: 'SUI-USDT', rows: 1, netMismatch: 1, marketDrivenNetMismatch: 1, costDrivenNetMismatch: 0, gapVsReplica: -13 },
-            { key: 'ETH-USDT', label: 'ETH-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 1, gapVsReplica: -9 },
-            { key: 'BTC-USDT', label: 'BTC-USDT', rows: 1, netMismatch: 0, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 0, gapVsReplica: -2 }
+            { key: 'SOL-USDT', label: 'SOL-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 1, costDrivenNetMismatch: 0, grossGapVsReplica: -13, costs: -2, costShareOfGapPercent: 13.33333333, gapVsReplica: -15 },
+            { key: 'SUI-USDT', label: 'SUI-USDT', rows: 1, netMismatch: 1, marketDrivenNetMismatch: 1, costDrivenNetMismatch: 0, grossGapVsReplica: -12, costs: -1, costShareOfGapPercent: 7.69230769, gapVsReplica: -13 },
+            { key: 'ETH-USDT', label: 'ETH-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 1, grossGapVsReplica: -6, costs: -3, costShareOfGapPercent: 33.33333333, gapVsReplica: -9 },
+            { key: 'BTC-USDT', label: 'BTC-USDT', rows: 1, netMismatch: 0, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 0, grossGapVsReplica: -1, costs: -1, costShareOfGapPercent: 50, gapVsReplica: -2 }
           ]
         },
         signAnalysis: { marketMismatch: 2, costFlip: 1, netMismatch: 3, pairedRows: 6 },

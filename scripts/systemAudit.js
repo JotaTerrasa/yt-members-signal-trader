@@ -331,7 +331,7 @@ function buildFindings(report) {
     findings.push({
       severity: 'high',
       code: 'same_sign_economic_gap',
-      detail: `${sameSignImpact.rows} operaciones coinciden en signo, pero la réplica suma ${money(sameSignImpact.replicaPnl)} VST y BingX neto ${money(sameSignImpact.bingxNet)} VST; la brecha es ${money(sameSignImpact.gapVsReplica)} VST.`
+      detail: `${sameSignImpact.rows} operaciones coinciden en signo, pero la réplica suma ${money(sameSignImpact.replicaPnl)} VST y BingX neto ${money(sameSignImpact.bingxNet)} VST; la brecha es ${money(sameSignImpact.gapVsReplica)} VST: ${money(sameSignImpact.grossGapVsReplica)} VST antes de costes y ${money(sameSignImpact.costs)} VST de costes.`
     });
   }
   if (report.replica?.gapBridge?.reconciled === false) {
@@ -707,19 +707,25 @@ function renderPairedOutcomeImpactLines(impact) {
   const sameSign = pairedOutcomeImpactGroup(impact, 'same_net_sign');
   const symbolLines = (impact.bySymbol || []).map((item) => {
     const mismatchLabel = Number(item.netMismatch || 0) === 1 ? 'cambio de signo' : 'cambios de signo';
-    return `- Impacto ${item.key}: ${item.rows} pares; ${item.netMismatch} ${mismatchLabel}; réplica ${money(item.replicaPnl)} VST; BingX neto ${money(item.bingxNet)} VST; brecha ${money(item.gapVsReplica)} VST.`;
+    return `- Impacto ${item.key}: ${item.rows} pares; ${item.netMismatch} ${mismatchLabel}; réplica ${money(item.replicaPnl)} VST; brecha bruta ${money(item.grossGapVsReplica)} VST; costes ${money(item.costs)} VST (${pairedOutcomeCostShareLabel(item.costShareOfGapPercent)}); BingX neto ${money(item.bingxNet)} VST; brecha neta ${money(item.gapVsReplica)} VST.`;
   });
   return [
     `- Impacto comparable réplica / BingX bruto / BingX neto: ${money(impact.replicaPnl)} / ${money(impact.bingxGross)} / ${money(impact.bingxNet)} VST`,
+    `- Brecha bruta antes de costes: ${money(impact.grossGapVsReplica)} VST`,
     `- Costes comparables, comisiones / funding / total: ${money(impact.fees)} / ${money(impact.funding)} / ${money(impact.costs)} VST`,
+    `- Peso de costes sobre la brecha negativa: ${pairedOutcomeCostShareLabel(impact.costShareOfGapPercent)}`,
     `- Brecha total BingX neto - réplica: ${money(impact.gapVsReplica)} VST`,
-    `- Brecha por signo distinto antes de costes: ${market?.rows || 0} operaciones; ${money(market?.gapVsReplica ?? 0)} VST`,
-    `- Brecha por signo cambiado por costes: ${costs?.rows || 0} operaciones; ${money(costs?.gapVsReplica ?? 0)} VST`,
-    `- Brecha por otro cambio neto: ${other?.rows || 0} operaciones; ${money(other?.gapVsReplica ?? 0)} VST`,
-    `- Brecha aunque coincide el signo: ${sameSign?.rows || 0} operaciones; ${money(sameSign?.gapVsReplica ?? 0)} VST`,
+    `- Brecha por signo distinto antes de costes: ${market?.rows || 0} operaciones; bruta ${money(market?.grossGapVsReplica ?? 0)} VST; costes ${money(market?.costs ?? 0)} VST; neta ${money(market?.gapVsReplica ?? 0)} VST`,
+    `- Brecha por signo cambiado por costes: ${costs?.rows || 0} operaciones; bruta ${money(costs?.grossGapVsReplica ?? 0)} VST; costes ${money(costs?.costs ?? 0)} VST; neta ${money(costs?.gapVsReplica ?? 0)} VST`,
+    `- Brecha por otro cambio neto: ${other?.rows || 0} operaciones; bruta ${money(other?.grossGapVsReplica ?? 0)} VST; costes ${money(other?.costs ?? 0)} VST; neta ${money(other?.gapVsReplica ?? 0)} VST`,
+    `- Brecha aunque coincide el signo: ${sameSign?.rows || 0} operaciones; bruta ${money(sameSign?.grossGapVsReplica ?? 0)} VST; costes ${money(sameSign?.costs ?? 0)} VST; neta ${money(sameSign?.gapVsReplica ?? 0)} VST`,
     `- Residual del impacto: ${money(impact.residual)} VST (${impact.reconciled ? 'reconciliado' : 'revisar'})`,
     ...symbolLines
   ];
+}
+
+function pairedOutcomeCostShareLabel(value) {
+  return value === null || value === undefined ? 'no atribuible linealmente' : `${percent(value)} del gap`;
 }
 
 function renderMatchedGapAttributionLines(attribution) {

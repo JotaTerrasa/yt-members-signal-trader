@@ -3764,12 +3764,12 @@ summary.dashboard-section-title {
 
 .replica-impact-table {
   width: 100%;
-  min-width: 820px;
+  min-width: 1080px;
   border-collapse: collapse;
 }
 
 .replica-impact-table.symbol {
-  min-width: 680px;
+  min-width: 980px;
 }
 
 .replica-impact-table th,

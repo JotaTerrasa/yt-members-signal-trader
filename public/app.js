@@ -6433,7 +6433,9 @@ function renderPairedOutcomeImpact(impact = {}, activeFilter = 'all') {
       <td>${escapeHtml(String(group.rows || 0))}</td>
       <td class="${amountClass(group.replicaPnl)}">${escapeHtml(formatMoney(group.replicaPnl, 'VST'))}</td>
       <td class="${amountClass(group.bingxGross)}">${escapeHtml(formatMoney(group.bingxGross, 'VST'))}</td>
+      <td class="${amountClass(group.grossGapVsReplica)}">${escapeHtml(formatMoney(group.grossGapVsReplica, 'VST'))}</td>
       <td class="${amountClass(group.costs)}">${escapeHtml(formatMoney(group.costs, 'VST'))}</td>
+      <td>${escapeHtml(formatOptionalPercent(group.costShareOfGapPercent))}</td>
       <td class="${amountClass(group.bingxNet)}">${escapeHtml(formatMoney(group.bingxNet, 'VST'))}</td>
       <td class="${amountClass(group.gapVsReplica)}">${escapeHtml(formatMoney(group.gapVsReplica, 'VST'))}</td>
     </tr>
@@ -6454,6 +6456,9 @@ function renderPairedOutcomeImpact(impact = {}, activeFilter = 'all') {
       <td>${escapeHtml(String(group.netMismatch || 0))}</td>
       <td>${escapeHtml(String(group.marketDrivenNetMismatch || 0))}</td>
       <td>${escapeHtml(String(group.costDrivenNetMismatch || 0))}</td>
+      <td class="${amountClass(group.grossGapVsReplica)}">${escapeHtml(formatMoney(group.grossGapVsReplica, 'VST'))}</td>
+      <td class="${amountClass(group.costs)}">${escapeHtml(formatMoney(group.costs, 'VST'))}</td>
+      <td>${escapeHtml(formatOptionalPercent(group.costShareOfGapPercent))}</td>
       <td class="${amountClass(group.gapVsReplica)}">${escapeHtml(formatMoney(group.gapVsReplica, 'VST'))}</td>
     </tr>
   `;
@@ -6480,9 +6485,11 @@ function renderPairedOutcomeImpact(impact = {}, activeFilter = 'all') {
               <th>Ops.</th>
               <th>Réplica</th>
               <th>BingX bruto</th>
+              <th>Brecha bruta</th>
               <th>Costes</th>
+              <th>Peso costes</th>
               <th>BingX neto</th>
-              <th>Brecha</th>
+              <th>Brecha neta</th>
             </tr>
           </thead>
           <tbody>${groupRows}</tbody>
@@ -6502,6 +6509,9 @@ function renderPairedOutcomeImpact(impact = {}, activeFilter = 'all') {
                 <th>Cambian signo</th>
                 <th>Antes de costes</th>
                 <th>Por costes</th>
+                <th>Brecha bruta</th>
+                <th>Costes</th>
+                <th>Peso costes</th>
                 <th>Brecha neta</th>
               </tr>
             </thead>

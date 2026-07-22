@@ -1,8 +1,8 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-22T21:31:55.375Z
+Generada: 2026-07-22T21:59:46.897Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T21:31:55.849Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T21:59:47.289Z
 
 ## Resumen ejecutivo
 
@@ -14,7 +14,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T21:31:55.849Z
 - **INFO · gross_sign_recovered_after_costs:** 1 operación tuvo signo bruto contrario a la hoja, pero volvió a coincidir en neto después de costes; no forma parte de los cambios de signo neto.
 - **HIGH · paired_win_rate_gap:** Sobre las mismas 159 operaciones cerradas, la hoja gana el 74.84% y BingX VST neto el 61.64%; la brecha es de -13.2075 puntos y 21 resultados cambian de signo.
 - **INFO · paired_outcome_gap_by_cause:** 15 cambios de signo anteriores a costes aportan -216.4457 VST de brecha y 6 cambios provocados por costes aportan -39.9812 VST.
-- **HIGH · same_sign_economic_gap:** 138 operaciones coinciden en signo, pero la réplica suma 367.8335 VST y BingX neto -109.6113 VST; la brecha es -477.4448 VST.
+- **HIGH · same_sign_economic_gap:** 138 operaciones coinciden en signo, pero la réplica suma 367.8335 VST y BingX neto -109.6113 VST; la brecha es -477.4448 VST: -326.4774 VST antes de costes y -150.9674 VST de costes.
 - **INFO · historical_close_incidents_isolated:** 7 operaciones están asociadas a incidencias históricas ya corregidas, con un gap observado de -107.3859 VST; no se interpreta como contrafactual recuperable.
 - **INFO · openings_recovered_from_exchange:** 3 aperturas ausentes en los eventos locales fueron recuperadas desde BingX.
 - **HIGH · sheet_operations_missing:** 18 operaciones de la hoja no tienen apertura VST emparejada. Motivos: 5 stop inválido, 9 filtro de costes, 3 margen VST insuficiente, 1 desviación de entrada.
@@ -88,17 +88,19 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T21:31:55.849Z
 - Mismo signo / signo neto distinto: 138 / 21
 - Hoja ganadora y VST perdedora / caso inverso: 21 / 0
 - Impacto comparable réplica / BingX bruto / BingX neto: 487.5218 / -70.6756 / -246.3499 VST
+- Brecha bruta antes de costes: -558.1973 VST
 - Costes comparables, comisiones / funding / total: -170.8566 / -4.8178 / -175.6744 VST
+- Peso de costes sobre la brecha negativa: 23.94% del gap
 - Brecha total BingX neto - réplica: -733.8717 VST
-- Brecha por signo distinto antes de costes: 15 operaciones; -216.4457 VST
-- Brecha por signo cambiado por costes: 6 operaciones; -39.9812 VST
-- Brecha por otro cambio neto: 0 operaciones; 0.0000 VST
-- Brecha aunque coincide el signo: 138 operaciones; -477.4448 VST
+- Brecha por signo distinto antes de costes: 15 operaciones; bruta -198.9333 VST; costes -17.5123 VST; neta -216.4457 VST
+- Brecha por signo cambiado por costes: 6 operaciones; bruta -32.7866 VST; costes -7.1946 VST; neta -39.9812 VST
+- Brecha por otro cambio neto: 0 operaciones; bruta 0.0000 VST; costes 0.0000 VST; neta 0.0000 VST
+- Brecha aunque coincide el signo: 138 operaciones; bruta -326.4774 VST; costes -150.9674 VST; neta -477.4448 VST
 - Residual del impacto: 0.0000 VST (reconciliado)
-- Impacto SOL-USDT: 50 pares; 6 cambios de signo; réplica 127.4101 VST; BingX neto -140.8052 VST; brecha -268.2152 VST.
-- Impacto ETH-USDT: 51 pares; 7 cambios de signo; réplica 226.3713 VST; BingX neto -32.9064 VST; brecha -259.2778 VST.
-- Impacto BTC-USDT: 52 pares; 5 cambios de signo; réplica 137.7975 VST; BingX neto -32.7890 VST; brecha -170.5865 VST.
-- Impacto SUI-USDT: 6 pares; 3 cambios de signo; réplica -4.0571 VST; BingX neto -39.8493 VST; brecha -35.7922 VST.
+- Impacto SOL-USDT: 50 pares; 6 cambios de signo; réplica 127.4101 VST; brecha bruta -212.3036 VST; costes -55.9116 VST (20.85% del gap); BingX neto -140.8052 VST; brecha neta -268.2152 VST.
+- Impacto ETH-USDT: 51 pares; 7 cambios de signo; réplica 226.3713 VST; brecha bruta -204.0369 VST; costes -55.2409 VST (21.31% del gap); BingX neto -32.9064 VST; brecha neta -259.2778 VST.
+- Impacto BTC-USDT: 52 pares; 5 cambios de signo; réplica 137.7975 VST; brecha bruta -112.9161 VST; costes -57.6704 VST (33.81% del gap); BingX neto -32.7890 VST; brecha neta -170.5865 VST.
+- Impacto SUI-USDT: 6 pares; 3 cambios de signo; réplica -4.0571 VST; brecha bruta -28.9407 VST; costes -6.8515 VST (19.14% del gap); BingX neto -39.8493 VST; brecha neta -35.7922 VST.
 - Ejecuciones de entrada > 0,15%: 82 de 170
 - Ejecuciones de salida > 0,15%: 52 de 113
 - Fuentes de entrada: {"exchange_fill":170,"unavailable":18}
@@ -204,17 +206,19 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T21:31:55.849Z
 - Brecha de win rate VST - hoja: -5.7143 puntos
 - Mismo signo / signo neto distinto: 33 / 2
 - Impacto comparable réplica / BingX bruto / BingX neto: 39.5936 / -32.1511 / -72.5583 VST
+- Brecha bruta antes de costes: -71.7448 VST
 - Costes comparables, comisiones / funding / total: -39.3488 / -1.0584 / -40.4072 VST
+- Peso de costes sobre la brecha negativa: 36.03% del gap
 - Brecha total BingX neto - réplica: -112.1520 VST
-- Brecha por signo distinto antes de costes: 2 operaciones; -10.6718 VST
-- Brecha por signo cambiado por costes: 0 operaciones; 0.0000 VST
-- Brecha por otro cambio neto: 0 operaciones; 0.0000 VST
-- Brecha aunque coincide el signo: 33 operaciones; -101.4801 VST
+- Brecha por signo distinto antes de costes: 2 operaciones; bruta -8.1445 VST; costes -2.5274 VST; neta -10.6718 VST
+- Brecha por signo cambiado por costes: 0 operaciones; bruta 0.0000 VST; costes 0.0000 VST; neta 0.0000 VST
+- Brecha por otro cambio neto: 0 operaciones; bruta 0.0000 VST; costes 0.0000 VST; neta 0.0000 VST
+- Brecha aunque coincide el signo: 33 operaciones; bruta -63.6003 VST; costes -37.8798 VST; neta -101.4801 VST
 - Residual del impacto: 0.0000 VST (reconciliado)
-- Impacto SOL-USDT: 12 pares; 1 cambio de signo; réplica 6.3456 VST; BingX neto -49.4014 VST; brecha -55.7470 VST.
-- Impacto ETH-USDT: 10 pares; 1 cambio de signo; réplica 5.0914 VST; BingX neto -23.3532 VST; brecha -28.4447 VST.
-- Impacto BTC-USDT: 11 pares; 0 cambios de signo; réplica 27.9378 VST; BingX neto 10.2093 VST; brecha -17.7285 VST.
-- Impacto SUI-USDT: 2 pares; 0 cambios de signo; réplica 0.2187 VST; BingX neto -10.0131 VST; brecha -10.2318 VST.
+- Impacto SOL-USDT: 12 pares; 1 cambio de signo; réplica 6.3456 VST; brecha bruta -41.7406 VST; costes -14.0064 VST (25.12% del gap); BingX neto -49.4014 VST; brecha neta -55.7470 VST.
+- Impacto ETH-USDT: 10 pares; 1 cambio de signo; réplica 5.0914 VST; brecha bruta -16.9896 VST; costes -11.4550 VST (40.27% del gap); BingX neto -23.3532 VST; brecha neta -28.4447 VST.
+- Impacto BTC-USDT: 11 pares; 0 cambios de signo; réplica 27.9378 VST; brecha bruta -5.0306 VST; costes -12.6979 VST (71.62% del gap); BingX neto 10.2093 VST; brecha neta -17.7285 VST.
+- Impacto SUI-USDT: 2 pares; 0 cambios de signo; réplica 0.2187 VST; brecha bruta -7.9839 VST; costes -2.2479 VST (21.97% del gap); BingX neto -10.0131 VST; brecha neta -10.2318 VST.
 - Ejecuciones de entrada / salida > 0,15%: 27 / 10
 - Stops comparables alineados / divergentes: 7 / 0
 - Divergencias precedidas por cierres fallidos: 0
@@ -305,7 +309,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T21:31:55.849Z
 - Recarga Telegram: 30 s
 - Puerta de promoción: Bloqueada por fiabilidad
 - Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes
-- Reloj REST BingX: +713 ms de offset; RTT 197 ms; antigüedad 21.9 s; warn; solo observación
+- Reloj REST BingX: +758 ms de offset; RTT 275 ms; antigüedad 120.5 s; warn; solo observación
 
 ## Interpretación
 

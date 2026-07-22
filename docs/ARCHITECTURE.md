@@ -250,6 +250,8 @@ Reconstruye el ciclo operativo completo:
 
 Calcula métricas de ejecución y escenarios económicos comparables: bruto teórico, neto con entrada y salida taker y neto con entrada maker y salida taker. La devolución de comisiones solo se incorpora al resultado observado cuando aparece acreditada en los ingresos de BingX.
 
+La métrica `pairedOutcomeImpact` separa la brecha bruta frente a la réplica, anterior a comisiones y funding, de los costes observados. `costShareOfGapPercent` solo atribuye un porcentaje cuando ambos componentes empeoran la brecha; si uno compensa al otro, devuelve `null` para evitar una lectura causal engañosa. Estas métricas son exclusivamente analíticas y no participan en la ejecución de señales.
+
 ### `src/bingxClient.js`
 
 Cliente REST firmado con HMAC para BingX:

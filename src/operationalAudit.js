@@ -357,6 +357,11 @@ function addPairedOutcomeImpact(accumulator, row, outcome) {
 
 function finalizePairedOutcomeImpact(accumulator) {
   const costs = roundMoney(accumulator.fees + accumulator.funding);
+  const grossGapVsReplica = roundMoney(accumulator.bingxGross - accumulator.replicaPnl);
+  const gapVsReplica = roundMoney(accumulator.gapVsReplica);
+  const costShareOfGapPercent = grossGapVsReplica <= 0 && costs <= 0 && gapVsReplica < 0
+    ? roundMoney((Math.abs(costs) / Math.abs(gapVsReplica)) * 100)
+    : null;
   const residual = roundMoney(accumulator.bingxNet - accumulator.bingxGross - costs);
   return {
     key: accumulator.key,
@@ -370,11 +375,13 @@ function finalizePairedOutcomeImpact(accumulator) {
     grossMismatchRecoveredByCosts: accumulator.grossMismatchRecoveredByCosts,
     replicaPnl: roundMoney(accumulator.replicaPnl),
     bingxGross: roundMoney(accumulator.bingxGross),
+    grossGapVsReplica,
     fees: roundMoney(accumulator.fees),
     funding: roundMoney(accumulator.funding),
     costs,
+    costShareOfGapPercent,
     bingxNet: roundMoney(accumulator.bingxNet),
-    gapVsReplica: roundMoney(accumulator.gapVsReplica),
+    gapVsReplica,
     averageGapVsReplica: accumulator.rows
       ? roundMoney(accumulator.gapVsReplica / accumulator.rows)
       : 0,
