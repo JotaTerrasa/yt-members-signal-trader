@@ -157,6 +157,17 @@ Configuración importante:
 
 Cambiar cualquiera de los disparadores solo afecta a los SL que se creen o modifiquen después de guardar. La aplicación no cancela ni recrea automáticamente las protecciones ya abiertas. El take profit mantiene su configuración independiente.
 
+### Publicaciones editadas
+
+YouTube puede mostrar primero una señal con un error tipográfico y corregir el mismo post segundos después. En Demo VST, la aplicación compara ambas versiones y recupera únicamente la apertura cuya entrada, stop o apalancamiento hayan cambiado.
+
+- La corrección debe seguir dentro de la edad máxima configurada para señales.
+- La apertura pasa por las mismas validaciones y por el mismo antiduplicados que una señal nueva.
+- Si esa posición ya fue abierta, la edición no crea otra.
+- Una edición no puede añadir un ticker o una dirección nuevos a la recuperación.
+- Los cambios de prosa o take profit no vuelven a abrir posiciones.
+- Esta recuperación no se ejecuta en Live real.
+
 ### Reserva técnica de Demo VST
 
 La reserva técnica evita que un paquete quede a medias por falta de margen virtual. Antes de la primera apertura de cada publicación, la app calcula el margen necesario para todas sus señales y comprueba el saldo libre una sola vez.

@@ -40,6 +40,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Ejecuta los cierres explícitos inmediatamente a mercado; el slippage se registra como advertencia y nunca retiene la salida.
 - Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
 - Reintenta aperturas bloqueadas por una zona temporalmente inválida o por fallos transitorios, sin perseguir precios desfavorables.
+- En Demo VST recupera correcciones recientes de una publicación editada cuando cambian la entrada, el stop o el apalancamiento. La antigüedad máxima y el antiduplicados siguen siendo obligatorios; una edición de prosa o TP no reabre posiciones y Live real queda fuera.
 - Asigna a cada apertura un identificador determinista: un timeout o un reinicio no puede convertir un reintento en una segunda posición.
 - Conserva en `.data/execution-retries.json` las aperturas y los cierres pendientes para recuperarlos después de reiniciar el proceso.
 - Conserva en `.data/pnl-snapshots.json` la última lectura histórica válida de BingX. Un reinicio, rate limit o `system busy` ya no sustituye temporalmente fees, cierres y PnL por ceros.
@@ -521,6 +522,7 @@ src/
   futuresTrader.js       Test/demo/live/dual y gestión
   executionReliability.js Identidad idempotente y clasificación de reintentos
   executionRetryStore.js Cola persistente de aperturas y cierres pendientes
+  editedSignalRecovery.js Correcciones recientes de aperturas editadas en Demo
   pnlSnapshotStore.js    Última lectura PnL válida y fallback por fuente
   promotionGate.js       Criterios de promoción sin activación automática
   httpSecurity.js        Autenticación opcional y protecciones HTTP

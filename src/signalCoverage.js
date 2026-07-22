@@ -169,7 +169,7 @@ function normalizeExpectedSignal(signal = {}) {
 
 function heuristicOpeningSignals(text = '') {
   const results = [];
-  const pattern = /\b(LONG|SHORT)\s+([A-Z0-9]{2,16})(?:[-/]?USDT)?\b/gi;
+  const pattern = /^[^\p{L}\p{N}\r\n]{0,12}(LONG|SHORT)\s+([A-Z0-9]{2,16}(?:[-/]USDT)?)\b/gimu;
   for (const match of String(text || '').matchAll(pattern)) {
     results.push({
       symbol: normalizeSymbol(match[2]),

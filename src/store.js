@@ -67,6 +67,7 @@ export class PostStore {
     const byId = new Map(this.data.posts.map((post) => [post.id, post]));
     const inserted = [];
     const updated = [];
+    const edited = [];
 
     for (const post of posts) {
       if (!post?.id) {
@@ -93,6 +94,7 @@ export class PostStore {
         continue;
       }
 
+      const previousText = String(existing.text || '');
       const merged = {
         ...existing,
         ...normalized,
@@ -105,6 +107,13 @@ export class PostStore {
       if (changed) {
         updated.push(existing);
       }
+      if (previousText !== String(existing.text || '')) {
+        edited.push({
+          post: existing,
+          previousText,
+          currentText: String(existing.text || '')
+        });
+      }
     }
 
     if (inserted.length || updated.length) {
@@ -114,6 +123,7 @@ export class PostStore {
     return {
       inserted,
       updated,
+      edited,
       total: this.data.posts.length
     };
   }

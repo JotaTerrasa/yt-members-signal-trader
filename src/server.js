@@ -15,6 +15,7 @@ import { applySecurityHeaders, authorizeHttpRequest, buildHttpSecurity, createMu
 import { buildHistoricalPnl } from './historicalPnl.js';
 import { PaperTradeStore } from './paperTradeStore.js';
 import { detectPortfolioUrl } from './portfolioDetector.js';
+import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
@@ -239,6 +240,10 @@ async function handlePosts(payload) {
     await detectPortfolioUpdate([...result.inserted, ...result.updated]);
   }
 
+  if (result.edited.length && payload.source !== 'telegram_web') {
+    await recoverEditedPostOpenings(result.edited);
+  }
+
   if (result.inserted.length) {
     const sourceLabel = sourceItemLabel(payload);
     pushLog({
@@ -309,6 +314,36 @@ function enqueueTradeProcessing(posts, payload, options) {
   return task;
 }
 
+async function recoverEditedPostOpenings(edits = []) {
+  const config = configStore.getBingX({ includeSecrets: true });
+  if (!config.enabled || config.mode !== 'demo') {
+    return 0;
+  }
+
+  let attempted = 0;
+  for (const edit of edits) {
+    const signals = editedOpeningSignals({
+      previousText: edit.previousText,
+      currentText: edit.currentText,
+      parseSignals: (text) => futuresTrader.parseAll(text)
+    });
+    for (const signal of signals) {
+      await enqueueCoverageRecovery({
+        signal,
+        post: edit.post,
+        phase: 'edited_post_recovery',
+        logMessage: `Recuperando apertura corregida en una edicion de YouTube: ${signal.symbol} ${signal.direction}.`
+      });
+      attempted += 1;
+    }
+  }
+
+  if (attempted) {
+    await refreshSignalCoverage({ notify: true, recover: true });
+  }
+  return attempted;
+}
+
 async function recoverMissingCoverageExecutions(coverage) {
   const config = configStore.getBingX({ includeSecrets: true });
   if (!config.enabled || config.mode !== 'demo') {
@@ -361,12 +396,12 @@ function enqueueCoverageRecovery(candidate) {
 
       pushLog({
         level: 'warn',
-        message: `Recuperando hueco de cobertura Demo: ${candidate.signal.symbol} ${candidate.signal.direction}.`,
+        message: candidate.logMessage || `Recuperando hueco de cobertura Demo: ${candidate.signal.symbol} ${candidate.signal.direction}.`,
         at: new Date().toISOString()
       });
       return futuresTrader.executeSignal(candidate.signal, {
         post: candidate.post,
-        phase: 'coverage_recovery'
+        phase: candidate.phase || 'coverage_recovery'
       });
     });
   tradeProcessingQueue = task.catch(() => null);

@@ -126,6 +126,7 @@ Orquesta:
 - Cola serial de señales para evitar carreras entre YouTube y Telegram Web.
 - Reintentos cortos de entradas cuyo stop o precio aún no estén en zona válida.
 - Recuperación de reintentos pendientes después de reiniciar el proceso.
+- Recuperación acotada de aperturas corregidas en publicaciones editadas, solo en Demo VST.
 - Reconciliación de posiciones antes de reenviar una apertura.
 - Cierre inmediato a mercado con auditoría de slippage.
 - Reintentos idempotentes de cierres que fallen por red o error transitorio de BingX.
@@ -149,6 +150,10 @@ Mantiene la cola local de aperturas y cierres pendientes mediante reemplazo ató
 ### `src/coverageRecovery.js`
 
 Selecciona huecos recientes de cobertura que pueden recuperarse de forma segura. Solo propone aperturas Demo con motivo `no_execution_event`, dentro de la ventana temporal y con una señal parseada exacta. Los fallos ya explicados, los huecos antiguos y cualquier modo Live quedan fuera.
+
+### `src/editedSignalRecovery.js`
+
+Compara las señales estructuradas antes y después de una edición. Solo devuelve aperturas ya presentes en la versión anterior cuya entrada, stop o apalancamiento hayan cambiado; una edición no puede añadir un ticker o una dirección nuevos. `server.js` aplica después la edad máxima, las validaciones operativas y el antiduplicados; la ruta está desactivada fuera de Demo VST.
 
 ### `src/promotionGate.js`
 

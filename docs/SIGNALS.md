@@ -38,6 +38,10 @@ Regla de tipo de orden:
 - `LONG BTC 78190` o `SHORT BTC 78190` => `LIMIT`.
 - `LONG BTC` o `SHORT BTC` sin precio => `MARKET`.
 
+## Correcciones de una publicación
+
+En Demo VST, si YouTube edita una publicación reciente y corrige la entrada, el stop o el apalancamiento, la app vuelve a evaluar solo esa apertura. Se mantienen la edad máxima, todas las validaciones y el antiduplicados. Una edición de texto explicativo o de take profits no dispara una apertura nueva. Esta recuperación no se aplica en Live real.
+
 ## Direcciones
 
 Long:

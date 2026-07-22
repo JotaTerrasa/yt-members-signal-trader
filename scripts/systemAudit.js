@@ -266,10 +266,24 @@ function buildFindings(report) {
     findings.push({ severity: 'high', code: 'fees_dominate', detail: 'Las comisiones acumuladas superan el PnL bruto de BingX.' });
   }
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
-    findings.push({ severity: 'high', code: 'sheet_operations_missing', detail: `${report.replica.issueCounts['No ejecutada en VST']} operaciones de la hoja no tienen apertura VST emparejada.` });
+    const missingSheetOperations = report.replica.issueCounts['No ejecutada en VST'];
+    findings.push({
+      severity: 'high',
+      code: 'sheet_operations_missing',
+      detail: missingSheetOperations === 1
+        ? '1 operación de la hoja no tiene apertura VST emparejada.'
+        : `${missingSheetOperations} operaciones de la hoja no tienen apertura VST emparejada.`
+    });
   }
   if (report.runtime.signalCoverage?.summary?.missingOpenings) {
-    findings.push({ severity: 'critical', code: 'incomplete_signal_packages', detail: `${report.runtime.signalCoverage.summary.missingOpenings} aperturas faltan en paquetes posteriores a las mejoras.` });
+    const missingOpenings = report.runtime.signalCoverage.summary.missingOpenings;
+    findings.push({
+      severity: 'critical',
+      code: 'incomplete_signal_packages',
+      detail: missingOpenings === 1
+        ? '1 apertura falta en paquetes posteriores a las mejoras.'
+        : `${missingOpenings} aperturas faltan en paquetes posteriores a las mejoras.`
+    });
   }
   if (report.replica && Math.abs(report.replica.fees) > 0 && !report.replica.commissionRebateDetected) {
     findings.push({ severity: 'info', code: 'rebate_not_detected', detail: 'BingX no acredita ninguna devolución de comisiones en el histórico consultado.' });
