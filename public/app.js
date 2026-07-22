@@ -4407,6 +4407,10 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const bingxFunding = Number(summary.bingxFunding || 0);
   const actualRebate = Number(summary.actualCommissionRebate || 0);
   const referenceCoverage = summary.referenceCoverage || {};
+  const missingReasonCounts = summary.missingReasonCounts || {};
+  const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
+  const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
+  const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
   const coverageDetail = referenceCoverage.latestSheetAt
     ? `Última operación: ${formatDateTime(referenceCoverage.latestSheetAt)}`
     : 'Sin fecha de referencia';
@@ -4431,6 +4435,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Tarifa real', formatCommissionRates(summary), 'Tarifa consultada en BingX', '')}
         ${renderReplicaMetric('Diferencia neta', formatMoney(summary.netGap, 'VST'), 'BingX neto frente a réplica teórica', amountClass(summary.netGap))}
         ${renderReplicaMetric('Cobertura de la hoja', referenceCoverage.stale ? 'Desactualizada' : 'Al día', `${coverageDetail} · ${referenceCoverage.outsideCoverageRows || 0} VST posteriores`, referenceCoverage.stale ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
       </div>
       ${renderImprovementCohort(audit.cohort, audit.cohortHistory)}
       <div class="replica-issue-strip">
@@ -4503,6 +4508,22 @@ function formatCommissionRates(summary = {}) {
   return `Taker ${formatRatePercent(taker)} / Maker ${formatRatePercent(maker)}`;
 }
 
+function formatMissingReasonCounts(counts = {}) {
+  const labels = {
+    invalid_stop: 'stop inválido',
+    cost_guard: 'filtro de costes',
+    insufficient_vst: 'margen VST',
+    entry_deviation: 'desviación',
+    stop_distance: 'distancia de stop',
+    other: 'otro motivo',
+    unexplained: 'sin evidencia'
+  };
+  const parts = Object.entries(counts || {})
+    .filter(([, count]) => Number(count || 0) > 0)
+    .map(([key, count]) => `${count} ${labels[key] || key}`);
+  return parts.join(' · ') || 'Sin ausencias en la muestra';
+}
+
 function formatRatePercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) {
@@ -4553,11 +4574,14 @@ function renderReplicaAuditRow(row = {}) {
   const aggregation = Number(vst.aggregatedOpenings || 1) > 1
     ? `<span>${escapeHtml(`${vst.aggregatedOpenings} entradas agregadas`)}</span>`
     : '';
+  const failureEvidence = row.failure
+    ? `<span>${escapeHtml(`${row.failure.status || 'error'} · ${truncateText(row.failure.reason || '', 96)}`)}</span>`
+    : '';
   return `
     <tr class="${escapeAttribute(row.severity || 'neutral')}">
       <td>
         <strong>${escapeHtml(String(row.orderNumber || row.sequence || '-'))}</strong>
-        <span>${escapeHtml(formatAuditDate(vst.closingAt || vst.openingAt))}</span>
+        <span>${escapeHtml(formatAuditDate(vst.closingAt || vst.openingAt || row.failure?.at))}</span>
         ${aggregation}
       </td>
       <td>
@@ -4583,6 +4607,7 @@ function renderReplicaAuditRow(row = {}) {
       <td>
         <strong>${escapeHtml(row.cause || '-')}</strong>
         <span>${escapeHtml(row.detail || '')}</span>
+        ${failureEvidence}
         ${postLink}
       </td>
     </tr>

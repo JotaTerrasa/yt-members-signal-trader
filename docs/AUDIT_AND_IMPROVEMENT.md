@@ -31,6 +31,8 @@ La pestaña `PnL` usa `/api/replica-audit` como fuente única para la comparaci�
 
 La lectura actual separa tres grupos: filas emparejadas, operaciones realmente ausentes y aperturas VST posteriores al último día disponible en la hoja. El tercer grupo queda como `Fuera de cobertura de la hoja` y no se considera una desalineación hasta que la referencia se actualice. El emparejador no permite que una apertura de días posteriores rellene un hueco antiguo. Para las cohortes, las fuentes se acotan a su ventana antes de emparejar, evitando cruces falsos con operaciones anteriores.
 
+Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio, las **19/19 ausencias** tienen evidencia: seis stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
+
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 
 ## Causas demostradas

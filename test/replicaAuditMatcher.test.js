@@ -142,6 +142,39 @@ test('una apertura posterior a la cobertura de la hoja no rellena un hueco anter
   assert.equal(rows[2].opening, lateOpening);
 });
 
+test('enlaza un fallo solo con la fila ausente del mismo dia, activo, direccion y precio', () => {
+  const matchedFailure = {
+    eventId: 'missing-sol',
+    at: '2026-07-11T16:18:49.000Z',
+    status: 'error',
+    reason: 'No hay VST disponible suficiente.',
+    signal: {
+      symbol: 'SOL-USDT',
+      direction: 'LONG',
+      entry: { price: 78.15 }
+    }
+  };
+  const wrongDay = {
+    ...matchedFailure,
+    eventId: 'other-sol',
+    at: '2026-07-12T16:18:49.000Z'
+  };
+  const rows = alignReplicaAuditRecords({
+    sheetRows: [{
+      orderNumber: 112,
+      symbol: 'SOL-USDT',
+      direction: 'LONG',
+      entryPrice: 78.15,
+      openedAt: '2026-07-11T12:00:00.000Z'
+    }],
+    openingFailures: [wrongDay, matchedFailure]
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].opening, null);
+  assert.equal(rows[0].openingFailure, matchedFailure);
+});
+
 test('reparte un cierre de una posición agregada entre todas sus aperturas', () => {
   const first = {
     ...opening('2026-07-01T10:00:00Z', 'BTC-USDT', 100),

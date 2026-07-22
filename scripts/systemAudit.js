@@ -81,6 +81,7 @@ const report = {
     aggregatedRows: summary.aggregatedRows || 0,
     aggregatedCycles: summary.aggregatedCycles || 0,
     issueCounts: summary.issueCounts || {},
+    missingReasonCounts: summary.missingReasonCounts || {},
     referenceCoverage: summary.referenceCoverage || null
   } : null,
   cohort: replica?.cohort ? {
@@ -273,7 +274,7 @@ function buildFindings(report) {
       code: 'sheet_operations_missing',
       detail: missingSheetOperations === 1
         ? '1 operación de la hoja no tiene apertura VST emparejada.'
-        : `${missingSheetOperations} operaciones de la hoja no tienen apertura VST emparejada.`
+        : `${missingSheetOperations} operaciones de la hoja no tienen apertura VST emparejada. Motivos: ${missingReasonSummary(report.replica.missingReasonCounts)}.`
     });
   }
   if (report.replica?.referenceCoverage?.stale) {
@@ -369,6 +370,7 @@ function renderMarkdown(report) {
     `- Cobertura temporal asumida hasta: ${r.referenceCoverage?.coverageThroughAt || 'sin fecha'}`,
     `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
     `- Aperturas VST posteriores sin referencia: ${r.referenceCoverage?.outsideCoverageRows ?? 0}`,
+    `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
     '',
     '## Cohorte posterior a las mejoras',
@@ -413,6 +415,7 @@ function pickCohortSummary(summary = {}) {
     actualCommissionRebate: summary.actualCommissionRebate || 0,
     commissionRebateDetected: Boolean(summary.commissionRebateDetected),
     issueCounts: summary.issueCounts || {},
+    missingReasonCounts: summary.missingReasonCounts || {},
     referenceCoverage: summary.referenceCoverage || null
   };
 }
@@ -435,6 +438,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Paquetes completos: ${packages.completePackages || 0} de ${packages.packages || 0}`,
     `- Aperturas esperadas / ejecutadas / faltantes: ${packages.expectedOpenings || 0} / ${packages.executedOpenings || 0} / ${packages.missingOpenings || 0}`,
     `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
+    `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,
     `- Clasificación: ${JSON.stringify(summary.issueCounts || {})}`
   ];
@@ -448,6 +452,22 @@ function sameSignal(event, signal) {
 
 function reasonType(reason) {
   return String(reason || 'unknown').split(':')[0] || 'unknown';
+}
+
+function missingReasonSummary(counts = {}) {
+  const labels = {
+    invalid_stop: 'stop inválido',
+    cost_guard: 'filtro de costes',
+    insufficient_vst: 'margen VST insuficiente',
+    entry_deviation: 'desviación de entrada',
+    stop_distance: 'distancia de stop',
+    other: 'otro motivo',
+    unexplained: 'sin evidencia'
+  };
+  const parts = Object.entries(counts || {})
+    .filter(([, count]) => Number(count || 0) > 0)
+    .map(([key, count]) => `${count} ${labels[key] || key}`);
+  return parts.join(', ') || 'ninguna';
 }
 
 function pickHealth(health = {}) {

@@ -205,6 +205,88 @@ export function referenceCoverageEndTime(sheetRows = []) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1) - 1;
 }
 
+export function buildOpeningFailureAttempts(events = []) {
+  const groups = new Map();
+  for (const event of events || []) {
+    const key = openingAttemptKey(event);
+    if (!key) {
+      continue;
+    }
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(event);
+  }
+
+  const attempts = [];
+  for (const group of groups.values()) {
+    if (group.some((event) => String(event?.status || '') === 'demo_order_sent')) {
+      continue;
+    }
+    const failures = group
+      .filter((event) => isOpeningFailureStatus(event?.status))
+      .sort((left, right) => Date.parse(left?.at || 0) - Date.parse(right?.at || 0));
+    const failure = failures.at(-1);
+    if (!failure) {
+      continue;
+    }
+    attempts.push({
+      eventId: failure.eventId || null,
+      at: failure.at || null,
+      status: failure.status || 'error',
+      reason: String(failure.reason || failure.error || 'Motivo no registrado.'),
+      category: openingFailureCategory(failure.reason || failure.error),
+      postId: failure.postId || null,
+      postUrl: failure.postUrl || null,
+      executionKey: failure.executionKey || null,
+      signal: failure.signal || null
+    });
+  }
+
+  return attempts.sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
+}
+
+function openingAttemptKey(event = {}) {
+  const signal = event?.signal || {};
+  if (signal.action || !event?.postId || !signal.symbol || !signal.direction) {
+    return '';
+  }
+  const entryPrice = Number(signal.entry?.price);
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return '';
+  }
+  return [event.postId, signal.symbol, signal.direction, entryPrice].join('|').toUpperCase();
+}
+
+function isOpeningFailureStatus(status = '') {
+  const value = String(status || '').toLowerCase();
+  return value === 'blocked'
+    || value === 'error'
+    || value === 'demo_order_retry_expired'
+    || value === 'demo_order_failed'
+    || value === 'demo_order_rejected';
+}
+
+function openingFailureCategory(reason = '') {
+  const value = String(reason || '');
+  if (/cost_guard/i.test(value)) {
+    return 'cost_guard';
+  }
+  if (/VST disponible|insufficient margin/i.test(value)) {
+    return 'insufficient_vst';
+  }
+  if (/entry_adverse_deviation/i.test(value)) {
+    return 'entry_deviation';
+  }
+  if (/stop_loss_distance/i.test(value)) {
+    return 'stop_distance';
+  }
+  if (/stop_loss_invalid|SL Price must|invalid_(?:long|short)_stop_loss/i.test(value)) {
+    return 'invalid_stop';
+  }
+  return 'other';
+}
+
 export function monitorHealthFinding(health = {}) {
   const level = String(health.level || 'unknown').toLowerCase();
   if (!health.running || health.stale || level === 'error' || level === 'unknown') {

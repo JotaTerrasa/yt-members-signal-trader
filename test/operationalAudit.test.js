@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, scopeReplicaCohortInputs } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, scopeReplicaCohortInputs } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -147,6 +147,51 @@ test('extiende la cobertura de una fecha de hoja hasta el final de ese dia UTC',
     referenceCoverageEndTime([{ openedAt: '2026-07-15T12:00:00.000Z' }]),
     Date.parse('2026-07-15T23:59:59.999Z')
   );
+});
+
+test('conserva solo el fallo terminal de una apertura que nunca se ejecuto', () => {
+  const signal = {
+    symbol: 'SOL-USDT',
+    direction: 'LONG',
+    entry: { price: 75.93 }
+  };
+  const attempts = buildOpeningFailureAttempts([
+    {
+      eventId: 'blocked',
+      at: '2026-07-14T12:34:00.000Z',
+      postId: 'post-missing',
+      status: 'blocked',
+      reason: 'entry_adverse_deviation_too_high:0.28%>0.15%',
+      signal
+    },
+    {
+      eventId: 'expired',
+      at: '2026-07-14T12:37:00.000Z',
+      postId: 'post-missing',
+      status: 'demo_order_retry_expired',
+      reason: 'entry_adverse_deviation_too_high:0.36%>0.15%',
+      signal
+    },
+    {
+      eventId: 'temporary-block',
+      at: '2026-07-14T13:30:00.000Z',
+      postId: 'post-recovered',
+      status: 'blocked',
+      reason: 'exchange_stop_loss_invalid',
+      signal
+    },
+    {
+      eventId: 'sent',
+      at: '2026-07-14T13:31:00.000Z',
+      postId: 'post-recovered',
+      status: 'demo_order_sent',
+      signal
+    }
+  ]);
+
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].eventId, 'expired');
+  assert.equal(attempts[0].category, 'entry_deviation');
 });
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {

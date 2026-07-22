@@ -19,7 +19,7 @@ import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, scopeReplicaCohortInputs } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, scopeReplicaCohortInputs } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4256,10 +4256,10 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     demoIncomeRows({ config, monthWindow }),
     demoCommissionRate({ config }).catch(() => null)
   ]);
-  const events = tradeEventStore.list()
+  const windowEvents = tradeEventStore.list()
     .filter(Boolean)
-    .filter((event) => auditEventInWindow(event, monthWindow))
-    .filter((event) => auditEventIsDemo(event));
+    .filter((event) => auditEventInWindow(event, monthWindow));
+  const events = windowEvents.filter((event) => auditEventIsDemo(event, windowEvents));
   const rowAudit = annotateReplicaReferenceCoverage(buildReplicaAuditRows({
     sheetRows,
     incomeRows,
@@ -4402,6 +4402,7 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], d
     openings: auditOpeningEvents(events),
     realizedRows: auditIncomeByType(incomeRows, 'REALIZED_PNL'),
     closeEvents: auditCloseEvents(events),
+    openingFailures: buildOpeningFailureAttempts(events),
     openingFees: auditFeeRows(incomeRows, 'opening'),
     closingFees: auditFeeRows(incomeRows, 'closing'),
     fundingRows: auditIncomeByType(incomeRows, 'FUNDING_FEE'),
@@ -4439,6 +4440,7 @@ function replicaAuditRow({
   openingFee,
   closingFee,
   funding,
+  openingFailure,
   unmatchedClose,
   aggregatedOpenings,
   defaultNotional
@@ -4472,6 +4474,7 @@ function replicaAuditRow({
     fees,
     entryDiffPercent,
     closeDiffPercent,
+    openingFailure,
     unmatchedClose
   });
 
@@ -4511,8 +4514,16 @@ function replicaAuditRow({
       closeStatus: closeEvent?.status || '',
       closeReason: closeEvent?.reason || '',
       aggregatedOpenings: Number(aggregatedOpenings || 1),
-      postUrl: opening?.postUrl || closeEvent?.postUrl || ''
+      postUrl: opening?.postUrl || openingFailure?.postUrl || closeEvent?.postUrl || ''
     },
+    failure: openingFailure ? {
+      status: openingFailure.status || 'error',
+      reason: openingFailure.reason || '',
+      category: openingFailure.category || 'other',
+      at: openingFailure.at || null,
+      entry: auditRound(auditNumber(openingFailure.signal?.entry?.price, null)),
+      postUrl: openingFailure.postUrl || ''
+    } : null,
     diff: {
       gross: auditRound(diffGross),
       net: auditRound(diffNet),
@@ -4521,6 +4532,7 @@ function replicaAuditRow({
     },
     trace: {
       openingEventId: opening?.eventId || null,
+      openingFailureEventId: openingFailure?.eventId || null,
       executionKey: opening?.executionKey || null,
       closeEventId: closeEvent?.eventId || null,
       exchangePositionId: closeEvent?.exchangePosition?.id || null,
@@ -4545,13 +4557,18 @@ function auditRowStatus({
   fees,
   entryDiffPercent,
   closeDiffPercent,
+  openingFailure,
   unmatchedClose
 }) {
   if (unmatchedClose) {
     return { cause: 'Cierre sin apertura enlazada', detail: 'BingX registra un cierre que no se ha podido asociar a una apertura guardada.', severity: 'negative' };
   }
   if (sheet && !opening) {
-    return { cause: 'No ejecutada en VST', detail: 'Existe en la hoja, pero no hay apertura demo emparejada.', severity: 'negative' };
+    return {
+      cause: 'No ejecutada en VST',
+      detail: openingFailureDetail(openingFailure),
+      severity: 'negative'
+    };
   }
   if (!sheet && opening) {
     return { cause: 'Extra en VST', detail: 'Hay apertura demo que no aparece en la hoja externa.', severity: 'warn' };
@@ -4578,6 +4595,21 @@ function auditRowStatus({
     return { cause: 'Diferencia de ejecución', detail: 'La diferencia neta supera el margen normal de réplica.', severity: 'warn' };
   }
   return { cause: 'Alineada', detail: 'La operación está razonablemente cerca de la réplica teórica.', severity: 'positive' };
+}
+
+function openingFailureDetail(failure) {
+  if (!failure) {
+    return 'Existe en la hoja, pero no hay apertura demo ni un intento fallido emparejado.';
+  }
+  const details = {
+    cost_guard: 'El filtro de costes vigente en ese momento bloqueó la entrada.',
+    insufficient_vst: 'BingX rechazó la entrada por margen VST insuficiente.',
+    entry_deviation: 'La entrada agotó sus reintentos porque el precio se alejó del límite permitido.',
+    stop_distance: 'La validación bloqueó un stop demasiado alejado de la entrada.',
+    invalid_stop: 'BingX rechazó la orden porque el stop ya quedaba en un lado inválido del precio.'
+  };
+  return details[failure.category]
+    || `El intento terminó como ${failure.status || 'error'}: ${failure.reason || 'motivo no registrado'}`;
 }
 
 function summarizeReplicaAudit({
@@ -4625,6 +4657,13 @@ function summarizeReplicaAudit({
     totals[row.cause] = (totals[row.cause] || 0) + 1;
     return totals;
   }, {});
+  const missingReasonCounts = rows
+    .filter((row) => row.cause === 'No ejecutada en VST')
+    .reduce((totals, row) => {
+      const key = row.failure?.category || 'unexplained';
+      totals[key] = (totals[key] || 0) + 1;
+      return totals;
+    }, {});
   const worstRows = [...rows]
     .filter((row) => Number.isFinite(Number(row.diff?.net)))
     .sort((left, right) => Math.abs(Number(right.diff.net || 0)) - Math.abs(Number(left.diff.net || 0)))
@@ -4670,6 +4709,7 @@ function summarizeReplicaAudit({
     startingCapital: reference?.startingCapital ?? null,
     equity: reference?.equity ?? null,
     issueCounts,
+    missingReasonCounts,
     aggregatedRows: aggregatedRows.length,
     aggregatedCycles,
     worstRows,
@@ -4699,8 +4739,26 @@ function auditEventInWindow(event = {}, window) {
   return Number.isFinite(timestamp) && timestamp >= window.startTime && timestamp <= window.endTime;
 }
 
-function auditEventIsDemo(event = {}) {
+function auditEventIsDemo(event = {}, allEvents = []) {
   event = event || {};
+  if (auditEventExplicitlyDemo(event)) {
+    return true;
+  }
+  const status = String(event.status || '').toLowerCase();
+  if (status !== 'error' && status !== 'blocked') {
+    return false;
+  }
+  if (/\bVST\b/i.test(String(event.reason || event.error || ''))) {
+    return true;
+  }
+  return Boolean(event.postId) && allEvents.some((candidate) => (
+    candidate !== event
+    && candidate?.postId === event.postId
+    && auditEventExplicitlyDemo(candidate)
+  ));
+}
+
+function auditEventExplicitlyDemo(event = {}) {
   const status = String(event.status || '').toLowerCase();
   const mode = String(event.executionMode || '').toLowerCase();
   const source = String(event.exchangePosition?.source || event.position?.source || '').toLowerCase();
@@ -4794,6 +4852,10 @@ function auditClosePrice(event = {}) {
 }
 
 function auditPercentDiff(actual, expected) {
+  if (actual === null || actual === undefined || actual === ''
+    || expected === null || expected === undefined || expected === '') {
+    return null;
+  }
   const left = Number(actual);
   const right = Number(expected);
   if (!Number.isFinite(left) || !Number.isFinite(right) || right <= 0) {

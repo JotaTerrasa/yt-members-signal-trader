@@ -1,5 +1,6 @@
 const GAP_COST = 1;
 const MAX_MATCH_ENTRY_DIFF_PERCENT = 4;
+const MAX_FAILURE_MATCH_ENTRY_DIFF_PERCENT = 0.1;
 const CLOSE_EVENT_MATCH_WINDOW_MS = 5 * 60 * 1000;
 const FEE_MATCH_WINDOW_MS = 5 * 60 * 1000;
 
@@ -11,6 +12,7 @@ export function alignReplicaAuditRecords({
   openingFees = [],
   closingFees = [],
   fundingRows = [],
+  openingFailures = [],
   sheetCoverageEndTime = null
 } = {}) {
   const lifecycles = buildExecutionLifecycles({
@@ -21,7 +23,10 @@ export function alignReplicaAuditRecords({
     closingFees,
     fundingRows
   });
-  const aligned = alignBySymbol(sheetRows, lifecycles, sheetCoverageEndTime);
+  const aligned = attachOpeningFailures(
+    alignBySymbol(sheetRows, lifecycles, sheetCoverageEndTime),
+    openingFailures
+  );
   const matchedRealized = new Set(aligned.map((item) => item.realizedSource || item.realized).filter(Boolean));
 
   for (const realized of realizedRows) {
@@ -41,6 +46,40 @@ export function alignReplicaAuditRecords({
   }
 
   return aligned;
+}
+
+export function attachOpeningFailures(records = [], failures = []) {
+  const used = new Set();
+  const candidates = [...(failures || [])].sort((left, right) => eventTime(left) - eventTime(right));
+  return (records || []).map((record) => {
+    if (!record?.sheet || record?.opening) {
+      return record;
+    }
+    const sheetDate = utcDateKey(record.sheet?.openedAt || record.sheet?.closedAt);
+    if (!sheetDate) {
+      return record;
+    }
+    const match = candidates
+      .filter((failure) => !used.has(failure))
+      .filter((failure) => eventSymbol(failure) === normalizeSymbol(record.sheet?.symbol))
+      .filter((failure) => {
+        const sheetDirection = normalizeDirection(record.sheet?.direction);
+        const failureDirection = normalizeDirection(failure?.signal?.direction);
+        return !sheetDirection || !failureDirection || sheetDirection === failureDirection;
+      })
+      .filter((failure) => utcDateKey(failure?.at) === sheetDate)
+      .map((failure) => ({
+        failure,
+        entryDiff: percentDiff(record.sheet?.entryPrice, openingPrice(failure))
+      }))
+      .filter((item) => item.entryDiff !== null && item.entryDiff <= MAX_FAILURE_MATCH_ENTRY_DIFF_PERCENT)
+      .sort((left, right) => left.entryDiff - right.entryDiff || eventTime(left.failure) - eventTime(right.failure))[0];
+    if (!match) {
+      return record;
+    }
+    used.add(match.failure);
+    return { ...record, openingFailure: match.failure };
+  });
 }
 
 function alignBySymbol(sheetRows, lifecycles, sheetCoverageEndTime = null) {
@@ -413,6 +452,11 @@ function rowTime(row) {
 function eventTime(event) {
   const value = Date.parse(event?.at || 0);
   return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function utcDateKey(value) {
+  const timestamp = Date.parse(value || 0);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : '';
 }
 
 function incomeTime(row) {
