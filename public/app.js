@@ -6766,7 +6766,8 @@ function scrollTableContainer(wrap, direction) {
     right: { top: 0, left: horizontalStep }
   };
   const move = moves[direction] || moves.down;
-  wrap.scrollBy({ ...move, behavior: 'smooth' });
+  // Immediate steps keep rapid vertical and horizontal commands from cancelling each other.
+  wrap.scrollBy({ ...move, behavior: 'auto' });
 }
 
 function renderAlignmentRow(pair) {

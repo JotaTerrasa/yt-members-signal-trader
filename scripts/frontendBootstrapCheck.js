@@ -321,6 +321,94 @@ try {
     throw new Error(`Errores JavaScript al excluir PnL pendiente: ${nativeSheetErrors.join(' | ')}`);
   }
 
+  const sheetNavigationPage = await browser.newPage({ viewport: { width: 760, height: 800 } });
+  const sheetNavigationErrors = [];
+  const navigationPositions = Array.from({ length: 45 }, (_, index) => ({
+    id: `sheet-navigation-${index + 1}`,
+    orderNumber: 45 - index,
+    status: 'closed',
+    referenceLedger: true,
+    symbol: index % 2 === 0 ? 'BTC-USDT' : 'ETH-USDT',
+    direction: 'LONG',
+    leverage: 25,
+    openedAt: fixtureAt.toISOString(),
+    closedAt: fixtureAt.toISOString(),
+    entryPrice: 100 + index,
+    closePrice: 101 + index,
+    realizedPnl: 1,
+    paperPnl: 1,
+    notional: 1500,
+    outcome: 'GANADA'
+  }));
+  sheetNavigationPage.on('pageerror', (error) => sheetNavigationErrors.push(error.message));
+  await sheetNavigationPage.route('**/api/historical-pnl?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({
+        historical: {
+          source: {
+            alignedMonth: fixtureMonth,
+            referenceLedger: {
+              label: 'HOJA NAVEGACION QA',
+              url: 'https://docs.google.com/spreadsheets/d/qa-navigation/edit'
+            }
+          },
+          months: [{
+            month: fixtureMonth,
+            asset: 'USDT',
+            total: 45,
+            realized: 45,
+            closedTrades: 45,
+            openPaperTrades: 0
+          }],
+          positions: navigationPositions
+        }
+      })
+    });
+  });
+  await sheetNavigationPage.goto(`${baseUrl}/?sheet-navigation-check=${Date.now()}#external-sheet-panel`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await sheetNavigationPage.waitForFunction(() => (
+    document.querySelectorAll('#external-sheet-body tr').length === 40
+      && document.querySelector('#external-sheet-pagination-status')?.textContent.includes('40 de 45')
+  ), null, { timeout: 20_000 });
+  await sheetNavigationPage.click('#external-sheet-load-more');
+  await sheetNavigationPage.click('[data-external-sheet-scroll="down"]');
+  await sheetNavigationPage.click('[data-external-sheet-scroll="right"]');
+  await sheetNavigationPage.waitForTimeout(700);
+  const navigationState = await sheetNavigationPage.evaluate(() => {
+    const wrap = document.querySelector('.external-sheet-table-wrap');
+    const rows = [...document.querySelectorAll('#external-sheet-body tr')];
+    return {
+      rows: rows.length,
+      firstOrder: rows[0]?.querySelector('td:first-child strong')?.textContent.trim() || '',
+      lastOrder: rows.at(-1)?.querySelector('td:first-child strong')?.textContent.trim() || '',
+      status: document.querySelector('#external-sheet-pagination-status')?.textContent || '',
+      loadMoreHidden: document.querySelector('#external-sheet-load-more')?.classList.contains('hidden'),
+      scrollTop: wrap?.scrollTop || 0,
+      scrollLeft: wrap?.scrollLeft || 0,
+      scrollTopMax: wrap ? wrap.scrollHeight - wrap.clientHeight : 0,
+      scrollLeftMax: wrap ? wrap.scrollWidth - wrap.clientWidth : 0
+    };
+  });
+  if (navigationState.rows !== 45
+    || navigationState.firstOrder !== '45'
+    || navigationState.lastOrder !== '1'
+    || !navigationState.status.includes('45 de 45')
+    || !navigationState.loadMoreHidden
+    || navigationState.scrollTopMax <= 0
+    || navigationState.scrollLeftMax <= 0
+    || navigationState.scrollTop <= 0
+    || navigationState.scrollLeft <= 0) {
+    throw new Error(`La hoja no permitio recorrer todas sus filas: ${JSON.stringify(navigationState)}.`);
+  }
+  if (sheetNavigationErrors.length) {
+    throw new Error(`Errores JavaScript al navegar la hoja: ${sheetNavigationErrors.join(' | ')}`);
+  }
+
   const manualRefreshPage = await browser.newPage();
   const manualRefreshErrors = [];
   const manualRefreshRequests = {
@@ -423,6 +511,7 @@ try {
     externalSheetNativePassed: true,
     externalSheetOpenRowsPassed: true,
     externalSheetPendingPnlPassed: true,
+    externalSheetNavigationPassed: true,
     manualPnlRefreshPassed: true
   }));
 } finally {
