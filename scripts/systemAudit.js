@@ -82,6 +82,7 @@ const report = {
     aggregatedCycles: summary.aggregatedCycles || 0,
     issueCounts: summary.issueCounts || {},
     missingReasonCounts: summary.missingReasonCounts || {},
+    stopAnalysis: summary.stopAnalysis || {},
     referenceCoverage: summary.referenceCoverage || null
   } : null,
   cohort: replica?.cohort ? {
@@ -277,6 +278,15 @@ function buildFindings(report) {
         : `${missingSheetOperations} operaciones de la hoja no tienen apertura VST emparejada. Motivos: ${missingReasonSummary(report.replica.missingReasonCounts)}.`
     });
   }
+  if (report.replica?.stopAnalysis?.divergent) {
+    const stops = report.replica.stopAnalysis;
+    const aggregated = Number(stops.aggregatedDivergent || 0);
+    findings.push({
+      severity: 'high',
+      code: 'reference_stop_divergence',
+      detail: `${stops.divergent} stops cerraron con signo contrario a la hoja; ${stops.aligned} de ${stops.total} stops comparables sí quedaron alineados${aggregated ? ` y ${aggregated} divergencias pertenecen a posiciones agregadas` : ''}.`
+    });
+  }
   if (report.replica?.referenceCoverage?.stale) {
     const referenceCoverage = report.replica.referenceCoverage;
     findings.push({
@@ -371,6 +381,9 @@ function renderMarkdown(report) {
     `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
     `- Aperturas VST posteriores sin referencia: ${r.referenceCoverage?.outsideCoverageRows ?? 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
+    `- Stops comparables alineados / divergentes / con deslizamiento: ${r.stopAnalysis?.aligned ?? 0} / ${r.stopAnalysis?.divergent ?? 0} / ${r.stopAnalysis?.slippage ?? 0}`,
+    `- Stops observados sin hoja comparable: ${r.stopAnalysis?.unknown ?? 0}`,
+    `- Stops divergentes en posiciones agregadas: ${r.stopAnalysis?.aggregatedDivergent ?? 0}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
     '',
     '## Cohorte posterior a las mejoras',
@@ -416,6 +429,7 @@ function pickCohortSummary(summary = {}) {
     commissionRebateDetected: Boolean(summary.commissionRebateDetected),
     issueCounts: summary.issueCounts || {},
     missingReasonCounts: summary.missingReasonCounts || {},
+    stopAnalysis: summary.stopAnalysis || {},
     referenceCoverage: summary.referenceCoverage || null
   };
 }
@@ -439,6 +453,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Aperturas esperadas / ejecutadas / faltantes: ${packages.expectedOpenings || 0} / ${packages.executedOpenings || 0} / ${packages.missingOpenings || 0}`,
     `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
+    `- Stops comparables alineados / divergentes: ${summary.stopAnalysis?.aligned || 0} / ${summary.stopAnalysis?.divergent || 0}`,
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,
     `- Clasificación: ${JSON.stringify(summary.issueCounts || {})}`
   ];

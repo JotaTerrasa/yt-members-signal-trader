@@ -246,6 +246,57 @@ export function buildOpeningFailureAttempts(events = []) {
   return attempts.sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
 }
 
+export function replicaStopAlignment({
+  closeStatus = '',
+  replicaPnl = null,
+  grossPnl = null,
+  closeDiffPercent = null,
+  maxCloseDiffPercent = 0.15
+} = {}) {
+  if (String(closeStatus || '') !== 'exchange_stop_closed') {
+    return 'not_stop';
+  }
+  const reference = nullableNumber(replicaPnl);
+  const observed = nullableNumber(grossPnl);
+  if (reference === null || observed === null || Math.abs(reference) <= 0.01 || Math.abs(observed) <= 0.01) {
+    return 'unknown';
+  }
+  if (Math.sign(reference) !== Math.sign(observed)) {
+    return 'divergent';
+  }
+  const closeDiff = nullableNumber(closeDiffPercent);
+  if (closeDiff !== null && closeDiff > Number(maxCloseDiffPercent || 0.15)) {
+    return 'slippage';
+  }
+  return 'aligned';
+}
+
+export function summarizeReplicaStops(rows = []) {
+  const stopRows = (rows || []).filter((row) => (
+    row?.vst?.stopAlignment && row.vst.stopAlignment !== 'not_stop'
+  ));
+  const comparable = stopRows.filter((row) => row.vst.stopAlignment !== 'unknown');
+  return {
+    observed: stopRows.length,
+    total: comparable.length,
+    aligned: comparable.filter((row) => row.vst.stopAlignment === 'aligned').length,
+    divergent: comparable.filter((row) => row.vst.stopAlignment === 'divergent').length,
+    slippage: comparable.filter((row) => row.vst.stopAlignment === 'slippage').length,
+    unknown: stopRows.filter((row) => row.vst.stopAlignment === 'unknown').length,
+    aggregatedDivergent: comparable.filter((row) => (
+      row.vst.stopAlignment === 'divergent' && Number(row.vst.aggregatedOpenings || 1) > 1
+    )).length
+  };
+}
+
+function nullableNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function openingAttemptKey(event = {}) {
   const signal = event?.signal || {};
   if (signal.action || !event?.postId || !signal.symbol || !signal.direction) {

@@ -19,7 +19,7 @@ import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, scopeReplicaCohortInputs } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4461,6 +4461,12 @@ function replicaAuditRow({
   const netPnl = grossPnl == null ? null : roundMoney(grossPnl + fees);
   const entryDiffPercent = auditPercentDiff(entryPrice, sheet?.entryPrice);
   const closeDiffPercent = auditPercentDiff(closePrice, sheet?.closePrice || sheet?.currentPrice);
+  const stopAlignment = replicaStopAlignment({
+    closeStatus: closeEvent?.status,
+    replicaPnl,
+    grossPnl,
+    closeDiffPercent
+  });
   const diffGross = grossPnl == null || replicaPnl == null ? null : roundMoney(grossPnl - replicaPnl);
   const diffNet = netPnl == null || replicaPnl == null ? null : roundMoney(netPnl - replicaPnl);
   const status = auditRowStatus({
@@ -4474,6 +4480,7 @@ function replicaAuditRow({
     fees,
     entryDiffPercent,
     closeDiffPercent,
+    stopAlignment,
     openingFailure,
     unmatchedClose
   });
@@ -4513,6 +4520,7 @@ function replicaAuditRow({
       closingAt: realized ? new Date(Number(realized.time || 0)).toISOString() : closeEvent?.at || null,
       closeStatus: closeEvent?.status || '',
       closeReason: closeEvent?.reason || '',
+      stopAlignment,
       aggregatedOpenings: Number(aggregatedOpenings || 1),
       postUrl: opening?.postUrl || openingFailure?.postUrl || closeEvent?.postUrl || ''
     },
@@ -4557,6 +4565,7 @@ function auditRowStatus({
   fees,
   entryDiffPercent,
   closeDiffPercent,
+  stopAlignment,
   openingFailure,
   unmatchedClose
 }) {
@@ -4576,8 +4585,11 @@ function auditRowStatus({
   if (opening && !realized) {
     return { cause: 'Abierta o sin cierre', detail: 'La señal entró, pero no hay cierre realizado emparejado en BingX.', severity: 'warn' };
   }
-  if (String(closeEvent?.status || '') === 'exchange_stop_closed') {
-    return { cause: 'Stop antes del cierre', detail: 'BingX cerró por stop antes de poder replicar la salida de la hoja.', severity: 'negative' };
+  if (stopAlignment === 'divergent') {
+    return { cause: 'Stop antes del cierre', detail: 'BingX cerró por stop, pero la operación equivalente de la hoja terminó con el signo contrario.', severity: 'negative' };
+  }
+  if (stopAlignment === 'slippage') {
+    return { cause: 'Stop con deslizamiento', detail: 'La hoja y BingX pierden en el mismo sentido, pero el precio de stop se desvió más del 0,15%.', severity: 'warn' };
   }
   if (replicaPnl != null && netPnl != null && Math.sign(replicaPnl) !== Math.sign(netPnl) && Math.abs(replicaPnl) > 0.01 && Math.abs(netPnl) > 0.01) {
     return { cause: 'Signo distinto', detail: 'La hoja gana/pierde en sentido contrario al neto VST.', severity: 'negative' };
@@ -4593,6 +4605,12 @@ function auditRowStatus({
   }
   if (replicaPnl != null && netPnl != null && Math.abs(netPnl - replicaPnl) > Math.max(1, Math.abs(replicaPnl) * 0.25)) {
     return { cause: 'Diferencia de ejecución', detail: 'La diferencia neta supera el margen normal de réplica.', severity: 'warn' };
+  }
+  if (stopAlignment === 'aligned') {
+    return { cause: 'Stop alineado', detail: 'La hoja y BingX cerraron con el mismo signo y a menos del 0,15% de diferencia.', severity: 'positive' };
+  }
+  if (stopAlignment === 'unknown') {
+    return { cause: 'Stop sin referencia', detail: 'BingX cerró por stop, pero faltan datos suficientes para compararlo con la hoja.', severity: 'warn' };
   }
   return { cause: 'Alineada', detail: 'La operación está razonablemente cerca de la réplica teórica.', severity: 'positive' };
 }
@@ -4664,6 +4682,7 @@ function summarizeReplicaAudit({
       totals[key] = (totals[key] || 0) + 1;
       return totals;
     }, {});
+  const stopAnalysis = summarizeReplicaStops(rows);
   const worstRows = [...rows]
     .filter((row) => Number.isFinite(Number(row.diff?.net)))
     .sort((left, right) => Math.abs(Number(right.diff.net || 0)) - Math.abs(Number(left.diff.net || 0)))
@@ -4710,6 +4729,7 @@ function summarizeReplicaAudit({
     equity: reference?.equity ?? null,
     issueCounts,
     missingReasonCounts,
+    stopAnalysis,
     aggregatedRows: aggregatedRows.length,
     aggregatedCycles,
     worstRows,

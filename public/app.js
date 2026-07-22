@@ -4408,6 +4408,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const actualRebate = Number(summary.actualCommissionRebate || 0);
   const referenceCoverage = summary.referenceCoverage || {};
   const missingReasonCounts = summary.missingReasonCounts || {};
+  const stopAnalysis = summary.stopAnalysis || {};
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
@@ -4436,6 +4437,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Diferencia neta', formatMoney(summary.netGap, 'VST'), 'BingX neto frente a réplica teórica', amountClass(summary.netGap))}
         ${renderReplicaMetric('Cobertura de la hoja', referenceCoverage.stale ? 'Desactualizada' : 'Al día', `${coverageDetail} · ${referenceCoverage.outsideCoverageRows || 0} VST posteriores`, referenceCoverage.stale ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
+        ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
       </div>
       ${renderImprovementCohort(audit.cohort, audit.cohortHistory)}
       <div class="replica-issue-strip">
@@ -4524,6 +4526,20 @@ function formatMissingReasonCounts(counts = {}) {
   return parts.join(' · ') || 'Sin ausencias en la muestra';
 }
 
+function formatStopAnalysis(analysis = {}) {
+  const parts = [
+    `${Number(analysis.divergent || 0)} divergentes`,
+    `${Number(analysis.slippage || 0)} con deslizamiento`
+  ];
+  if (Number(analysis.aggregatedDivergent || 0) > 0) {
+    parts.push(`${Number(analysis.aggregatedDivergent)} por posición agregada`);
+  }
+  if (Number(analysis.unknown || 0) > 0) {
+    parts.push(`${Number(analysis.unknown)} observados sin hoja comparable`);
+  }
+  return parts.join(' · ');
+}
+
 function formatRatePercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) {
@@ -4554,6 +4570,9 @@ function renderReplicaIssuePills(issueCounts = {}) {
 }
 
 function replicaIssueClass(label = '') {
+  if (/stop alineado/i.test(label)) {
+    return 'positive';
+  }
   if (/no ejecutada|stop|signo|fees/i.test(label)) {
     return 'negative';
   }

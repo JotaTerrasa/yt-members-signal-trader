@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, scopeReplicaCohortInputs } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -192,6 +192,52 @@ test('conserva solo el fallo terminal de una apertura que nunca se ejecuto', () 
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0].eventId, 'expired');
   assert.equal(attempts[0].category, 'entry_deviation');
+});
+
+test('distingue un stop alineado de uno realmente contrario a la hoja', () => {
+  assert.equal(replicaStopAlignment({
+    closeStatus: 'exchange_stop_closed',
+    replicaPnl: -12.53,
+    grossPnl: -14.06,
+    closeDiffPercent: 0.09
+  }), 'aligned');
+  assert.equal(replicaStopAlignment({
+    closeStatus: 'exchange_stop_closed',
+    replicaPnl: 7.31,
+    grossPnl: -3.28,
+    closeDiffPercent: 1.43
+  }), 'divergent');
+  assert.equal(replicaStopAlignment({
+    closeStatus: 'exchange_stop_closed',
+    replicaPnl: -10,
+    grossPnl: -12,
+    closeDiffPercent: 0.21
+  }), 'slippage');
+  assert.equal(replicaStopAlignment({
+    closeStatus: 'exchange_signal_closed',
+    replicaPnl: -10,
+    grossPnl: -12,
+    closeDiffPercent: 0.05
+  }), 'not_stop');
+});
+
+test('resume solo los stops comparables y separa los que no tienen hoja', () => {
+  const summary = summarizeReplicaStops([
+    { vst: { stopAlignment: 'aligned', aggregatedOpenings: 1 } },
+    { vst: { stopAlignment: 'divergent', aggregatedOpenings: 3 } },
+    { vst: { stopAlignment: 'unknown', aggregatedOpenings: 1 } },
+    { vst: { stopAlignment: 'not_stop', aggregatedOpenings: 1 } }
+  ]);
+
+  assert.deepEqual(summary, {
+    observed: 3,
+    total: 2,
+    aligned: 1,
+    divergent: 1,
+    slippage: 0,
+    unknown: 1,
+    aggregatedDivergent: 1
+  });
 });
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {
