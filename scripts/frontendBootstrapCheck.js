@@ -279,22 +279,40 @@ try {
   await nativeSheetPage.waitForFunction(() => {
     const panel = document.querySelector('#external-sheet-panel');
     const status = document.querySelector('#external-sheet-status');
+    const panelRect = panel?.getBoundingClientRect();
     return panel
       && panel.dataset.sheetState !== 'loading'
       && document.querySelectorAll('#external-sheet-body tr').length === 2
-      && status?.textContent.includes('datos hasta');
+      && status?.textContent.includes('datos hasta')
+      && panelRect.top >= 0
+      && panelRect.top <= 180
+      && panelRect.bottom > 0
+      && panelRect.top < document.documentElement.clientHeight;
   }, null, { timeout: 20_000 });
-  const nativeSheetState = await nativeSheetPage.evaluate(() => ({
-    iframeCount: document.querySelectorAll('#external-sheet-panel iframe').length,
-    rowCount: document.querySelectorAll('#external-sheet-body tr').length,
-    status: document.querySelector('#external-sheet-status')?.textContent || '',
-    summary: document.querySelector('#external-sheet-summary')?.textContent || '',
-    firstRow: document.querySelector('#external-sheet-body tr')?.textContent || '',
-    tableVisible: !document.querySelector('#external-sheet-native')?.classList.contains('hidden')
-  }));
+  await nativeSheetPage.waitForTimeout(250);
+  const nativeSheetState = await nativeSheetPage.evaluate(() => {
+    const panel = document.querySelector('#external-sheet-panel');
+    const panelRect = panel?.getBoundingClientRect();
+    return {
+      iframeCount: document.querySelectorAll('#external-sheet-panel iframe').length,
+      rowCount: document.querySelectorAll('#external-sheet-body tr').length,
+      status: document.querySelector('#external-sheet-status')?.textContent || '',
+      summary: document.querySelector('#external-sheet-summary')?.textContent || '',
+      firstRow: document.querySelector('#external-sheet-body tr')?.textContent || '',
+      tableVisible: !document.querySelector('#external-sheet-native')?.classList.contains('hidden'),
+      panelTop: panelRect?.top ?? null,
+      panelBottom: panelRect?.bottom ?? null,
+      viewportHeight: document.documentElement.clientHeight
+    };
+  });
   if (nativeSheetState.iframeCount !== 0
     || nativeSheetState.rowCount !== 2
     || !nativeSheetState.tableVisible
+    || nativeSheetState.panelTop == null
+    || nativeSheetState.panelTop < 0
+    || nativeSheetState.panelTop > 180
+    || nativeSheetState.panelBottom <= 0
+    || nativeSheetState.panelTop >= nativeSheetState.viewportHeight
     || !nativeSheetState.summary.includes('1 abiertas')
     || !nativeSheetState.firstRow.includes('SL 195')
     || !nativeSheetState.firstRow.includes('ABIERTA')) {
@@ -302,6 +320,19 @@ try {
   }
   if (nativeSheetErrors.length) {
     throw new Error(`Errores JavaScript en la hoja nativa: ${nativeSheetErrors.join(' | ')}`);
+  }
+
+  await nativeSheetPage.evaluate(() => {
+    window.scrollTo(0, 0);
+  });
+  await nativeSheetPage.waitForFunction(() => window.scrollY <= 5, null, { timeout: 5_000 });
+  await nativeSheetPage.evaluate(() => {
+    document.querySelector('#pnl-tab')?.click();
+  });
+  await nativeSheetPage.waitForTimeout(250);
+  const releasedAnchorScroll = await nativeSheetPage.evaluate(() => window.scrollY);
+  if (releasedAnchorScroll > 5) {
+    throw new Error(`El ancla de la hoja recupero el scroll tras un render posterior: ${releasedAnchorScroll}px.`);
   }
 
   await nativeSheetPage.click('[data-performance-source="sheet"]');
@@ -623,6 +654,7 @@ try {
     historicalFailures,
     pnlIsolationPassed: true,
     externalSheetNativePassed: true,
+    externalSheetAnchorPassed: true,
     externalSheetOpenRowsPassed: true,
     externalSheetPendingPnlPassed: true,
     externalSheetNavigationPassed: true,

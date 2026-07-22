@@ -317,7 +317,8 @@ const appState = {
   externalSheetVisibleLimit: EXTERNAL_SHEET_PAGE_SIZE,
   replicaAuditVisibleLimit: REPLICA_AUDIT_PAGE_SIZE,
   replicaAuditFilter: 'all',
-  alignmentAnchorSettled: false,
+  pnlHashAnchorRequested: '',
+  pnlHashAnchorSettled: '',
   externalSheetRenderKey: '',
   externalSheetLoading: false,
   externalSheetError: '',
@@ -1781,6 +1782,7 @@ function renderPnl() {
   renderRealAuditTable();
   elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
   window.lucide?.createIcons();
+  settlePnlHashAnchor();
 }
 
 function schedulePnlPriceRender() {
@@ -4946,23 +4948,6 @@ function renderOfficialSheetVstAlignment(audit) {
     renderAlignmentMetric('Mismo signo', outcomeCount ? `${sameNetSign}/${outcomeCount}` : '-', `${netSignMismatch} cambiaron de resultado neto`, netSignMismatch ? 'warn' : 'amount positive')
   ].join('');
   renderReplicaControlPreservingScroll(audit);
-  settleAlignmentAnchor();
-}
-
-function settleAlignmentAnchor() {
-  if (appState.alignmentAnchorSettled
-    || appState.pnlLoading
-    || window.location.hash !== '#sheet-vst-alignment') {
-    return;
-  }
-  const panel = document.querySelector('#sheet-vst-alignment');
-  if (!panel) {
-    return;
-  }
-  appState.alignmentAnchorSettled = true;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => panel.scrollIntoView({ block: 'start', behavior: 'auto' }));
-  });
 }
 
 function renderReplicaControlPreservingScroll(audit, { resetScroll = false } = {}) {
@@ -9859,16 +9844,19 @@ function viewIsVisible(element) {
 function applyHashNavigation() {
   const target = pnlHashTarget();
   if (!target) {
+    appState.pnlHashAnchorRequested = '';
+    appState.pnlHashAnchorSettled = '';
     return;
   }
 
+  if (appState.pnlHashAnchorRequested !== target.id) {
+    appState.pnlHashAnchorRequested = target.id;
+    appState.pnlHashAnchorSettled = '';
+  }
   switchView('pnl');
-  const finish = () => requestAnimationFrame(() => {
-    target.scrollIntoView({ block: 'start' });
-  });
 
   if (appState.pnl) {
-    finish();
+    settlePnlHashAnchor();
     return;
   }
 
@@ -9877,7 +9865,23 @@ function applyHashNavigation() {
       appState.pnlError = error.message;
       renderPnl();
     })
-    .finally(finish);
+    .finally(settlePnlHashAnchor);
+}
+
+function settlePnlHashAnchor() {
+  const target = pnlHashTarget();
+  if (!target
+    || appState.pnlLoading
+    || !appState.pnl
+    || appState.pnlHashAnchorSettled === target.id) {
+    return;
+  }
+
+  appState.pnlHashAnchorRequested = target.id;
+  appState.pnlHashAnchorSettled = target.id;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => target.scrollIntoView({ block: 'start', behavior: 'auto' }));
+  });
 }
 
 function pnlHashTarget() {

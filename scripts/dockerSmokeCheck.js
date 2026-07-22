@@ -56,6 +56,7 @@ async function main() {
       bootstrapTimeoutRecovery: frontendCheck.timeoutRecovered,
       pnlSourceIsolation: frontendCheck.pnlIsolationPassed,
       externalSheetNative: frontendCheck.externalSheetNativePassed,
+      externalSheetAnchor: frontendCheck.externalSheetAnchorPassed,
       externalSheetOpenRows: frontendCheck.externalSheetOpenRowsPassed,
       externalSheetPendingPnl: frontendCheck.externalSheetPendingPnlPassed,
       externalSheetNavigation: frontendCheck.externalSheetNavigationPassed,
@@ -120,6 +121,7 @@ function verifyFrontendBootstrap(container) {
     || result.historicalFailures < 1
     || !result.pnlIsolationPassed
     || !result.externalSheetNativePassed
+    || !result.externalSheetAnchorPassed
     || !result.externalSheetOpenRowsPassed
     || !result.externalSheetPendingPnlPassed
     || !result.externalSheetNavigationPassed
