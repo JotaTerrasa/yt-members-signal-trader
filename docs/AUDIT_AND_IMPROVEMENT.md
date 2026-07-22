@@ -33,7 +33,7 @@ La lectura actual separa tres grupos: filas emparejadas, operaciones realmente a
 
 Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio, las **19/19 ausencias** tienen evidencia: seis stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
 
-Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. En el corte del 22 de julio hay **17 de 21 stops comparables alineados** y cuatro divergentes. Tres divergencias BTC estuvieron precedidas por uno, dos y tres cierres fallidos, respectivamente, debido al error histórico `CLOSE_GUARD_MIN_NET_PNL is not defined`; por ello quedaron abiertas y terminaron agregadas en un único stop. La constante está definida y la ruta actual tiene regresiones que obligan a ejecutar el cierre incluso si el guard falla. La cuarta divergencia no comparte esa causa. Otros cuatro stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
+Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. En el corte del 22 de julio hay **17 de 21 stops comparables alineados** y cuatro divergentes. Tres divergencias BTC estuvieron precedidas por uno, dos y tres cierres fallidos, respectivamente, debido al error histórico `CLOSE_GUARD_MIN_NET_PNL is not defined`; por ello quedaron abiertas y terminaron agregadas en un único stop. La constante está definida y la ruta actual tiene regresiones que obligan a ejecutar el cierre incluso si el guard falla. La cuarta divergencia corresponde a SOL: la publicación `CUERRE TOTAL` del 5 de julio se almacenó, pero no generó eventos para BTC, ETH ni SOL porque la versión del parser vigente todavía no reconocía esa errata. El soporte para `CUERRE` se incorporó el 6 de julio y ahora queda cubierto por una prueba con el mensaje real. Otros cuatro stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
 
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 
@@ -61,11 +61,17 @@ La diferencia de 15 aperturas se explica completamente por eventos registrados: 
 
 Nueve bloqueos procedían del filtro anterior, que rechazaba indiscriminadamente todas las entradas a x25. Ese criterio no distinguía una señal con ventaja de otra sin ella.
 
-### 5. Posiciones agregadas
+### 5. Cierre histórico no procesado
+
+La única publicación de cierre del mes guardada sin evento fue `CUERRE TOTAL · BTC 63170 · ETH 1790 · SOL 81.92`, detectada el 5 de julio a las 21:58 UTC. Afectó a tres posiciones que ya estaban abiertas: BTC, ETH y SOL. SOL debía cerrar con beneficio en 81,92, pero permaneció abierta hasta el stop en 80,819; esta es la causa demostrada de la cuarta divergencia de stop.
+
+La auditoría reconstruye esta incidencia desde la publicación almacenada, el parser actual y la ausencia de eventos. Solo enlaza el cierre omitido con posiciones del mismo activo que ya estaban abiertas y que todavía no se habían cerrado en ese instante.
+
+### 6. Posiciones agregadas
 
 BingX puede combinar varias entradas del mismo activo en una posición. La auditoría detectó cuatro ciclos agregados, con ocho filas de la hoja implicadas. El comparador ahora reparte PnL y costes entre esas aperturas en vez de marcar falsamente una operación como abierta.
 
-### 6. Reset con posiciones heredadas
+### 7. Reset con posiciones heredadas
 
 Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. Se conservan en el neto real, pero se clasifican como cierres heredados y no se fuerzan contra una fila incorrecta de la hoja.
 
@@ -108,6 +114,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - El histórico usa un diario incremental y compactación atómica.
 - Una caída durante una escritura no obliga a reescribir ni perder el archivo completo.
 - El parser, las guardas, el riesgo, los cierres, la auditoría y la persistencia tienen pruebas automáticas.
+- La errata histórica `CUERRE` se reconoce como cierre y está cubierta con el mensaje exacto que se perdió el 5 de julio.
 - Cada publicación con aperturas forma un paquete auditable: símbolos esperados, ejecutados, pendientes y ausentes.
 - Una alerta informa cuando un paquete queda incompleto al terminar su ventana de reintento.
 - La cohorte posterior a las mejoras conserva el histórico anterior, pero calcula sus métricas desde una marca temporal independiente.

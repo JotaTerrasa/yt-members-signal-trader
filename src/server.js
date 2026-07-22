@@ -19,7 +19,7 @@ import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4260,10 +4260,18 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     .filter(Boolean)
     .filter((event) => auditEventInWindow(event, monthWindow));
   const events = windowEvents.filter((event) => auditEventIsDemo(event, windowEvents));
+  const unprocessedCloses = buildUnprocessedCloseSignals({
+    posts: store.list(),
+    events,
+    parseSignals: (text) => futuresTrader.parseAll(text),
+    startTime: monthWindow.startTime,
+    endTime: monthWindow.endTime
+  });
   const rowAudit = annotateReplicaReferenceCoverage(buildReplicaAuditRows({
     sheetRows,
     incomeRows,
     events,
+    unprocessedCloses,
     defaultNotional: publicConfig.defaultNotionalUSDT || publicConfig.monthlyOrderNotionalUSDT || 0
   }), sheetRows);
   const rows = rowAudit.rows;
@@ -4283,6 +4291,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     sheetRows,
     incomeRows,
     events,
+    unprocessedCloses,
     reference,
     config: publicConfig,
     monthWindow,
@@ -4295,6 +4304,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
       sheetRows,
       incomeRows,
       events,
+      unprocessedCloses,
       reference,
       config: publicConfig,
       monthWindow,
@@ -4352,6 +4362,7 @@ function buildReplicaAuditCohort({
   sheetRows,
   incomeRows,
   events,
+  unprocessedCloses,
   reference,
   config,
   monthWindow,
@@ -4370,6 +4381,7 @@ function buildReplicaAuditCohort({
     sheetRows: cohortSheetRows,
     incomeRows: cohortIncomeRows,
     events: cohortEvents,
+    unprocessedCloses: (unprocessedCloses || []).filter((close) => auditEventInWindow(close, cohortWindow)),
     defaultNotional: config.defaultNotionalUSDT || config.monthlyOrderNotionalUSDT || 0
   }).filter(cohortAuditRowHasOrigin);
   const rowAudit = annotateReplicaReferenceCoverage(rawRows, cohortSheetRows);
@@ -4396,7 +4408,7 @@ function buildReplicaAuditCohort({
   };
 }
 
-function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], defaultNotional = 0 }) {
+function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], unprocessedCloses = [], defaultNotional = 0 }) {
   const aligned = alignReplicaAuditRecords({
     sheetRows,
     openings: auditOpeningEvents(events),
@@ -4404,6 +4416,7 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], d
     closeEvents: auditCloseEvents(events),
     openingFailures: buildOpeningFailureAttempts(events),
     closeFailures: buildCloseFailureAttempts(events),
+    unprocessedCloses,
     openingFees: auditFeeRows(incomeRows, 'opening'),
     closingFees: auditFeeRows(incomeRows, 'closing'),
     fundingRows: auditIncomeByType(incomeRows, 'FUNDING_FEE'),
@@ -4443,6 +4456,7 @@ function replicaAuditRow({
   funding,
   openingFailure,
   closeFailures = [],
+  unprocessedCloses = [],
   unmatchedClose,
   aggregatedOpenings,
   defaultNotional
@@ -4484,6 +4498,7 @@ function replicaAuditRow({
     closeDiffPercent,
     stopAlignment,
     closeFailures,
+    unprocessedCloses,
     openingFailure,
     unmatchedClose
   });
@@ -4531,6 +4546,17 @@ function replicaAuditRow({
         at: failure.at || null,
         postUrl: failure.postUrl || ''
       })),
+      unprocessedCloses: unprocessedCloses.map((close) => ({
+        action: close.signal?.action || 'CLOSE',
+        symbol: close.signal?.symbol || '',
+        closePrice: auditRound(auditNumber(close.signal?.closePrice, null)),
+        closePercent: auditRound(auditNumber(close.signal?.closePercent, 100)),
+        category: close.category || 'close_signal_without_event',
+        reason: close.reason || '',
+        at: close.at || null,
+        postId: close.postId || null,
+        postUrl: close.postUrl || ''
+      })),
       aggregatedOpenings: Number(aggregatedOpenings || 1),
       postUrl: opening?.postUrl || openingFailure?.postUrl || closeEvent?.postUrl || ''
     },
@@ -4556,7 +4582,8 @@ function replicaAuditRow({
       exchangePositionId: closeEvent?.exchangePosition?.id || null,
       tradeId: realized?.tradeId || null,
       openingFeeTradeId: openingFee?.tradeId || null,
-      closingFeeTradeId: closingFee?.tradeId || null
+      closingFeeTradeId: closingFee?.tradeId || null,
+      unprocessedClosePostIds: [...new Set(unprocessedCloses.map((close) => close.postId).filter(Boolean))]
     },
     cause: status.cause,
     detail: status.detail,
@@ -4577,6 +4604,7 @@ function auditRowStatus({
   closeDiffPercent,
   stopAlignment,
   closeFailures = [],
+  unprocessedCloses = [],
   openingFailure,
   unmatchedClose
 }) {
@@ -4592,6 +4620,14 @@ function auditRowStatus({
   }
   if (!sheet && opening) {
     return { cause: 'Extra en VST', detail: 'Hay apertura demo que no aparece en la hoja externa.', severity: 'warn' };
+  }
+  if (unprocessedCloses.length) {
+    const typoCount = unprocessedCloses.filter((close) => close.category === 'historical_close_typo').length;
+    return {
+      cause: 'Cierre no procesado',
+      detail: `Histórico: ${unprocessedCloses.length} cierre${unprocessedCloses.length === 1 ? '' : 's'} no ${unprocessedCloses.length === 1 ? 'generó' : 'generaron'} ejecución${typoCount ? '; CUERRE ya está cubierto' : ''}.`,
+      severity: 'negative'
+    };
   }
   if (opening && !realized) {
     return { cause: 'Abierta o sin cierre', detail: 'La señal entró, pero no hay cierre realizado emparejado en BingX.', severity: 'warn' };
@@ -4712,6 +4748,10 @@ function summarizeReplicaAudit({
     row.symbol,
     row.vst?.closingAt || ''
   ].join('|'))).size;
+  const unprocessedCloseRows = rows.filter((row) => Number(row.vst?.unprocessedCloses?.length || 0) > 0);
+  const unprocessedClosePosts = new Set(unprocessedCloseRows.flatMap((row) => (
+    row.trace?.unprocessedClosePostIds || []
+  )));
 
   return {
     sheetRows: sheetRows.length,
@@ -4749,6 +4789,8 @@ function summarizeReplicaAudit({
     issueCounts,
     missingReasonCounts,
     stopAnalysis,
+    unprocessedCloseRows: unprocessedCloseRows.length,
+    unprocessedClosePosts: unprocessedClosePosts.size,
     aggregatedRows: aggregatedRows.length,
     aggregatedCycles,
     worstRows,

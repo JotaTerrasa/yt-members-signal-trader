@@ -14,6 +14,7 @@ export function alignReplicaAuditRecords({
   fundingRows = [],
   openingFailures = [],
   closeFailures = [],
+  unprocessedCloses = [],
   sheetCoverageEndTime = null
 } = {}) {
   const lifecycles = buildExecutionLifecycles({
@@ -46,7 +47,10 @@ export function alignReplicaAuditRecords({
     });
   }
 
-  return attachCloseFailures(aligned, closeFailures);
+  return attachUnprocessedCloses(
+    attachCloseFailures(aligned, closeFailures),
+    unprocessedCloses
+  );
 }
 
 export function attachOpeningFailures(records = [], failures = []) {
@@ -105,6 +109,33 @@ export function attachCloseFailures(records = [], failures = []) {
         && (!direction || !failureDirection || direction === failureDirection);
     });
     return matches.length ? { ...record, closeFailures: matches } : record;
+  });
+}
+
+export function attachUnprocessedCloses(records = [], closes = []) {
+  const candidates = [...(closes || [])].sort((left, right) => eventTime(left) - eventTime(right));
+  return (records || []).map((record) => {
+    const openingAt = eventTime(record?.opening);
+    if (!Number.isFinite(openingAt)) {
+      return record;
+    }
+    const closingAt = Math.min(
+      eventTime(record?.closeEvent),
+      incomeTime(record?.realizedSource || record?.realized)
+    );
+    const direction = normalizeDirection(record?.opening?.signal?.direction);
+    const symbol = eventSymbol(record?.opening);
+    const matches = candidates.filter((close) => {
+      const closeAt = eventTime(close);
+      const closeDirection = normalizeDirection(close?.signal?.direction);
+      const closeSymbol = eventSymbol(close);
+      const closesAll = String(close?.signal?.action || '').toUpperCase() === 'CLOSE_ALL';
+      return (closesAll || closeSymbol === symbol)
+        && closeAt >= openingAt
+        && closeAt <= closingAt
+        && (!direction || !closeDirection || direction === closeDirection);
+    });
+    return matches.length ? { ...record, unprocessedCloses: matches } : record;
   });
 }
 
@@ -476,12 +507,18 @@ function rowTime(row) {
 }
 
 function eventTime(event) {
-  const value = Date.parse(event?.at || 0);
+  if (!event?.at) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const value = Date.parse(event.at);
   return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
 }
 
 function utcDateKey(value) {
-  const timestamp = Date.parse(value || 0);
+  if (!value) {
+    return '';
+  }
+  const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : '';
 }
 

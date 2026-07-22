@@ -17,6 +17,16 @@ test('reconoce cierre total escrito en lenguaje natural', () => {
   assert.equal(signal.action, 'CLOSE_ALL');
 });
 
+test('reconoce la errata CUERRE TOTAL con cierres por activo', () => {
+  const signals = parseFuturesSignals('CUERRE TOTAL\n\nBTC 63170\nETH 1790\nSOL 81.92');
+
+  assert.deepEqual(signals.map(({ action, symbol, closePrice }) => ({ action, symbol, closePrice })), [
+    { action: 'CLOSE', symbol: 'BTC-USDT', closePrice: 63170 },
+    { action: 'CLOSE', symbol: 'ETH-USDT', closePrice: 1790 },
+    { action: 'CLOSE', symbol: 'SOL-USDT', closePrice: 81.92 }
+  ]);
+});
+
 test('parsea una apertura SHORT con el stop en el lado correcto', () => {
   const [signal] = parseFuturesSignals([
     'ORDEN',

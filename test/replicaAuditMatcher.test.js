@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { alignReplicaAuditRecords, alignSequences, attachCloseFailures } from '../src/replicaAuditMatcher.js';
+import { alignReplicaAuditRecords, alignSequences, attachCloseFailures, attachUnprocessedCloses } from '../src/replicaAuditMatcher.js';
 
 function opening(at, symbol, price, direction = 'LONG') {
   return {
@@ -200,6 +200,33 @@ test('enlaza un cierre fallido solo durante la vida de la posición del mismo ac
   ]);
 
   assert.deepEqual(records[0].closeFailures, [relevantFailure]);
+});
+
+test('enlaza un cierre sin evento solo con posiciones que ya estaban abiertas', () => {
+  const missedClose = {
+    at: '2026-07-05T21:58:25.879Z',
+    postId: 'missed-close',
+    signal: { action: 'CLOSE', symbol: 'SOL-USDT', closePrice: 81.92 }
+  };
+  const closeTime = Date.parse('2026-07-06T03:22:16Z');
+  const records = attachUnprocessedCloses([
+    {
+      opening: opening('2026-07-05T21:52:06Z', 'SOL-USDT', 81.518),
+      realized: { time: closeTime }
+    },
+    {
+      opening: opening('2026-07-05T22:34:37Z', 'SOL-USDT', 81.8),
+      realized: { time: closeTime }
+    },
+    {
+      opening: opening('2026-07-05T21:50:30Z', 'ETH-USDT', 1781.28),
+      realized: { time: closeTime }
+    }
+  ], [missedClose]);
+
+  assert.deepEqual(records[0].unprocessedCloses, [missedClose]);
+  assert.equal(records[1].unprocessedCloses, undefined);
+  assert.equal(records[2].unprocessedCloses, undefined);
 });
 
 test('reparte un cierre de una posición agregada entre todas sus aperturas', () => {

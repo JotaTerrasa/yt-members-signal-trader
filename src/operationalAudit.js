@@ -263,6 +263,50 @@ export function buildCloseFailureAttempts(events = []) {
     .sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
 }
 
+export function buildUnprocessedCloseSignals({
+  posts = [],
+  events = [],
+  parseSignals = () => [],
+  startTime = Number.NEGATIVE_INFINITY,
+  endTime = Number.POSITIVE_INFINITY
+} = {}) {
+  const processedEvents = (events || []).filter((event) => isCloseAction(event?.signal?.action));
+  const candidates = [];
+
+  for (const post of posts || []) {
+    const at = Date.parse(post?.firstSeenAt || post?.scrapedAt || 0);
+    if (!Number.isFinite(at) || at < startTime || at > endTime) {
+      continue;
+    }
+    const signals = parseSignals(post?.text || '').filter((signal) => (
+      signal?.isSignal && isCloseAction(signal?.action)
+    ));
+    for (const signal of signals) {
+      const processed = processedEvents.some((event) => (
+        event?.postId === post?.id && closeSignalMatchesEvent(signal, event?.signal)
+      ));
+      if (processed) {
+        continue;
+      }
+      const category = /\bCUERRES?\b/i.test(String(post?.text || ''))
+        ? 'historical_close_typo'
+        : 'close_signal_without_event';
+      candidates.push({
+        at: new Date(at).toISOString(),
+        postId: post?.id || null,
+        postUrl: post?.url || null,
+        category,
+        reason: category === 'historical_close_typo'
+          ? 'La publicación se guardó, pero el parser vigente entonces no reconoció la errata CUERRE.'
+          : 'La publicación contiene un cierre reconocible, pero no existe un evento de ejecución.',
+        signal
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => Date.parse(left.at || 0) - Date.parse(right.at || 0));
+}
+
 export function replicaStopAlignment({
   closeStatus = '',
   replicaPnl = null,
@@ -307,6 +351,9 @@ export function summarizeReplicaStops(rows = []) {
       row.vst.stopAlignment === 'divergent'
       && row.vst.closeFailures?.some((failure) => failure.category === 'close_guard_runtime_error')
     )).length,
+    unprocessedCloseDivergent: comparable.filter((row) => (
+      row.vst.stopAlignment === 'divergent' && Number(row.vst.unprocessedCloses?.length || 0) > 0
+    )).length,
     aggregatedDivergent: comparable.filter((row) => (
       row.vst.stopAlignment === 'divergent' && Number(row.vst.aggregatedOpenings || 1) > 1
     )).length
@@ -349,6 +396,23 @@ function isCloseFailureStatus(status = '') {
     || value === 'demo_close_guarded'
     || value === 'demo_close_guard_expired'
     || value === 'demo_close_retry_expired';
+}
+
+function isCloseAction(action = '') {
+  const value = String(action || '').toUpperCase();
+  return value === 'CLOSE' || value === 'CLOSE_ALL';
+}
+
+function closeSignalMatchesEvent(expected = {}, observed = {}) {
+  const expectedAction = String(expected?.action || '').toUpperCase();
+  const observedAction = String(observed?.action || '').toUpperCase();
+  if (!isCloseAction(observedAction)) {
+    return false;
+  }
+  if (expectedAction === 'CLOSE_ALL' || observedAction === 'CLOSE_ALL') {
+    return true;
+  }
+  return String(expected?.symbol || '').toUpperCase() === String(observed?.symbol || '').toUpperCase();
 }
 
 function closeFailureCategory(event = {}) {

@@ -83,6 +83,8 @@ const report = {
     issueCounts: summary.issueCounts || {},
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
+    unprocessedCloseRows: summary.unprocessedCloseRows || 0,
+    unprocessedClosePosts: summary.unprocessedClosePosts || 0,
     referenceCoverage: summary.referenceCoverage || null
   } : null,
   cohort: replica?.cohort ? {
@@ -278,15 +280,23 @@ function buildFindings(report) {
         : `${missingSheetOperations} operaciones de la hoja no tienen apertura VST emparejada. Motivos: ${missingReasonSummary(report.replica.missingReasonCounts)}.`
     });
   }
+  if (report.replica?.unprocessedClosePosts) {
+    findings.push({
+      severity: 'high',
+      code: 'historical_close_unprocessed',
+      detail: `${report.replica.unprocessedClosePosts} publicación histórica de cierre no generó evento y afectó a ${report.replica.unprocessedCloseRows} posiciones. La errata CUERRE ya está cubierta por el parser actual.`
+    });
+  }
   if (report.replica?.stopAnalysis?.divergent) {
     const stops = report.replica.stopAnalysis;
     const aggregated = Number(stops.aggregatedDivergent || 0);
     const failedCloses = Number(stops.closeFailureDivergent || 0);
     const runtimeGuardFailures = Number(stops.runtimeGuardFailureDivergent || 0);
+    const unprocessedCloses = Number(stops.unprocessedCloseDivergent || 0);
     findings.push({
       severity: 'high',
       code: 'reference_stop_divergence',
-      detail: `${stops.divergent} stops cerraron con signo contrario a la hoja; ${stops.aligned} de ${stops.total} stops comparables sí quedaron alineados${failedCloses ? `, ${failedCloses} divergencias estuvieron precedidas por cierres fallidos` : ''}${runtimeGuardFailures ? ` por el fallo histórico del guard` : ''}${aggregated ? ` y esas ${aggregated} posiciones terminaron agregadas` : ''}.`
+      detail: `${stops.divergent} stops cerraron con signo contrario a la hoja; ${stops.aligned} de ${stops.total} stops comparables sí quedaron alineados${failedCloses ? `, ${failedCloses} divergencias estuvieron precedidas por cierres fallidos` : ''}${runtimeGuardFailures ? ` por el fallo histórico del guard` : ''}${aggregated ? ` y esas ${aggregated} posiciones terminaron agregadas` : ''}${unprocessedCloses ? `; ${unprocessedCloses} divergencia${unprocessedCloses === 1 ? '' : 's'} ${unprocessedCloses === 1 ? 'procedió' : 'procedieron'} de cierres no procesados` : ''}.`
     });
   }
   if (report.replica?.referenceCoverage?.stale) {
@@ -383,10 +393,13 @@ function renderMarkdown(report) {
     `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
     `- Aperturas VST posteriores sin referencia: ${r.referenceCoverage?.outsideCoverageRows ?? 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
+    `- Publicaciones históricas de cierre sin evento: ${r.unprocessedClosePosts ?? 0}`,
+    `- Posiciones afectadas por cierres no procesados: ${r.unprocessedCloseRows ?? 0}`,
     `- Stops comparables alineados / divergentes / con deslizamiento: ${r.stopAnalysis?.aligned ?? 0} / ${r.stopAnalysis?.divergent ?? 0} / ${r.stopAnalysis?.slippage ?? 0}`,
     `- Stops observados sin hoja comparable: ${r.stopAnalysis?.unknown ?? 0}`,
     `- Stops divergentes precedidos por cierres fallidos: ${r.stopAnalysis?.closeFailureDivergent ?? 0}`,
     `- Stops divergentes por el fallo histórico del guard: ${r.stopAnalysis?.runtimeGuardFailureDivergent ?? 0}`,
+    `- Stops divergentes tras un cierre no procesado: ${r.stopAnalysis?.unprocessedCloseDivergent ?? 0}`,
     `- Stops divergentes en posiciones agregadas: ${r.stopAnalysis?.aggregatedDivergent ?? 0}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
     '',
@@ -434,6 +447,8 @@ function pickCohortSummary(summary = {}) {
     issueCounts: summary.issueCounts || {},
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
+    unprocessedCloseRows: summary.unprocessedCloseRows || 0,
+    unprocessedClosePosts: summary.unprocessedClosePosts || 0,
     referenceCoverage: summary.referenceCoverage || null
   };
 }
@@ -457,6 +472,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Aperturas esperadas / ejecutadas / faltantes: ${packages.expectedOpenings || 0} / ${packages.executedOpenings || 0} / ${packages.missingOpenings || 0}`,
     `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
+    `- Cierres históricos sin evento / posiciones afectadas: ${summary.unprocessedClosePosts || 0} / ${summary.unprocessedCloseRows || 0}`,
     `- Stops comparables alineados / divergentes: ${summary.stopAnalysis?.aligned || 0} / ${summary.stopAnalysis?.divergent || 0}`,
     `- Divergencias precedidas por cierres fallidos: ${summary.stopAnalysis?.closeFailureDivergent || 0}`,
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,

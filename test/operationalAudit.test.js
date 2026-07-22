@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -225,19 +225,21 @@ test('resume solo los stops comparables y separa los que no tienen hoja', () => 
   const summary = summarizeReplicaStops([
     { vst: { stopAlignment: 'aligned', aggregatedOpenings: 1 } },
     { vst: { stopAlignment: 'divergent', aggregatedOpenings: 3, closeFailures: [{ category: 'close_guard_runtime_error' }] } },
+    { vst: { stopAlignment: 'divergent', aggregatedOpenings: 1, unprocessedCloses: [{ category: 'historical_close_typo' }] } },
     { vst: { stopAlignment: 'unknown', aggregatedOpenings: 1 } },
     { vst: { stopAlignment: 'not_stop', aggregatedOpenings: 1 } }
   ]);
 
   assert.deepEqual(summary, {
-    observed: 3,
-    total: 2,
+    observed: 4,
+    total: 3,
     aligned: 1,
-    divergent: 1,
+    divergent: 2,
     slippage: 0,
     unknown: 1,
     closeFailureDivergent: 1,
     runtimeGuardFailureDivergent: 1,
+    unprocessedCloseDivergent: 1,
     aggregatedDivergent: 1
   });
 });
@@ -263,6 +265,32 @@ test('extrae el fallo histórico de una señal de cierre demo', () => {
   assert.equal(failures.length, 1);
   assert.equal(failures[0].eventId, 'btc-close-error');
   assert.equal(failures[0].category, 'close_guard_runtime_error');
+});
+
+test('detecta un cierre parseable guardado sin evento de ejecución', () => {
+  const signals = [
+    { isSignal: true, action: 'CLOSE', symbol: 'BTC-USDT', closePrice: 63170 },
+    { isSignal: true, action: 'CLOSE', symbol: 'ETH-USDT', closePrice: 1790 },
+    { isSignal: true, action: 'CLOSE', symbol: 'SOL-USDT', closePrice: 81.92 }
+  ];
+  const closes = buildUnprocessedCloseSignals({
+    posts: [{
+      id: 'missed-close',
+      url: 'https://www.youtube.com/post/missed-close',
+      firstSeenAt: '2026-07-05T21:58:25.879Z',
+      text: 'CUERRE TOTAL\nBTC 63170\nETH 1790\nSOL 81.92'
+    }],
+    events: [{
+      postId: 'missed-close',
+      signal: { action: 'CLOSE', symbol: 'BTC-USDT' }
+    }],
+    parseSignals: () => signals,
+    startTime: Date.parse('2026-07-01T00:00:00Z'),
+    endTime: Date.parse('2026-08-01T00:00:00Z')
+  });
+
+  assert.deepEqual(closes.map((close) => close.signal.symbol), ['ETH-USDT', 'SOL-USDT']);
+  assert.ok(closes.every((close) => close.category === 'historical_close_typo'));
 });
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {

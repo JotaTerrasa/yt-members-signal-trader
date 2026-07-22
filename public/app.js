@@ -4091,7 +4091,7 @@ function renderSheetVstAlignment(reference = currentReferenceLedger()) {
     audit?.error || 'Consultando Google Sheet y BingX VST',
     audit?.error ? 'amount negative' : ''
   );
-  elements.replicaControl.innerHTML = renderReplicaAudit(audit);
+  renderReplicaControlPreservingScroll(audit);
 }
 
 function renderOfficialSheetVstAlignment(audit) {
@@ -4130,7 +4130,25 @@ function renderOfficialSheetVstAlignment(audit) {
     renderAlignmentMetric('Sin referencia', String(outsideCoverageCount), outsideCoverageCount ? 'Operaciones VST posteriores a la hoja' : 'Cobertura temporal completa', outsideCoverageCount ? 'warn' : 'amount positive'),
     renderAlignmentMetric('Alineadas', String(alignedCount), `${reviewCount} requieren revisión`, reviewCount ? 'warn' : 'amount positive')
   ].join('');
+  renderReplicaControlPreservingScroll(audit);
+}
+
+function renderReplicaControlPreservingScroll(audit) {
+  const previous = elements.replicaControl.querySelector('.replica-audit-wrap');
+  const scroll = previous ? {
+    top: previous.scrollTop,
+    left: previous.scrollLeft
+  } : null;
   elements.replicaControl.innerHTML = renderReplicaAudit(audit);
+  if (!scroll) {
+    return;
+  }
+  const next = elements.replicaControl.querySelector('.replica-audit-wrap');
+  if (!next) {
+    return;
+  }
+  next.scrollTop = Math.min(scroll.top, Math.max(0, next.scrollHeight - next.clientHeight));
+  next.scrollLeft = Math.min(scroll.left, Math.max(0, next.scrollWidth - next.clientWidth));
 }
 
 function renderLegacySheetVstAlignment(reference = currentReferenceLedger()) {
@@ -4412,6 +4430,8 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
+  const unprocessedCloseRows = Number(summary.unprocessedCloseRows || 0);
+  const unprocessedClosePosts = Number(summary.unprocessedClosePosts || 0);
   const coverageDetail = referenceCoverage.latestSheetAt
     ? `Última operación: ${formatDateTime(referenceCoverage.latestSheetAt)}`
     : 'Sin fecha de referencia';
@@ -4439,6 +4459,12 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
       </div>
+      ${unprocessedCloseRows ? `
+        <p class="notice replica-audit-notice">
+          <strong>Incidencia histórica corregida.</strong>
+          ${escapeHtml(`${unprocessedClosePosts} publicación${unprocessedClosePosts === 1 ? '' : 'es'} de cierre no ${unprocessedClosePosts === 1 ? 'generó' : 'generaron'} ejecución y afectó a ${unprocessedCloseRows} posiciones. El parser actual ya reconoce la errata CUERRE.`)}
+        </p>
+      ` : ''}
       ${renderImprovementCohort(audit.cohort, audit.cohortHistory)}
       <div class="replica-issue-strip">
         ${renderReplicaIssuePills(summary.issueCounts)}
@@ -4534,6 +4560,9 @@ function formatStopAnalysis(analysis = {}) {
   if (Number(analysis.closeFailureDivergent || 0) > 0) {
     parts.push(`${Number(analysis.closeFailureDivergent)} tras cierre fallido`);
   }
+  if (Number(analysis.unprocessedCloseDivergent || 0) > 0) {
+    parts.push(`${Number(analysis.unprocessedCloseDivergent)} tras cierre no procesado`);
+  }
   if (Number(analysis.aggregatedDivergent || 0) > 0) {
     parts.push(`${Number(analysis.aggregatedDivergent)} en posición agregada`);
   }
@@ -4557,6 +4586,20 @@ function formatCloseFailureEvidence(failures = []) {
       ? `${count} cierre${count === 1 ? '' : 's'} fallido${count === 1 ? '' : 's'}`
       : `${count} intento${count === 1 ? '' : 's'} de cierre no completado${count === 1 ? '' : 's'}`;
   return `${label} · ${truncateText(last.reason || '', 96)}`;
+}
+
+function formatUnprocessedCloseEvidence(closes = []) {
+  const list = Array.isArray(closes) ? closes : [];
+  const last = list.at(-1);
+  if (!last) {
+    return '';
+  }
+  const count = list.length;
+  const at = last.at ? ` · ${formatAuditDate(last.at)}` : '';
+  const price = last.closePrice !== null && last.closePrice !== undefined && Number.isFinite(Number(last.closePrice))
+    ? ` · precio ${formatPrice(last.closePrice)}`
+    : '';
+  return `${count} cierre${count === 1 ? '' : 's'} sin evento${at}${price}`;
 }
 
 function formatRatePercent(value) {
@@ -4592,7 +4635,7 @@ function replicaIssueClass(label = '') {
   if (/stop alineado/i.test(label)) {
     return 'positive';
   }
-  if (/no ejecutada|stop|signo|fees|cierre fallido/i.test(label)) {
+  if (/no ejecutada|stop|signo|fees|cierre fallido|cierre no procesado/i.test(label)) {
     return 'negative';
   }
   if (/desviada|extra|abierta|diferencia|fuera de cobertura/i.test(label)) {
@@ -4618,6 +4661,10 @@ function renderReplicaAuditRow(row = {}) {
   const lastCloseFailure = Array.isArray(vst.closeFailures) ? vst.closeFailures.at(-1) : null;
   const closeFailureEvidence = lastCloseFailure
     ? `<span>${escapeHtml(formatCloseFailureEvidence(vst.closeFailures))}</span>`
+    : '';
+  const lastUnprocessedClose = Array.isArray(vst.unprocessedCloses) ? vst.unprocessedCloses.at(-1) : null;
+  const unprocessedCloseEvidence = lastUnprocessedClose
+    ? `<span>${escapeHtml(formatUnprocessedCloseEvidence(vst.unprocessedCloses))}${lastUnprocessedClose.postUrl ? ` · <a href="${escapeAttribute(lastUnprocessedClose.postUrl)}" target="_blank" rel="noreferrer">Cierre omitido</a>` : ''}</span>`
     : '';
   return `
     <tr class="${escapeAttribute(row.severity || 'neutral')}">
@@ -4651,6 +4698,7 @@ function renderReplicaAuditRow(row = {}) {
         <span>${escapeHtml(row.detail || '')}</span>
         ${failureEvidence}
         ${closeFailureEvidence}
+        ${unprocessedCloseEvidence}
         ${postLink}
       </td>
     </tr>
