@@ -39,6 +39,7 @@ const elements = {
   monthResetStatus: document.querySelector('#month-reset-status'),
   pnlStatus: document.querySelector('#pnl-status'),
   pnlSourceGrid: document.querySelector('#pnl-source-grid'),
+  replicaHealthPanel: document.querySelector('#replica-health-panel'),
   reliabilityPanel: document.querySelector('#reliability-panel'),
   reliabilityStatus: document.querySelector('#reliability-status'),
   reliabilitySummary: document.querySelector('#reliability-summary'),
@@ -1180,6 +1181,7 @@ function renderPnl() {
   elements.monthReset.disabled = appState.pnlLoading;
   elements.monthResetStatus.textContent = monthResetStatusText(appState.bingx);
   renderPnlSourceGrid(sources, selectedSource.key);
+  renderReplicaHealthPanel(reference);
   renderReliabilityPanel();
   renderCostControl(selectedSource, reference);
   renderProtectedClosePanel();
@@ -1462,6 +1464,81 @@ function renderReliabilityPanel() {
       </span>
     </div>
   `).join('');
+}
+
+function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
+  if (!elements.replicaHealthPanel) {
+    return;
+  }
+
+  const audit = appState.replicaAudit;
+  const summary = audit?.summary;
+  if (!reference || !summary || audit?.error) {
+    elements.replicaHealthPanel.classList.add('hidden');
+    elements.replicaHealthPanel.innerHTML = '';
+    return;
+  }
+
+  const gapCounts = summary.gapBridge?.counts || {};
+  const coverage = summary.referenceCoverage || {};
+  const fill = summary.fillQuality || {};
+  const signs = summary.signAnalysis || {};
+  const missingReasons = summary.missingReasonCounts || {};
+  const sheetRows = Number(gapCounts.sheet || summary.sheetRows || 0);
+  const matchedRows = Number(gapCounts.matched || 0);
+  const missingRows = Number(gapCounts.missingExecution || summary.issueCounts?.['No ejecutada en VST'] || 0);
+  const outsideCoverage = Number(gapCounts.outsideCoverage || coverage.outsideCoverageRows || 0);
+  const costs = Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0);
+  const net = Number(summary.bingxNet || 0);
+  const marketMismatch = Number(signs.marketMismatch || 0);
+  const tone = coverage.stale
+    ? 'warn'
+    : missingRows || marketMismatch || net < 0
+      ? 'negative'
+      : 'positive';
+  const status = coverage.stale
+    ? 'Hoja desactualizada'
+    : missingRows || marketMismatch || net < 0
+      ? 'Desalineación abierta'
+      : 'Alineación controlada';
+  const latestSheet = coverage.latestSheetAt ? formatShortDateTime(coverage.latestSheetAt) : 'sin fecha';
+  const lag = Number.isFinite(Number(coverage.lagHours))
+    ? formatMilliseconds(Math.max(0, Number(coverage.lagHours)) * unitMs.hour)
+    : '-';
+  const explanation = coverage.stale
+    ? `La hoja llega hasta ${latestSheet} y acumula ${lag} de retraso. ${outsideCoverage} operaciones VST posteriores todavía no pueden compararse.`
+    : missingRows
+      ? `${missingRows} operaciones de la hoja no tienen una apertura VST emparejada.`
+      : net < 0
+        ? 'La cobertura está actualizada, pero la ejecución neta de BingX continúa por debajo de la réplica.'
+        : 'La referencia está actualizada y no quedan diferencias críticas abiertas.';
+
+  elements.replicaHealthPanel.dataset.tone = tone;
+  elements.replicaHealthPanel.innerHTML = `
+    <div class="replica-health-head">
+      <div>
+        <span>Google Sheet / Futuros VST</span>
+        <h3>Estado de alineación</h3>
+        <p>${escapeHtml(explanation)}</p>
+      </div>
+      <div class="replica-health-actions">
+        <span class="replica-health-status ${escapeAttribute(tone)}" role="status" aria-live="polite">${escapeHtml(status)}</span>
+        <a class="button secondary" href="#sheet-vst-alignment">
+          <i data-lucide="scan-search"></i>
+          <span>Ver auditoría</span>
+        </a>
+      </div>
+    </div>
+    <div class="replica-health-metrics">
+      ${renderReliabilityMetric('Emparejadas', `${matchedRows}/${sheetRows || '-'}`, sheetRows ? `${formatPercent((matchedRows / sheetRows) * 100)} de la hoja` : 'Sin referencia')}
+      ${renderReliabilityMetric('No ejecutadas', String(missingRows), formatMissingReasonCounts(missingReasons), missingRows ? 'negative' : 'positive')}
+      ${renderReliabilityMetric('Entradas > 0,15%', `${Number(fill.entryAboveTolerance || 0)}/${Number(fill.entryMeasured || 0)}`, `Media adversa ${formatExecutionPercent(fill.entryAverageAdversePercent)}`, Number(fill.entryAboveTolerance || 0) ? 'warn' : 'positive')}
+      ${renderReliabilityMetric('Salidas > 0,15%', `${Number(fill.closeAboveTolerance || 0)}/${Number(fill.closeMeasured || 0)}`, `Media adversa ${formatExecutionPercent(fill.closeAverageAdversePercent)}`, Number(fill.closeAboveTolerance || 0) ? 'warn' : 'positive')}
+      ${renderReliabilityMetric('Fees + funding', formatMoney(costs, 'VST'), `${formatMoney(summary.bingxFees, 'VST')} en fees`, amountClass(costs))}
+      ${renderReliabilityMetric('Neto BingX', formatMoney(net, 'VST'), `${marketMismatch} signos contrarios a la hoja`, amountClass(net))}
+    </div>
+  `;
+  elements.replicaHealthPanel.classList.remove('hidden');
 }
 
 function renderNetEntryFilterAudit(audit = {}) {
@@ -4150,6 +4227,17 @@ function renderSheetVstAlignment(reference = currentReferenceLedger()) {
   renderReplicaControlPreservingScroll(audit);
 }
 
+function formatExecutionPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  return `${number.toLocaleString('es-ES', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 3
+  })}%`;
+}
+
 function renderOfficialSheetVstAlignment(audit) {
   const summary = audit.summary || {};
   const rows = audit.rows || [];
@@ -4922,8 +5010,8 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Signos divergentes', `${Number(signAnalysis.marketMismatch || 0)} mercado`, `${Number(signAnalysis.costFlip || 0)} absorbidos por costes`, Number(signAnalysis.marketMismatch || 0) ? 'amount negative' : 'amount positive')}
-        ${renderReplicaMetric('Ejecución de entrada', `${Number(fillQuality.entryAboveTolerance || 0)}/${Number(fillQuality.entryMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.entryAverageAdversePercent)}`, Number(fillQuality.entryAboveTolerance || 0) ? 'warn' : 'amount positive')}
-        ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Ejecución de entrada', `${Number(fillQuality.entryAboveTolerance || 0)}/${Number(fillQuality.entryMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatExecutionPercent(fillQuality.entryAverageAdversePercent)}`, Number(fillQuality.entryAboveTolerance || 0) ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatExecutionPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
       </div>
       ${renderReplicaGapBridge(gapBridge, referenceCoverage)}
       ${renderMatchedGapAttribution(matchedGapAttribution)}
