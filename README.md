@@ -51,6 +51,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
 - Limita el trabajo visual de Posts, Eventos y las tablas extensas de Rendimiento mediante paginación progresiva. Los totales y diagnósticos siguen usando la muestra completa, mientras el canal SSE se mantiene compacto durante el monitor continuo.
 - Supervisa el canal SSE con heartbeat cada 15 segundos. Si el panel queda 45 segundos sin actividad, muestra la reconexión y crea un canal nuevo con espera exponencial, sin detener el monitor del backend.
+- Descarta de forma aislada cualquier evento SSE truncado o con JSON inválido. La interfaz avisa, conserva la conexión y se recupera con el siguiente evento válido o heartbeat; la operativa del backend no se interrumpe.
 - Identifica cada arranque del backend. Si una pestaña sigue abierta durante un reinicio o despliegue, detecta la nueva instancia y recarga una sola vez el frontend para no conservar una interfaz antigua.
 - Arranca el canal en tiempo real antes que las consultas auxiliares. Si una fuente inicial devuelve un error temporal, el resto del panel permanece operativo y solo esa fuente se reintenta a los 2, 5, 15 y 30 segundos.
 - Agrupa las ráfagas de precios de BingX y actualiza primero posiciones, riesgo y totales. Gráficos, histórico y auditoría se sincronizan después sin reconstruirse con cada tick.

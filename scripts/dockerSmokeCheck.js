@@ -31,7 +31,7 @@ async function main() {
 
     const firstHealth = await startAndWait({ container, volumes, image, port, timeoutMs });
     await verifyRealtimeStream(port);
-    verifyFrontendBootstrap(container);
+    const frontendCheck = verifyFrontendBootstrap(container);
     writeProbes(container);
     removeContainer(container);
 
@@ -52,6 +52,7 @@ async function main() {
       secondHealth: secondHealth.health?.level || 'ok',
       runtimeRenewed: true,
       frontendRecovery: true,
+      realtimePayloadRecovery: frontendCheck.realtimeRecovered,
       persistedVolumes: probes.length,
       uid
     }, null, 2));
@@ -101,9 +102,14 @@ function verifyFrontendBootstrap(container) {
     'http://127.0.0.1:5178'
   ], { capture: true });
   const result = JSON.parse(output);
-  if (!result.ok || result.injectedFailures !== 1 || !result.recovered) {
+  if (!result.ok
+    || result.injectedFailures !== 1
+    || !result.recovered
+    || result.realtimeInjectedFailures !== 1
+    || !result.realtimeRecovered) {
     throw new Error(`El frontend no recupero su carga parcial: ${output}`);
   }
+  return result;
 }
 
 async function waitForHealth(port, timeoutMs) {

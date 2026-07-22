@@ -275,6 +275,7 @@ const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
 const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
+const CLIENT_ERROR_PRIORITIES = Object.freeze({ bootstrap: 1, realtime: 2, action: 3 });
 let referenceRefreshTimer = null;
 let pnlRealtimeRenderTimer = null;
 let pnlRealtimeRenderFrame = null;
@@ -284,6 +285,7 @@ let realtimeWatchdogTimer = null;
 let realtimeReconnectTimer = null;
 let realtimeReconnectAttempts = 0;
 let realtimeLastActivityAt = 0;
+let realtimePayloadFailures = 0;
 let bootstrapRetryTimer = null;
 document.documentElement.dataset.uiLoadedAt = new Date().toISOString();
 
@@ -1198,11 +1200,17 @@ function connectEvents() {
     scheduleRealtimeReconnect();
   };
 
-  source.addEventListener('heartbeat', () => recordRealtimeActivity(source));
+  source.addEventListener('heartbeat', () => {
+    recordRealtimeActivity(source);
+    markRealtimePayloadRecovered();
+  });
 
   source.addEventListener('state', (event) => {
     recordRealtimeActivity(source, { render: false });
-    const nextState = JSON.parse(event.data);
+    const nextState = parseRealtimePayload(event, 'state');
+    if (!nextState) {
+      return;
+    }
     if (syncRuntimeInstance(nextState)) {
       return;
     }
@@ -1229,7 +1237,11 @@ function connectEvents() {
   });
 
   source.addEventListener('log', (event) => {
-    appState.logs.unshift(JSON.parse(event.data));
+    const payload = parseRealtimePayload(event, 'log');
+    if (!payload) {
+      return;
+    }
+    appState.logs.unshift(payload);
     appState.logs = appState.logs.slice(0, 200);
     if (viewIsVisible(elements.logsView)) {
       renderLogs();
@@ -1242,26 +1254,38 @@ function connectEvents() {
   });
 
   source.addEventListener('telegram', (event) => {
-    const payload = JSON.parse(event.data);
+    const payload = parseRealtimePayload(event, 'telegram');
+    if (!payload) {
+      return;
+    }
     appState.telegram = payload.telegram;
     renderTelegram(payload.telegram);
   });
 
   source.addEventListener('telegramSource', (event) => {
-    const payload = JSON.parse(event.data);
+    const payload = parseRealtimePayload(event, 'telegramSource');
+    if (!payload) {
+      return;
+    }
     appState.telegramSource = payload.telegramSource;
     renderTelegramSource(payload.telegramSource);
     renderTelegramWatchPanel();
   });
 
   source.addEventListener('bingx', (event) => {
-    const payload = JSON.parse(event.data);
+    const payload = parseRealtimePayload(event, 'bingx');
+    if (!payload) {
+      return;
+    }
     appState.bingx = payload.bingx;
     renderBingx(payload.bingx);
   });
 
   source.addEventListener('trade', (event) => {
-    const payload = JSON.parse(event.data);
+    const payload = parseRealtimePayload(event, 'trade');
+    if (!payload) {
+      return;
+    }
     appState.trades.unshift(payload);
     appState.trades = appState.trades.slice(0, 200);
     if (payload.exchangePosition) {
@@ -1296,7 +1320,10 @@ function connectEvents() {
   });
 
   source.addEventListener('exchangePositions', (event) => {
-    const payload = JSON.parse(event.data);
+    const payload = parseRealtimePayload(event, 'exchangePositions');
+    if (!payload) {
+      return;
+    }
     appState.exchangePositions = payload.positions || [];
     appState.exchangeSafety = payload.exchangeSafety || appState.exchangeSafety;
     if (viewIsVisible(elements.pnlView)) {
@@ -1306,7 +1333,10 @@ function connectEvents() {
   });
 
   source.addEventListener('price', (event) => {
-    const payload = JSON.parse(event.data);
+    const payload = parseRealtimePayload(event, 'price');
+    if (!payload) {
+      return;
+    }
     const exchangePriceChanged = applyExchangePriceTick(payload.tick);
     for (const position of payload.updatedPaperPositions || []) {
       upsertPaperTrade(position);
@@ -1318,6 +1348,37 @@ function connectEvents() {
       schedulePnlPriceRender();
     }
   });
+}
+
+function parseRealtimePayload(event, eventName) {
+  try {
+    const payload = JSON.parse(event.data);
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('El payload no es un objeto JSON.');
+    }
+    markRealtimePayloadRecovered();
+    return payload;
+  } catch (error) {
+    realtimePayloadFailures += 1;
+    document.documentElement.dataset.realtimePayloadStatus = 'error';
+    document.documentElement.dataset.realtimePayloadEvent = eventName;
+    console.warn(`Evento SSE ${eventName} descartado por JSON no valido.`, error);
+    showClientError(
+      `Se descartó una actualización dañada del panel (${eventName}). La operativa sigue activa y la interfaz se recuperará con el siguiente evento válido.`,
+      'realtime'
+    );
+    return null;
+  }
+}
+
+function markRealtimePayloadRecovered() {
+  if (realtimePayloadFailures === 0) {
+    return;
+  }
+  realtimePayloadFailures = 0;
+  document.documentElement.dataset.realtimePayloadStatus = 'ok';
+  delete document.documentElement.dataset.realtimePayloadEvent;
+  clearClientError('realtime');
 }
 
 function recordRealtimeActivity(source, { render = true } = {}) {
@@ -9487,9 +9548,10 @@ function escapeAttribute(value) {
 }
 
 function showClientError(message, source = 'action') {
-  if (source === 'bootstrap'
-    && elements.clientError.dataset.source === 'action'
-    && !elements.clientError.classList.contains('hidden')) {
+  const currentSource = elements.clientError.dataset.source;
+  const currentPriority = CLIENT_ERROR_PRIORITIES[currentSource] || 0;
+  const nextPriority = CLIENT_ERROR_PRIORITIES[source] || 0;
+  if (!elements.clientError.classList.contains('hidden') && currentPriority > nextPriority) {
     return;
   }
   elements.clientError.textContent = message;

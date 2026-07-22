@@ -57,12 +57,66 @@ try {
     throw new Error(`Errores JavaScript en el arranque: ${pageErrors.join(' | ')}`);
   }
 
+  const realtimePage = await browser.newPage();
+  const realtimePageErrors = [];
+  let realtimeInjectedFailures = 0;
+  let realtimeRequests = 0;
+  realtimePage.on('pageerror', (error) => realtimePageErrors.push(error.message));
+  await realtimePage.route('**/api/events', async (route) => {
+    realtimeRequests += 1;
+    if (realtimeRequests === 1) {
+      realtimeInjectedFailures += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream; charset=utf-8',
+        headers: {
+          'cache-control': 'no-cache, no-transform',
+          'x-accel-buffering': 'no'
+        },
+        body: 'retry: 1000\n\nevent: state\ndata: {"runtime":\n\n'
+      });
+      return;
+    }
+    if (realtimeRequests === 2) {
+      await delay(1500);
+    }
+    await route.continue();
+  });
+
+  await realtimePage.goto(`${baseUrl}/?realtime-recovery-check=${Date.now()}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await realtimePage.waitForFunction(() => {
+    const alert = document.querySelector('#client-error');
+    return document.documentElement.dataset.realtimePayloadStatus === 'error'
+      && alert
+      && !alert.classList.contains('hidden')
+      && alert.dataset.source === 'realtime'
+      && alert.textContent.includes('actualización dañada');
+  }, null, { timeout: 10_000 });
+
+  await realtimePage.waitForFunction(() => {
+    const alert = document.querySelector('#client-error');
+    return document.documentElement.dataset.realtimePayloadStatus === 'ok'
+      && document.documentElement.dataset.runtimeId
+      && (!alert || alert.dataset.source !== 'realtime');
+  }, null, { timeout: 10_000 });
+  if (realtimeInjectedFailures !== 1 || realtimeRequests < 2) {
+    throw new Error(`La prueba SSE no completo el ciclo de recuperacion: ${realtimeInjectedFailures}/${realtimeRequests}.`);
+  }
+  if (realtimePageErrors.length) {
+    throw new Error(`Errores JavaScript tras el evento SSE corrupto: ${realtimePageErrors.join(' | ')}`);
+  }
+
   console.log(JSON.stringify({
     ok: true,
     injectedFailures,
     runtime: partial.runtime,
     statusDuringFailure: partial.status,
-    recovered: true
+    recovered: true,
+    realtimeInjectedFailures,
+    realtimeRecovered: true
   }));
 } finally {
   await browser?.close().catch(() => {});
@@ -71,4 +125,8 @@ try {
 function optionValue(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : '';
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
