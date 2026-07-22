@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, scopeReplicaCohortInputs } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -77,6 +77,62 @@ test('un cierre de una posición abierta antes de la cohorte no contamina la coh
 
   assert.equal(auditRowBelongsToWindow(carryIn, window), false);
   assert.equal(auditRowBelongsToWindow(newOpening, window), true);
+});
+
+test('acota las fuentes antes de emparejar una cohorte', () => {
+  const window = {
+    startTime: Date.parse('2026-07-15T07:00:00.000Z'),
+    endTime: Date.parse('2026-07-22T07:00:00.000Z')
+  };
+  const scoped = scopeReplicaCohortInputs({
+    sheetRows: [
+      { orderNumber: 1, openedAt: '2026-07-14T12:00:00.000Z' },
+      { orderNumber: 2, openedAt: '2026-07-15T12:00:00.000Z' }
+    ],
+    incomeRows: [
+      { tradeId: 'old', time: Date.parse('2026-07-14T12:00:00.000Z') },
+      { tradeId: 'new', time: Date.parse('2026-07-16T12:00:00.000Z') }
+    ],
+    events: [
+      { eventId: 'old', at: '2026-07-14T12:00:00.000Z' },
+      { eventId: 'new', at: '2026-07-16T12:00:00.000Z' }
+    ],
+    window
+  });
+
+  assert.deepEqual(scoped.sheetRows.map((row) => row.orderNumber), [2]);
+  assert.deepEqual(scoped.incomeRows.map((row) => row.tradeId), ['new']);
+  assert.deepEqual(scoped.events.map((event) => event.eventId), ['new']);
+});
+
+test('una cohorte excluye cierres heredados sin apertura propia', () => {
+  assert.equal(cohortAuditRowHasOrigin({ sheet: null, vst: { openingAt: null, closingAt: '2026-07-16T12:00:00.000Z' } }), false);
+  assert.equal(cohortAuditRowHasOrigin({ sheet: { orderNumber: 2 }, vst: { openingAt: null } }), true);
+  assert.equal(cohortAuditRowHasOrigin({ sheet: null, vst: { openingAt: '2026-07-16T10:00:00.000Z' } }), true);
+});
+
+test('separa extras reales de operaciones posteriores a la cobertura de la hoja', () => {
+  const result = annotateReplicaReferenceCoverage([
+    {
+      id: 'before',
+      cause: 'Extra en VST',
+      vst: { openingAt: '2026-07-15T11:00:00.000Z' }
+    },
+    {
+      id: 'after',
+      cause: 'Extra en VST',
+      vst: { openingAt: '2026-07-17T12:00:00.000Z' }
+    }
+  ], [{ openedAt: '2026-07-15T12:00:00.000Z' }]);
+
+  assert.equal(result.rows[0].cause, 'Extra en VST');
+  assert.equal(result.rows[1].cause, 'Fuera de cobertura de la hoja');
+  assert.equal(result.coverage.latestSheetAt, '2026-07-15T12:00:00.000Z');
+  assert.equal(result.coverage.latestVstAt, '2026-07-17T12:00:00.000Z');
+  assert.equal(result.coverage.lagHours, 48);
+  assert.equal(result.coverage.stale, true);
+  assert.equal(result.coverage.outsideCoverageRows, 1);
+  assert.equal(result.coverage.comparableRows, 1);
 });
 
 test('una lectura vacía aislada no se confunde con un monitor caído', () => {

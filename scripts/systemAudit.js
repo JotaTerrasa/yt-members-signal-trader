@@ -80,7 +80,8 @@ const report = {
     makerCommissionPercent: summary.makerCommissionPercent ?? null,
     aggregatedRows: summary.aggregatedRows || 0,
     aggregatedCycles: summary.aggregatedCycles || 0,
-    issueCounts: summary.issueCounts || {}
+    issueCounts: summary.issueCounts || {},
+    referenceCoverage: summary.referenceCoverage || null
   } : null,
   cohort: replica?.cohort ? {
     startedAt: replica.cohort.startedAt,
@@ -275,6 +276,14 @@ function buildFindings(report) {
         : `${missingSheetOperations} operaciones de la hoja no tienen apertura VST emparejada.`
     });
   }
+  if (report.replica?.referenceCoverage?.stale) {
+    const referenceCoverage = report.replica.referenceCoverage;
+    findings.push({
+      severity: 'info',
+      code: 'sheet_reference_stale',
+      detail: `${referenceCoverage.outsideCoverageRows || 0} aperturas VST son posteriores a la última operación disponible en la hoja (${referenceCoverage.latestSheetAt || 'sin fecha'}). No se clasifican como extras mientras falte esa referencia.`
+    });
+  }
   if (report.runtime.signalCoverage?.summary?.missingOpenings) {
     const missingOpenings = report.runtime.signalCoverage.summary.missingOpenings;
     findings.push({
@@ -345,6 +354,9 @@ function renderMarkdown(report) {
     `- Devolución estimada (${r.estimatedCommissionRebatePercent ?? 0}%): ${money(r.estimatedCommissionRebate)} VST`,
     `- Neto hipotético tras devolución estimada: ${money(r.netAfterEstimatedRebate)} VST`,
     `- Ciclos con entradas agregadas: ${r.aggregatedCycles ?? 0} (${r.aggregatedRows ?? 0} filas)`,
+    `- Última operación disponible en la hoja: ${r.referenceCoverage?.latestSheetAt || 'sin fecha'}`,
+    `- Última apertura VST: ${r.referenceCoverage?.latestVstAt || 'sin fecha'}`,
+    `- Aperturas VST posteriores sin referencia: ${r.referenceCoverage?.outsideCoverageRows ?? 0}`,
     `- Clasificación: ${JSON.stringify(r.issueCounts || {})}`,
     '',
     '## Cohorte posterior a las mejoras',
@@ -388,7 +400,8 @@ function pickCohortSummary(summary = {}) {
     net: summary.bingxNet || 0,
     actualCommissionRebate: summary.actualCommissionRebate || 0,
     commissionRebateDetected: Boolean(summary.commissionRebateDetected),
-    issueCounts: summary.issueCounts || {}
+    issueCounts: summary.issueCounts || {},
+    referenceCoverage: summary.referenceCoverage || null
   };
 }
 
@@ -403,6 +416,8 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Inicio: ${cohort.startedAt}`,
     `- Muestra: ${sample.label || sample.status || 'sin clasificar'} (${summary.closes || 0} cierres)`,
     `- Aperturas / cierres: ${summary.openings || 0} / ${summary.closes || 0}`,
+    `- Filas comparables / VST posteriores sin referencia: ${summary.referenceCoverage?.comparableRows || 0} / ${summary.referenceCoverage?.outsideCoverageRows || 0}`,
+    `- Última operación disponible en la hoja: ${summary.referenceCoverage?.latestSheetAt || 'sin fecha'}`,
     `- Neto observado: ${money(summary.net)} VST`,
     `- Comisiones: ${money(summary.fees)} VST`,
     `- Paquetes completos: ${packages.completePackages || 0} de ${packages.packages || 0}`,

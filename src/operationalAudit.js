@@ -126,6 +126,74 @@ export function auditRowBelongsToWindow(row = {}, window = {}) {
     && timestamp <= Number(window.endTime);
 }
 
+export function scopeReplicaCohortInputs({ sheetRows = [], incomeRows = [], events = [], window = {} } = {}) {
+  const startTime = Number(window.startTime);
+  const endTime = Number(window.endTime);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) {
+    return { sheetRows: [], incomeRows: [], events: [] };
+  }
+
+  return {
+    sheetRows: sheetRows.filter((row) => timestampInWindow(
+      Date.parse(row?.openedAt || row?.closedAt || 0),
+      startTime,
+      endTime
+    )),
+    incomeRows: incomeRows.filter((row) => timestampInWindow(
+      Number(row?.time || 0),
+      startTime,
+      endTime
+    )),
+    events: events.filter((event) => timestampInWindow(
+      Date.parse(event?.at || 0),
+      startTime,
+      endTime
+    ))
+  };
+}
+
+export function cohortAuditRowHasOrigin(row = {}) {
+  return Boolean(row.sheet || row.vst?.openingAt);
+}
+
+export function annotateReplicaReferenceCoverage(rows = [], sheetRows = [], { staleAfterHours = 24 } = {}) {
+  const latestSheetTime = latestTimestamp(sheetRows.flatMap((row) => [row?.openedAt, row?.closedAt]));
+  const latestVstTime = latestTimestamp(rows.map((row) => row?.vst?.openingAt));
+  let outsideCoverageRows = 0;
+  const annotatedRows = rows.map((row) => {
+    const openingTime = Date.parse(row?.vst?.openingAt || 0);
+    if (row?.cause !== 'Extra en VST'
+      || !Number.isFinite(latestSheetTime)
+      || !Number.isFinite(openingTime)
+      || openingTime <= latestSheetTime) {
+      return row;
+    }
+    outsideCoverageRows += 1;
+    return {
+      ...row,
+      cause: 'Fuera de cobertura de la hoja',
+      detail: 'La apertura VST es posterior a la última operación disponible en la hoja y todavía no puede compararse.',
+      severity: 'warn'
+    };
+  });
+  const lagHours = Number.isFinite(latestSheetTime) && Number.isFinite(latestVstTime) && latestVstTime > latestSheetTime
+    ? roundMoney((latestVstTime - latestSheetTime) / 3_600_000)
+    : 0;
+
+  return {
+    rows: annotatedRows,
+    coverage: {
+      latestSheetAt: Number.isFinite(latestSheetTime) ? new Date(latestSheetTime).toISOString() : null,
+      latestVstAt: Number.isFinite(latestVstTime) ? new Date(latestVstTime).toISOString() : null,
+      lagHours,
+      staleAfterHours,
+      stale: outsideCoverageRows > 0 && lagHours > staleAfterHours,
+      outsideCoverageRows,
+      comparableRows: Math.max(0, annotatedRows.length - outsideCoverageRows)
+    }
+  };
+}
+
 export function monitorHealthFinding(health = {}) {
   const level = String(health.level || 'unknown').toLowerCase();
   if (!health.running || health.stale || level === 'error' || level === 'unknown') {
@@ -143,6 +211,17 @@ export function monitorHealthFinding(health = {}) {
     };
   }
   return null;
+}
+
+function timestampInWindow(timestamp, startTime, endTime) {
+  return Number.isFinite(timestamp) && timestamp >= startTime && timestamp <= endTime;
+}
+
+function latestTimestamp(values = []) {
+  const timestamps = values
+    .map((value) => Date.parse(value || 0))
+    .filter(Number.isFinite);
+  return timestamps.length ? Math.max(...timestamps) : NaN;
 }
 
 export function buildNetEntryShadowAudit({ events = [], config = {} } = {}) {

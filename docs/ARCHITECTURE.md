@@ -295,6 +295,8 @@ Calcula:
 
 Lee Google Sheets vía endpoint `gviz` y transforma la hoja mensual a posiciones de referencia.
 
+La auditoría acota las fuentes a la ventana temporal antes de emparejar operaciones. Además, separa las aperturas VST posteriores a la última fila disponible de la hoja: se muestran como pendientes de referencia y no como operaciones extra ni como desalineaciones demostradas.
+
 También resuelve enlaces acortados de portfolio que embeben Google Sheets en iframe.
 
 ### `src/portfolioDetector.js`

@@ -407,6 +407,7 @@ Horarios: datos diarios a las 03:15, perfil Chromium los domingos a las 04:00 y 
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
 - `GET /api/promotion-gate` devuelve cada criterio de forma auditable.
 - `GET /api/replica-audit` incluye la cohorte posterior a las mejoras.
+- La comparación distingue entre filas emparejables y aperturas VST posteriores a la última operación disponible en la hoja. Estas últimas quedan como `Fuera de cobertura de la hoja` hasta que la referencia se actualice.
 - `Nueva cohorte` conserva las fronteras de hasta doce cohortes anteriores y mueve únicamente el punto de inicio comparativo.
 - La auditoría separa réplica bruta, réplica neta estimada con órdenes de mercado, escenario con entrada maker y devolución acreditada.
 - La trazabilidad enlaza publicación, identidad de ejecución, evento de cierre, posición y operación de BingX cuando esos identificadores están disponibles.

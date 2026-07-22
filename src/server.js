@@ -19,7 +19,7 @@ import { editedOpeningSignals } from './editedSignalRecovery.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildNetEntryShadowAudit, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, scopeReplicaCohortInputs } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4260,12 +4260,13 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     .filter(Boolean)
     .filter((event) => auditEventInWindow(event, monthWindow))
     .filter((event) => auditEventIsDemo(event));
-  const rows = buildReplicaAuditRows({
+  const rowAudit = annotateReplicaReferenceCoverage(buildReplicaAuditRows({
     sheetRows,
     incomeRows,
     events,
     defaultNotional: publicConfig.defaultNotionalUSDT || publicConfig.monthlyOrderNotionalUSDT || 0
-  });
+  }), sheetRows);
+  const rows = rowAudit.rows;
   const summary = summarizeReplicaAudit({
     rows,
     sheetRows,
@@ -4274,7 +4275,8 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     reference,
     config: publicConfig,
     monthWindow,
-    commissionRate
+    commissionRate,
+    referenceCoverage: rowAudit.coverage
   });
   const cohort = buildReplicaAuditCohort({
     startedAt: publicConfig.improvementCohortStartedAt,
@@ -4359,21 +4361,19 @@ function buildReplicaAuditCohort({
   if (!cohortWindow) {
     return null;
   }
-  const cohortSheetRows = sheetRows.filter((row) => {
-    const timestamp = Date.parse(row.openedAt || row.closedAt || 0);
-    return Number.isFinite(timestamp) && timestamp >= cohortWindow.startTime && timestamp <= cohortWindow.endTime;
-  });
-  const cohortIncomeRows = incomeRows.filter((row) => {
-    const timestamp = Number(row.time || 0);
-    return Number.isFinite(timestamp) && timestamp >= cohortWindow.startTime && timestamp <= cohortWindow.endTime;
-  });
-  const cohortEvents = events.filter((event) => auditEventInWindow(event, cohortWindow));
-  const rows = buildReplicaAuditRows({
-    sheetRows,
-    incomeRows,
-    events,
+  const {
+    sheetRows: cohortSheetRows,
+    incomeRows: cohortIncomeRows,
+    events: cohortEvents
+  } = scopeReplicaCohortInputs({ sheetRows, incomeRows, events, window: cohortWindow });
+  const rawRows = buildReplicaAuditRows({
+    sheetRows: cohortSheetRows,
+    incomeRows: cohortIncomeRows,
+    events: cohortEvents,
     defaultNotional: config.defaultNotionalUSDT || config.monthlyOrderNotionalUSDT || 0
-  }).filter((row) => auditRowBelongsToWindow(row, cohortWindow));
+  }).filter(cohortAuditRowHasOrigin);
+  const rowAudit = annotateReplicaReferenceCoverage(rawRows, cohortSheetRows);
+  const rows = rowAudit.rows;
   const summary = summarizeReplicaAudit({
     rows,
     sheetRows: cohortSheetRows,
@@ -4383,7 +4383,8 @@ function buildReplicaAuditCohort({
     config,
     monthWindow: cohortWindow,
     commissionRate,
-    scopeToRows: true
+    scopeToRows: true,
+    referenceCoverage: rowAudit.coverage
   });
   return {
     startedAt: new Date(cohortWindow.startTime).toISOString(),
@@ -4587,7 +4588,8 @@ function summarizeReplicaAudit({
   config,
   monthWindow,
   commissionRate = null,
-  scopeToRows = false
+  scopeToRows = false,
+  referenceCoverage = null
 }) {
   const sheetPnl = roundMoney(sheetRows.reduce((sum, row) => sum + Number(row.realizedPnl ?? row.paperPnl ?? 0), 0));
   const replicaPnl = roundMoney(rows.reduce((sum, row) => sum + Number(row.replica?.pnl || 0), 0));
@@ -4670,7 +4672,8 @@ function summarizeReplicaAudit({
     aggregatedRows: aggregatedRows.length,
     aggregatedCycles,
     worstRows,
-    resetApplied: Number.isFinite(monthWindow.resetAt) && monthWindow.resetAt > 0
+    resetApplied: Number.isFinite(monthWindow.resetAt) && monthWindow.resetAt > 0,
+    referenceCoverage
   };
 }
 

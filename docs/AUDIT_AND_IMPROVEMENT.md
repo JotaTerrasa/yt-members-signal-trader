@@ -27,7 +27,9 @@ La devolución del 22% es un escenario. No se suma a la equity real hasta que Bi
 
 ## Lectura desde el frontend
 
-La pestaña `PnL` usa `/api/replica-audit` como fuente única para la comparación entre la hoja, la réplica teórica y BingX VST. La cabecera muestra las aperturas ejecutadas frente al total de la hoja, por lo que en esta línea base debe leerse **88/103 ejecutadas** y **15 no ejecutadas**.
+La pestaña `PnL` usa `/api/replica-audit` como fuente única para la comparación entre la hoja, la réplica teórica y BingX VST. En esta línea base histórica se observaron **88/103 aperturas emparejables** y **15 no ejecutadas**.
+
+La lectura actual separa tres grupos: filas emparejadas, operaciones realmente ausentes y aperturas VST posteriores a la última operación disponible en la hoja. El tercer grupo queda como `Fuera de cobertura de la hoja` y no se considera una desalineación hasta que la referencia se actualice. Para las cohortes, las fuentes se acotan a su ventana antes de emparejar, evitando cruces falsos con operaciones anteriores.
 
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 
