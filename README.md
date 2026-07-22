@@ -358,7 +358,7 @@ Los botones destructivos piden confirmación textual.
 
 ### Posts
 
-Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado. La lista carga 40 filas y permite ampliar el bloque sin renderizar todo el histórico de golpe. La navegación mantiene visibles el estado del monitor, las fuentes activas y la cuenta de ejecución.
+Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado. La lista carga 12 filas y permite ampliar el bloque sin renderizar todo el histórico de golpe. La pestaña PnL se construye bajo demanda para no penalizar el monitor ni la lectura de posts. La navegación mantiene visibles el estado del monitor, las fuentes activas y la cuenta de ejecución.
 
 ### Eventos
 

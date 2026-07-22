@@ -252,7 +252,7 @@ const PLOTLY_CDN_SOURCES = [
   'https://unpkg.com/plotly.js-dist-min@2.35.2/plotly.min.js'
 ];
 let plotlyLoadPromise = null;
-const POSTS_PAGE_SIZE = 40;
+const POSTS_PAGE_SIZE = 12;
 const LOGS_PAGE_SIZE = 60;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
@@ -457,6 +457,13 @@ function bindEvents() {
     wrap.scrollTop += event.deltaY;
     wrap.scrollLeft += event.deltaX;
   }, { passive: false });
+  elements.externalSheetPanel?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-external-sheet-scroll]');
+    if (!button) {
+      return;
+    }
+    scrollExternalSheet(button.dataset.externalSheetScroll);
+  });
   elements.postsTab.addEventListener('click', () => switchView('posts'));
   elements.logsTab.addEventListener('click', () => switchView('logs'));
   elements.pnlTab.addEventListener('click', () => {
@@ -808,10 +815,12 @@ async function loadBingx() {
   appState.exchangeSafety = response.exchangeSafety || appState.exchangeSafety;
   appState.risk = response.risk || appState.risk;
   renderBingx(response.bingx);
-  if (response.bingx?.apiKeyConfigured && response.bingx?.apiSecretConfigured) {
-    await loadPnl();
-  } else {
-    renderPnl();
+  if (viewIsVisible(elements.pnlView)) {
+    if (response.bingx?.apiKeyConfigured && response.bingx?.apiSecretConfigured) {
+      await loadPnl();
+    } else {
+      renderPnl();
+    }
   }
 }
 
@@ -1329,6 +1338,10 @@ function renderListPagination({ container, status, button, visible, total, noun 
 }
 
 function renderPnl() {
+  if (!viewIsVisible(elements.pnlView)) {
+    return;
+  }
+
   const configured = Boolean(appState.bingx?.apiKeyConfigured && appState.bingx?.apiSecretConfigured);
   const reference = currentReferenceLedger();
   const rows = pnlRowsWithReferenceLedger(pnlRowsWithLocalTrades(appState.pnl?.months || []), reference);
@@ -6287,6 +6300,15 @@ function finiteOrNull(value) {
 
 function scrollAlignmentTable(direction) {
   const wrap = document.querySelector('.replica-audit-wrap, .alignment-wrap');
+  scrollTableContainer(wrap, direction);
+}
+
+function scrollExternalSheet(direction) {
+  const wrap = elements.externalSheetPanel?.querySelector('.external-sheet-table-wrap');
+  scrollTableContainer(wrap, direction);
+}
+
+function scrollTableContainer(wrap, direction) {
   if (!wrap) {
     return;
   }
