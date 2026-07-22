@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildExecutionPriceChainAttribution, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -328,6 +328,103 @@ test('descompone el gap emparejado entre entrada, salida, cantidad y evidencia i
   assert.equal(attribution.bySymbol[0].key, 'SOL-USDT');
   assert.equal(attribution.byCloseKind.find((group) => group.key === 'stop').gap, -0.9);
   assert.equal(attribution.topRows[0].id, 'BTC|1');
+});
+
+test('reconcilia el gap por tramos entre señal, cotización y fill', () => {
+  const attribution = buildExecutionPriceChainAttribution([
+    {
+      symbol: 'BTC-USDT',
+      direction: 'LONG',
+      sheet: { entry: 100, exit: 110 },
+      replica: { pnl: 2, notional: 10, leverage: 2 },
+      vst: {
+        signalEntry: 101,
+        preOrderMarket: 103,
+        entry: 105,
+        closeTarget: 109,
+        preCloseMarket: 108,
+        exit: 107,
+        grossPnl: 0.5
+      }
+    },
+    {
+      symbol: 'ETH-USDT',
+      direction: 'SHORT',
+      sheet: { entry: 200, exit: 180 },
+      replica: { pnl: 2, notional: 10, leverage: 2 },
+      vst: {
+        signalEntry: 199,
+        preOrderMarket: 198,
+        entry: 197,
+        closeTarget: null,
+        preCloseMarket: null,
+        exit: 190,
+        grossPnl: 1
+      }
+    }
+  ]);
+
+  const steps = Object.fromEntries(attribution.steps.map((step) => [step.key, step]));
+  assert.equal(attribution.replicaPnl, 4);
+  assert.equal(attribution.bingxGross, 1.5);
+  assert.equal(attribution.gap, -2.5);
+  assert.equal(attribution.residual, 0);
+  assert.equal(attribution.reconciled, true);
+  assert.deepEqual(attribution.counts, {
+    matched: 2,
+    decomposable: 2,
+    incomplete: 0,
+    fullEntryPath: 2,
+    fullExitPath: 1
+  });
+  assert.equal(steps.entry_reference.count, 2);
+  assert.equal(steps.entry_quote_move.count, 2);
+  assert.equal(steps.entry_fill.count, 2);
+  assert.equal(steps.exit_target.count, 1);
+  assert.equal(steps.exit_quote_move.count, 1);
+  assert.equal(steps.exit_fill.count, 1);
+  assert.equal(steps.exit_missing_evidence.count, 1);
+  assert.equal(
+    Math.round(attribution.steps.reduce((sum, step) => sum + step.value, 0) * 1e7) / 1e7,
+    attribution.gap
+  );
+});
+
+test('mide reacción y reintentos sin duplicar un mismo cierre', () => {
+  const summary = summarizeExecutionLatency([
+    {
+      trace: { openingEventId: 'open-1', closeSignalEventId: 'close-1' },
+      vst: {
+        openingDetectedAt: '2026-07-20T10:00:00.000Z',
+        openingFirstAttemptAt: '2026-07-20T10:00:01.000Z',
+        openingAt: '2026-07-20T10:00:03.000Z',
+        closingDetectedAt: '2026-07-20T11:00:00.000Z',
+        closingFirstAttemptAt: '2026-07-20T11:00:00.500Z',
+        closeSignalAt: '2026-07-20T11:00:01.000Z'
+      }
+    },
+    {
+      trace: { openingEventId: 'open-2', closeSignalEventId: 'close-1' },
+      vst: {
+        openingDetectedAt: '2026-07-20T12:00:00.000Z',
+        openingFirstAttemptAt: '2026-07-20T12:00:00.500Z',
+        openingAt: '2026-07-20T12:00:10.000Z',
+        closingDetectedAt: '2026-07-20T11:00:00.000Z',
+        closingFirstAttemptAt: '2026-07-20T11:00:00.500Z',
+        closeSignalAt: '2026-07-20T11:00:01.000Z'
+      }
+    }
+  ]);
+
+  assert.equal(summary.opening.events, 2);
+  assert.equal(summary.opening.measured, 2);
+  assert.equal(summary.opening.retried, 2);
+  assert.equal(summary.opening.delayedAbove5Seconds, 1);
+  assert.equal(summary.opening.total.medianSeconds, 3);
+  assert.equal(summary.opening.total.maxSeconds, 10);
+  assert.equal(summary.closing.events, 1);
+  assert.equal(summary.closing.measured, 1);
+  assert.equal(summary.closing.total.medianSeconds, 1);
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

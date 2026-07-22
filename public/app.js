@@ -4143,6 +4143,7 @@ function renderReplicaControlPreservingScroll(audit) {
   requestAnimationFrame(() => {
     renderReplicaGapWaterfall('replica-gap-waterfall', audit?.summary?.gapBridge);
     renderMatchedGapWaterfall('replica-matched-gap-waterfall', audit?.summary?.matchedGapAttribution);
+    renderExecutionPriceChainWaterfall('execution-price-chain-waterfall', audit?.summary?.executionPriceChain);
   });
   if (!scroll) {
     return;
@@ -4504,6 +4505,84 @@ function renderMatchedGapAttribution(attribution) {
   `;
 }
 
+function renderExecutionPriceChain(chain, latency) {
+  if (!chain || !Array.isArray(chain.steps)) {
+    return '';
+  }
+  const steps = Object.fromEntries(chain.steps.map((step) => [step.key, step]));
+  const stepValue = (key) => Number(steps[key]?.value || 0);
+  const quoteToFill = stepValue('entry_fill') + stepValue('exit_fill');
+  const beforeSend = stepValue('entry_quote_move') + stepValue('exit_quote_move');
+  const targetDifference = stepValue('entry_reference') + stepValue('exit_target');
+  const missingEvidence = stepValue('entry_missing_evidence') + stepValue('exit_missing_evidence');
+  const status = chain.reconciled
+    ? 'Cadena reconciliada'
+    : `Residual ${formatMoney(chain.residual, 'VST')}`;
+  const fact = (label, value, detail) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong class="${amountClass(value)}">${escapeHtml(formatMoney(value, 'VST'))}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
+  const latencyPhase = (label, phase) => {
+    const total = phase?.total || {};
+    const reaction = phase?.reaction || {};
+    const retryWait = phase?.retryWait || {};
+    return `
+      <div class="execution-latency-phase">
+        <div>
+          <strong>${escapeHtml(label)}</strong>
+          <span>${escapeHtml(`${phase?.measured || 0} eventos medidos`)}</span>
+        </div>
+        <dl>
+          <div><dt>Reacción mediana</dt><dd>${escapeHtml(formatLatencySeconds(reaction.medianSeconds))}</dd></div>
+          <div><dt>Total p95</dt><dd>${escapeHtml(formatLatencySeconds(total.p95Seconds))}</dd></div>
+          <div><dt>Espera por reintento p90</dt><dd>${escapeHtml(formatLatencySeconds(retryWait.p90Seconds))}</dd></div>
+          <div><dt>Más de 5 s</dt><dd>${escapeHtml(String(phase?.delayedAbove5Seconds || 0))}</dd></div>
+        </dl>
+      </div>
+    `;
+  };
+
+  return `
+    <section class="replica-gap-panel execution-price-chain-panel" aria-labelledby="execution-price-chain-title">
+      <div class="replica-gap-heading">
+        <div>
+          <span>Raíz de la ejecución</span>
+          <strong id="execution-price-chain-title">De la señal al fill confirmado</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(chain.reconciled ? 'positive' : 'negative')}">${escapeHtml(status)}</span>
+      </div>
+      <div id="execution-price-chain-waterfall" class="replica-gap-chart" role="img" aria-label="Desglose entre señal, cotización previa y fill de BingX"></div>
+      <div class="replica-gap-facts">
+        ${fact('Movimiento antes de enviar', beforeSend, 'Señal/objetivo a cotización previa')}
+        ${fact('Cotización a fill', quoteToFill, 'Diferencia posterior al snapshot')}
+        ${fact('Referencia y objetivo', targetDifference, 'Hoja frente a señal o stop de la app')}
+        ${fact('Evidencia intermedia ausente', missingEvidence, `${chain.counts?.fullExitPath || 0}/${chain.counts?.decomposable || 0} salidas completas`)}
+      </div>
+      <div class="execution-latency-grid">
+        ${latencyPhase('Aperturas', latency?.opening)}
+        ${latencyPhase('Cierres por señal', latency?.closing)}
+      </div>
+      <p class="replica-gap-note">La cotización previa es el snapshot disponible justo antes de enviar. La diferencia hasta el fill incluye spread, base de precio y ejecución del exchange; no se presenta como slippage puro. Los reintentos se miden aparte.</p>
+    </section>
+  `;
+}
+
+function renderExecutionPriceChainWaterfall(chartId, chain) {
+  if (!chain) {
+    return;
+  }
+  renderReplicaGapWaterfall(chartId, {
+    ...chain,
+    bingxNet: chain.bingxGross
+  }, {
+    start: 'Réplica emparejada',
+    end: 'BingX bruto emparejado'
+  });
+}
+
 function renderMatchedGapWaterfall(chartId, attribution) {
   if (!attribution) {
     return;
@@ -4641,6 +4720,8 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const fillQuality = summary.fillQuality || {};
   const gapBridge = summary.gapBridge || null;
   const matchedGapAttribution = summary.matchedGapAttribution || null;
+  const executionPriceChain = summary.executionPriceChain || null;
+  const executionLatency = summary.executionLatency || null;
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
@@ -4678,6 +4759,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
       </div>
       ${renderReplicaGapBridge(gapBridge, referenceCoverage)}
       ${renderMatchedGapAttribution(matchedGapAttribution)}
+      ${renderExecutionPriceChain(executionPriceChain, executionLatency)}
       ${unprocessedCloseRows ? `
         <p class="notice replica-audit-notice">
           <strong>Incidencia histórica corregida.</strong>
@@ -7694,6 +7776,22 @@ function formatLeverage(value) {
     return '-';
   }
   return `${number}x`;
+}
+
+function formatLatencySeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '-';
+  }
+  if (seconds < 10) {
+    return `${seconds.toLocaleString('es-ES', { maximumFractionDigits: 2 })} s`;
+  }
+  if (seconds < 60) {
+    return `${seconds.toLocaleString('es-ES', { maximumFractionDigits: 1 })} s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
 }
 
 function formatDuration(startValue, endValue) {

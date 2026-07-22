@@ -86,6 +86,8 @@ const report = {
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
+    executionPriceChain: summary.executionPriceChain || null,
+    executionLatency: summary.executionLatency || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -298,6 +300,13 @@ function buildFindings(report) {
       detail: `El desglose de operaciones emparejadas deja un residual de ${money(report.replica.matchedGapAttribution.residual)} VST.`
     });
   }
+  if (report.replica?.executionPriceChain?.reconciled === false) {
+    findings.push({
+      severity: 'critical',
+      code: 'execution_price_chain_unreconciled',
+      detail: `La cadena señal-cotización-fill deja un residual de ${money(report.replica.executionPriceChain.residual)} VST.`
+    });
+  }
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
     const missingSheetOperations = report.replica.issueCounts['No ejecutada en VST'];
     findings.push({
@@ -444,6 +453,10 @@ function renderMarkdown(report) {
     '',
     ...renderMatchedGapAttributionLines(r.matchedGapAttribution),
     '',
+    '## Cadena señal, cotización y fill',
+    '',
+    ...renderExecutionPriceChainLines(r.executionPriceChain, r.executionLatency),
+    '',
     '## Cohorte posterior a las mejoras',
     '',
     ...renderCohortLines(report.cohort, report.runtime.signalCoverage),
@@ -511,6 +524,26 @@ function renderMatchedGapAttributionLines(attribution) {
   ];
 }
 
+function renderExecutionPriceChainLines(chain, latency) {
+  if (!chain || !Array.isArray(chain.steps)) {
+    return ['- Sin cadena de precios disponible.'];
+  }
+  const stepLines = chain.steps
+    .filter((step) => Math.abs(Number(step.value || 0)) > 0.0000001 || Number(step.count || 0) > 0)
+    .map((step) => `- ${step.label} (${step.count ?? 0} operaciones): ${money(step.value)} VST`);
+  const opening = latency?.opening || {};
+  const closing = latency?.closing || {};
+  return [
+    `- Operaciones emparejadas / cadena base completa: ${chain.counts?.matched ?? 0} / ${chain.counts?.decomposable ?? 0}`,
+    `- Entradas con señal y cotización / salidas con objetivo y cotización: ${chain.counts?.fullEntryPath ?? 0} / ${chain.counts?.fullExitPath ?? 0}`,
+    ...stepLines,
+    `- Bruto BingX reconstruido: ${money(chain.reconstructedGross)} VST`,
+    `- Residual: ${money(chain.residual)} VST (${chain.reconciled ? 'reconciliado' : 'revisar'})`,
+    `- Latencia de apertura: mediana ${seconds(opening.total?.medianSeconds)}, p95 ${seconds(opening.total?.p95Seconds)}, ${opening.retried ?? 0} con espera de reintento.`,
+    `- Latencia de cierre por señal: mediana ${seconds(closing.total?.medianSeconds)}, p95 ${seconds(closing.total?.p95Seconds)}, ${closing.retried ?? 0} con espera de reintento.`
+  ];
+}
+
 function pickCohortSummary(summary = {}) {
   return {
     sheetRows: summary.sheetRows || 0,
@@ -529,6 +562,8 @@ function pickCohortSummary(summary = {}) {
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
+    executionPriceChain: summary.executionPriceChain || null,
+    executionLatency: summary.executionLatency || null,
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -702,6 +737,11 @@ function round(value) {
 
 function money(value) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(4) : '-';
+}
+
+function seconds(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(number < 10 ? 2 : 1)} s` : 'sin datos';
 }
 
 function percent(value) {

@@ -473,6 +473,8 @@ El panel separa el resultado bruto teórico, el neto estimado con entrada y sali
 
 La auditoría incluye una cohorte posterior a las mejoras, las tarifas maker/taker, la cobertura de cada paquete y trazas desde la publicación hasta el ciclo de BingX. Una cohorte nueva archiva la frontera temporal de la anterior. La lectura es exploratoria con menos de 30 cierres, orientativa entre 30 y 99 y contrastable a partir de 100.
 
+El comparador reconstruye además la cadena `hoja → señal/objetivo → cotización previa → fill` y la representa con Plotly. La latencia se divide entre reacción inicial y espera por reintentos, de modo que un movimiento previo, un retry y una diferencia entre cotización y fill no se mezclen bajo una única etiqueta de slippage.
+
 Si un paquete Demo reciente presenta una apertura sin evento de ejecución, la cobertura vuelve a validar la señal tras un breve margen y la reenvía por la ruta idempotente. Las aperturas ya ejecutadas desde otra fuente se enlazan mediante su identidad estable en lugar de contarse como ausentes. Esta recuperación no cambia el modo, no arma Live y no habilita aperturas desde Telegram Web.
 
 Endpoints:

@@ -2917,6 +2917,77 @@ summary.dashboard-section-title {
   overflow-wrap: anywhere;
 }
 
+.execution-price-chain-panel {
+  margin-top: 4px;
+}
+
+.execution-latency-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.execution-latency-phase {
+  min-width: 0;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+}
+
+.execution-latency-phase:last-child {
+  border-right: 0;
+}
+
+.execution-latency-phase > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.execution-latency-phase > div strong {
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.execution-latency-phase > div span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.execution-latency-phase dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.execution-latency-phase dl div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.execution-latency-phase dt,
+.execution-latency-phase dd {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.execution-latency-phase dt {
+  color: var(--muted);
+}
+
+.execution-latency-phase dd {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
 .replica-issue-strip {
   display: flex;
   flex-wrap: wrap;
@@ -4240,6 +4311,8 @@ summary.dashboard-section-title {
   .cost-symbol-row,
   .protected-close-grid,
   .replica-audit-grid,
+  .execution-latency-grid,
+  .execution-latency-phase dl,
   .performance-source-grid,
   .performance-overview-header,
   .performance-kpi-grid,
@@ -5004,6 +5077,15 @@ h1 {
   .real-lifecycle-row,
   .incident-item {
     grid-template-columns: 1fr;
+  }
+
+  .execution-latency-phase {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .execution-latency-phase:last-child {
+    border-bottom: 0;
   }
 
   .replica-gap-facts {

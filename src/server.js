@@ -20,7 +20,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildExecutionPriceChainAttribution, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4261,8 +4261,9 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     .filter(Boolean)
     .filter((event) => auditEventInWindow(event, monthWindow));
   const events = windowEvents.filter((event) => auditEventIsDemo(event, windowEvents));
+  const posts = store.list();
   const unprocessedCloses = buildUnprocessedCloseSignals({
-    posts: store.list(),
+    posts,
     events,
     parseSignals: (text) => futuresTrader.parseAll(text),
     startTime: monthWindow.startTime,
@@ -4272,6 +4273,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     sheetRows,
     incomeRows,
     events,
+    posts,
     unprocessedCloses,
     defaultNotional: publicConfig.defaultNotionalUSDT || publicConfig.monthlyOrderNotionalUSDT || 0
   }), sheetRows);
@@ -4292,6 +4294,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
     sheetRows,
     incomeRows,
     events,
+    posts,
     unprocessedCloses,
     reference,
     config: publicConfig,
@@ -4305,6 +4308,7 @@ async function buildReplicaAudit({ month = currentMonthKey() } = {}) {
       sheetRows,
       incomeRows,
       events,
+      posts,
       unprocessedCloses,
       reference,
       config: publicConfig,
@@ -4363,6 +4367,7 @@ function buildReplicaAuditCohort({
   sheetRows,
   incomeRows,
   events,
+  posts,
   unprocessedCloses,
   reference,
   config,
@@ -4382,6 +4387,7 @@ function buildReplicaAuditCohort({
     sheetRows: cohortSheetRows,
     incomeRows: cohortIncomeRows,
     events: cohortEvents,
+    posts,
     unprocessedCloses: (unprocessedCloses || []).filter((close) => auditEventInWindow(close, cohortWindow)),
     defaultNotional: config.defaultNotionalUSDT || config.monthlyOrderNotionalUSDT || 0
   }).filter(cohortAuditRowHasOrigin);
@@ -4409,7 +4415,8 @@ function buildReplicaAuditCohort({
   };
 }
 
-function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], unprocessedCloses = [], defaultNotional = 0 }) {
+function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], posts = [], unprocessedCloses = [], defaultNotional = 0 }) {
+  const timingContext = buildAuditTimingContext({ events, posts });
   const aligned = alignReplicaAuditRecords({
     sheetRows,
     openings: auditOpeningEvents(events),
@@ -4435,6 +4442,7 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], u
       symbol,
       sequence,
       ...record,
+      timingContext,
       defaultNotional
     });
   });
@@ -4444,6 +4452,63 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], u
     || left.symbol.localeCompare(right.symbol)
     || left.sequence - right.sequence
   ));
+}
+
+function buildAuditTimingContext({ events = [], posts = [] } = {}) {
+  const postsById = new Map((posts || [])
+    .filter((post) => post?.id)
+    .map((post) => [String(post.id), post]));
+  const firstAttemptByKey = new Map();
+  for (const event of events || []) {
+    const action = auditAttemptAction(event);
+    const key = auditAttemptKey(event, action);
+    const timestamp = Date.parse(event?.at || '');
+    if (!key || !Number.isFinite(timestamp)) {
+      continue;
+    }
+    const current = firstAttemptByKey.get(key);
+    if (!current || timestamp < current.timestamp) {
+      firstAttemptByKey.set(key, { timestamp, at: event.at });
+    }
+  }
+  return { postsById, firstAttemptByKey };
+}
+
+function auditAttemptAction(event = {}) {
+  const action = String(event?.signal?.action || '').toUpperCase();
+  if (action.startsWith('CLOSE')) {
+    return 'CLOSE';
+  }
+  return event?.signal?.entry ? 'OPEN' : '';
+}
+
+function auditAttemptKey(event = {}, action = auditAttemptAction(event)) {
+  const postId = String(event?.postId || '').trim();
+  const symbol = auditEventSymbol(event);
+  return postId && symbol && action ? `${postId}|${symbol}|${action}` : '';
+}
+
+function auditEventTiming(event, action, timingContext = {}) {
+  if (!event) {
+    return { detectedAt: null, firstAttemptAt: null };
+  }
+  const post = timingContext.postsById?.get(String(event.postId || ''));
+  const firstAttempt = timingContext.firstAttemptByKey?.get(auditAttemptKey(event, action));
+  return {
+    detectedAt: post?.firstSeenAt || null,
+    firstAttemptAt: firstAttempt?.at || event.at || null
+  };
+}
+
+function auditPreCloseMarket({ symbol, closeSignalEvent, closeEvent }) {
+  const positions = closeSignalEvent?.exchangeClose?.positions || [];
+  const position = positions.find((item) => auditPositionSymbol(item) === symbol) || positions[0];
+  return firstAuditPrice([
+    position?.markPrice,
+    position?.lastPrice,
+    closeEvent?.exchangePosition?.currentPrice,
+    closeEvent?.exchangePosition?.raw?.markPrice
+  ]);
 }
 
 function replicaAuditRow({
@@ -4463,6 +4528,7 @@ function replicaAuditRow({
   unprocessedCloses = [],
   unmatchedClose,
   aggregatedOpenings,
+  timingContext,
   defaultNotional
 }) {
   const sheetPnl = auditNumber(sheet?.realizedPnl ?? sheet?.paperPnl, null);
@@ -4514,6 +4580,15 @@ function replicaAuditRow({
     closePrice,
     grossPnl
   });
+  const openingTiming = auditEventTiming(opening, 'OPEN', timingContext);
+  const closingTiming = auditEventTiming(closeSignalEvent, 'CLOSE', timingContext);
+  const preOrderMarket = firstAuditPrice([
+    opening?.marketPrice,
+    opening?.entryPrice
+  ]);
+  const closeTarget = closeReference?.price
+    ?? (closeKind.kind === 'stop' ? stopLoss : null);
+  const preCloseMarket = auditPreCloseMarket({ symbol, closeSignalEvent, closeEvent });
   const stopAlignment = replicaStopAlignment({
     closeStatus: closeKind.kind === 'stop' ? 'exchange_stop_closed' : closeEvent?.status,
     replicaPnl,
@@ -4567,6 +4642,9 @@ function replicaAuditRow({
       exit: auditRound(closePrice),
       signalEntry: auditRound(entryReference?.price),
       signalClose: auditRound(closeReference?.price),
+      preOrderMarket: auditRound(preOrderMarket),
+      closeTarget: auditRound(closeTarget),
+      preCloseMarket: auditRound(preCloseMarket),
       stopLoss: auditRound(stopLoss),
       entryPriceSource: entryFill?.source || '',
       closePriceSource: closeFill?.source || '',
@@ -4580,7 +4658,12 @@ function replicaAuditRow({
       closingFee: auditRound(closingFeeAmount),
       funding: auditRound(fundingAmount),
       netPnl: auditRound(netPnl),
+      openingDetectedAt: openingTiming.detectedAt,
+      openingFirstAttemptAt: openingTiming.firstAttemptAt,
       openingAt: opening?.at || null,
+      closingDetectedAt: closingTiming.detectedAt,
+      closingFirstAttemptAt: closingTiming.firstAttemptAt,
+      closeSignalAt: closeSignalEvent?.at || null,
       closingAt: realized ? new Date(Number(realized.time || 0)).toISOString() : closeEvent?.at || null,
       closeStatus: closeEvent?.status || '',
       closeReason: closeEvent?.reason || '',
@@ -4799,6 +4882,8 @@ function summarizeReplicaAudit({
   const fillQuality = summarizeReplicaFillQuality(rows);
   const gapBridge = buildReplicaGapBridge({ rows, bingxFees, bingxFunding });
   const matchedGapAttribution = buildMatchedGapAttribution(rows);
+  const executionPriceChain = buildExecutionPriceChainAttribution(rows);
+  const executionLatency = summarizeExecutionLatency(rows);
   const missingReasonCounts = rows
     .filter((row) => row.cause === 'No ejecutada en VST')
     .reduce((totals, row) => {
@@ -4860,6 +4945,8 @@ function summarizeReplicaAudit({
     fillQuality,
     gapBridge,
     matchedGapAttribution,
+    executionPriceChain,
+    executionLatency,
     missingReasonCounts,
     stopAnalysis,
     unprocessedCloseRows: unprocessedCloseRows.length,
@@ -5056,6 +5143,16 @@ function auditPercentDiff(actual, expected) {
 function auditNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function firstAuditPrice(values = []) {
+  for (const value of values) {
+    const number = auditNumber(value, null);
+    if (number !== null && number > 0) {
+      return number;
+    }
+  }
+  return null;
 }
 
 function auditRound(value) {

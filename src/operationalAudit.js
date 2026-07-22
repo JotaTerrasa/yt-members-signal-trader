@@ -562,6 +562,291 @@ export function buildMatchedGapAttribution(rows = []) {
   };
 }
 
+export function buildExecutionPriceChainAttribution(rows = []) {
+  const matchedRows = (Array.isArray(rows) ? rows : []).filter((row) => (
+    Boolean(row?.sheet)
+    && nullableNumber(row?.replica?.pnl) !== null
+    && nullableNumber(row?.vst?.grossPnl) !== null
+  ));
+  const stepKeys = [
+    'sheet_accounting',
+    'entry_reference',
+    'entry_quote_move',
+    'entry_fill',
+    'entry_missing_evidence',
+    'exit_target',
+    'exit_quote_move',
+    'exit_fill',
+    'exit_missing_evidence',
+    'size_and_fills',
+    'insufficient_evidence'
+  ];
+  const totals = Object.fromEntries(stepKeys.map((key) => [key, 0]));
+  const stepCounts = Object.fromEntries(stepKeys.map((key) => [key, 0]));
+  let replicaPnlTotal = 0;
+  let bingxGrossTotal = 0;
+  let decomposableRows = 0;
+  let fullEntryPath = 0;
+  let fullExitPath = 0;
+
+  for (const row of matchedRows) {
+    const replicaPnl = Number(row.replica.pnl);
+    const bingxGross = Number(row.vst.grossPnl);
+    replicaPnlTotal += replicaPnl;
+    bingxGrossTotal += bingxGross;
+    const attribution = executionPriceChainRowAttribution(row);
+    if (!attribution) {
+      totals.insufficient_evidence += bingxGross - replicaPnl;
+      stepCounts.insufficient_evidence += 1;
+      continue;
+    }
+    decomposableRows += 1;
+    fullEntryPath += attribution.fullEntryPath ? 1 : 0;
+    fullExitPath += attribution.fullExitPath ? 1 : 0;
+    for (const [key, value] of Object.entries(attribution.values)) {
+      totals[key] += value;
+    }
+    for (const key of attribution.evidence) {
+      stepCounts[key] += 1;
+    }
+  }
+
+  const labels = {
+    sheet_accounting: 'Contabilidad de la hoja',
+    entry_reference: 'Referencia de entrada',
+    entry_quote_move: 'Señal a cotización',
+    entry_fill: 'Cotización a fill de entrada',
+    entry_missing_evidence: 'Entrada sin traza intermedia',
+    exit_target: 'Objetivo de salida',
+    exit_quote_move: 'Objetivo a cotización',
+    exit_fill: 'Cotización a fill de salida',
+    exit_missing_evidence: 'Salida sin traza intermedia',
+    size_and_fills: 'Cantidad y fills',
+    insufficient_evidence: 'Evidencia base incompleta'
+  };
+  const steps = stepKeys.map((key) => bridgeStep(
+    key,
+    labels[key],
+    totals[key],
+    stepCounts[key]
+  ));
+  const replicaPnl = roundMoney(replicaPnlTotal);
+  const bingxGross = roundMoney(bingxGrossTotal);
+  const reconstructedGross = roundMoney(replicaPnl + sumFinite(steps.map((step) => step.value)));
+  const rawResidual = bingxGross - reconstructedGross;
+  const residual = Math.abs(rawResidual) <= 0.0000001 ? 0 : roundMoney(rawResidual);
+
+  return {
+    replicaPnl,
+    bingxGross,
+    gap: roundMoney(bingxGross - replicaPnl),
+    reconstructedGross,
+    residual,
+    reconciled: Math.abs(residual) <= 0.01,
+    counts: {
+      matched: matchedRows.length,
+      decomposable: decomposableRows,
+      incomplete: matchedRows.length - decomposableRows,
+      fullEntryPath,
+      fullExitPath
+    },
+    entryImpact: roundMoney(
+      totals.entry_reference
+      + totals.entry_quote_move
+      + totals.entry_fill
+      + totals.entry_missing_evidence
+    ),
+    exitImpact: roundMoney(
+      totals.exit_target
+      + totals.exit_quote_move
+      + totals.exit_fill
+      + totals.exit_missing_evidence
+    ),
+    steps,
+    mainDrags: steps
+      .filter((step) => Number(step.value) < -0.0000001)
+      .sort((left, right) => Number(left.value) - Number(right.value))
+      .slice(0, 4)
+  };
+}
+
+export function summarizeExecutionLatency(rows = []) {
+  return {
+    opening: summarizeLatencyPhase(rows, {
+      eventId: (row) => row?.trace?.openingEventId,
+      detectedAt: (row) => row?.vst?.openingDetectedAt,
+      firstAttemptAt: (row) => row?.vst?.openingFirstAttemptAt,
+      completedAt: (row) => row?.vst?.openingAt
+    }),
+    closing: summarizeLatencyPhase(rows, {
+      eventId: (row) => row?.trace?.closeSignalEventId,
+      detectedAt: (row) => row?.vst?.closingDetectedAt,
+      firstAttemptAt: (row) => row?.vst?.closingFirstAttemptAt,
+      completedAt: (row) => row?.vst?.closeSignalAt
+    })
+  };
+}
+
+function executionPriceChainRowAttribution(row = {}) {
+  const sheetEntry = positiveNumber(row?.sheet?.entry);
+  const sheetExit = positiveNumber(row?.sheet?.exit);
+  const bingxEntry = positiveNumber(row?.vst?.entry);
+  const bingxExit = positiveNumber(row?.vst?.exit);
+  const notional = positiveNumber(row?.replica?.notional);
+  const leverage = positiveNumber(row?.replica?.leverage);
+  const replicaPnl = nullableNumber(row?.replica?.pnl);
+  const bingxGross = nullableNumber(row?.vst?.grossPnl);
+  if ([sheetEntry, sheetExit, bingxEntry, bingxExit, notional, leverage, replicaPnl, bingxGross].some((value) => value === null)) {
+    return null;
+  }
+
+  const context = { notional, leverage, direction: row.direction };
+  const values = {
+    sheet_accounting: linearPositionPnl(context, sheetEntry, sheetExit) - replicaPnl,
+    entry_reference: 0,
+    entry_quote_move: 0,
+    entry_fill: 0,
+    entry_missing_evidence: 0,
+    exit_target: 0,
+    exit_quote_move: 0,
+    exit_fill: 0,
+    exit_missing_evidence: 0,
+    size_and_fills: 0
+  };
+  const evidence = new Set(['sheet_accounting', 'size_and_fills']);
+  const entryImpact = (from, to) => symmetricEntryImpact(context, from, to, sheetExit, bingxExit);
+  const exitImpact = (from, to) => symmetricExitImpact(context, from, to, sheetEntry, bingxEntry);
+
+  const signalEntry = positiveNumber(row?.vst?.signalEntry);
+  const entryQuote = positiveNumber(row?.vst?.preOrderMarket);
+  let entryCursor = sheetEntry;
+  if (signalEntry !== null) {
+    values.entry_reference += entryImpact(entryCursor, signalEntry);
+    evidence.add('entry_reference');
+    entryCursor = signalEntry;
+  }
+  if (entryQuote !== null) {
+    const key = signalEntry !== null ? 'entry_quote_move' : 'entry_missing_evidence';
+    values[key] += entryImpact(entryCursor, entryQuote);
+    evidence.add(key);
+    entryCursor = entryQuote;
+  }
+  if (entryQuote !== null) {
+    values.entry_fill += entryImpact(entryCursor, bingxEntry);
+    evidence.add('entry_fill');
+  } else {
+    values.entry_missing_evidence += entryImpact(entryCursor, bingxEntry);
+    evidence.add('entry_missing_evidence');
+  }
+
+  const closeTarget = positiveNumber(row?.vst?.closeTarget);
+  const closeQuote = positiveNumber(row?.vst?.preCloseMarket);
+  let exitCursor = sheetExit;
+  if (closeTarget !== null) {
+    values.exit_target += exitImpact(exitCursor, closeTarget);
+    evidence.add('exit_target');
+    exitCursor = closeTarget;
+  }
+  if (closeQuote !== null) {
+    const key = closeTarget !== null ? 'exit_quote_move' : 'exit_missing_evidence';
+    values[key] += exitImpact(exitCursor, closeQuote);
+    evidence.add(key);
+    exitCursor = closeQuote;
+  }
+  if (closeQuote !== null) {
+    values.exit_fill += exitImpact(exitCursor, bingxExit);
+    evidence.add('exit_fill');
+  } else {
+    values.exit_missing_evidence += exitImpact(exitCursor, bingxExit);
+    evidence.add('exit_missing_evidence');
+  }
+
+  values.size_and_fills = bingxGross - linearPositionPnl(context, bingxEntry, bingxExit);
+  return {
+    values,
+    evidence,
+    fullEntryPath: signalEntry !== null && entryQuote !== null,
+    fullExitPath: closeTarget !== null && closeQuote !== null
+  };
+}
+
+function symmetricEntryImpact(context, from, to, sheetExit, bingxExit) {
+  return 0.5 * (
+    (linearPositionPnl(context, to, sheetExit) - linearPositionPnl(context, from, sheetExit))
+    + (linearPositionPnl(context, to, bingxExit) - linearPositionPnl(context, from, bingxExit))
+  );
+}
+
+function symmetricExitImpact(context, from, to, sheetEntry, bingxEntry) {
+  return 0.5 * (
+    (linearPositionPnl(context, sheetEntry, to) - linearPositionPnl(context, sheetEntry, from))
+    + (linearPositionPnl(context, bingxEntry, to) - linearPositionPnl(context, bingxEntry, from))
+  );
+}
+
+function summarizeLatencyPhase(rows, selectors) {
+  const unique = new Map();
+  for (const row of rows || []) {
+    const eventId = selectors.eventId(row);
+    if (!eventId || unique.has(eventId)) {
+      continue;
+    }
+    unique.set(eventId, row);
+  }
+  const reaction = [];
+  const retryWait = [];
+  const total = [];
+  let retried = 0;
+  let delayed = 0;
+  for (const row of unique.values()) {
+    const detectedAt = Date.parse(selectors.detectedAt(row) || '');
+    const firstAttemptAt = Date.parse(selectors.firstAttemptAt(row) || '');
+    const completedAt = Date.parse(selectors.completedAt(row) || '');
+    if (![detectedAt, firstAttemptAt, completedAt].every(Number.isFinite)
+      || firstAttemptAt < detectedAt
+      || completedAt < firstAttemptAt) {
+      continue;
+    }
+    const reactionSeconds = (firstAttemptAt - detectedAt) / 1000;
+    const retrySeconds = (completedAt - firstAttemptAt) / 1000;
+    const totalSeconds = (completedAt - detectedAt) / 1000;
+    reaction.push(reactionSeconds);
+    retryWait.push(retrySeconds);
+    total.push(totalSeconds);
+    retried += retrySeconds > 0.5 ? 1 : 0;
+    delayed += totalSeconds > 5 ? 1 : 0;
+  }
+  return {
+    events: unique.size,
+    measured: total.length,
+    retried,
+    delayedAbove5Seconds: delayed,
+    reaction: latencyStats(reaction),
+    retryWait: latencyStats(retryWait),
+    total: latencyStats(total)
+  };
+}
+
+function latencyStats(values = []) {
+  const sorted = values
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((left, right) => left - right);
+  const percentile = (ratio) => {
+    if (!sorted.length) {
+      return null;
+    }
+    return roundMoney(sorted[Math.floor((sorted.length - 1) * ratio)]);
+  };
+  return {
+    count: sorted.length,
+    medianSeconds: percentile(0.5),
+    p90Seconds: percentile(0.9),
+    p95Seconds: percentile(0.95),
+    maxSeconds: sorted.length ? roundMoney(sorted.at(-1)) : null
+  };
+}
+
 function matchedRowAttribution(row = {}) {
   const sheetEntry = positiveNumber(row?.sheet?.entry);
   const sheetExit = positiveNumber(row?.sheet?.exit);
