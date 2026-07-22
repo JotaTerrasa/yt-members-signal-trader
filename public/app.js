@@ -9880,7 +9880,7 @@ function settlePnlHashAnchor() {
   appState.pnlHashAnchorRequested = target.id;
   appState.pnlHashAnchorSettled = target.id;
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => target.scrollIntoView({ block: 'start', behavior: 'auto' }));
+    requestAnimationFrame(() => target.scrollIntoView({ block: 'start', behavior: 'instant' }));
   });
 }
 
