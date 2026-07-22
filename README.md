@@ -361,6 +361,7 @@ Incluye:
 - Equity frente al capital inicial en Demo VST y live real.
 - Simulador de capital inicial para Google Sheet.
 - Hoja de Google en vista nativa, con resumen, cabecera fija y scroll; el enlace original permanece disponible.
+- Refresco pasivo de la hoja y su auditoría cada cinco minutos mientras PnL está visible. Conserva el último dato válido y aplica una espera exponencial de hasta treinta minutos si Google falla.
 - Resumen superior de alineación Hoja/VST: cobertura, operaciones no ejecutadas, desviación de fills, costes y neto de BingX antes de entrar en la auditoría detallada.
 - Desviación de entrada y salida, operaciones agregadas y causas de desalineación con la hoja.
 - Fiabilidad de ejecución: cobertura, paquetes completos, reintentos pendientes y puerta de promoción.

@@ -254,6 +254,11 @@ const PLOTLY_CDN_SOURCES = [
 let plotlyLoadPromise = null;
 const POSTS_PAGE_SIZE = 40;
 const LOGS_PAGE_SIZE = 60;
+const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
+const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
+const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
+let referenceRefreshTimer = null;
 
 const appState = {
   state: null,
@@ -279,6 +284,12 @@ const appState = {
   externalSheetLoading: false,
   externalSheetError: '',
   externalSheetLoadedAt: null,
+  referenceRefreshLoading: false,
+  referenceRefreshPromise: null,
+  referenceRefreshLastAttemptAt: null,
+  referenceRefreshLastSuccessAt: null,
+  referenceRefreshFailures: 0,
+  referenceRefreshWarning: '',
   sheetSimCapital: storedSheetSimCapital(),
   sheetSimTouched: false,
   pnlLoading: false,
@@ -315,6 +326,7 @@ async function init() {
     applyHashNavigation();
   });
   applyHashNavigation();
+  startReferenceRefreshLoop();
   window.lucide?.createIcons();
 }
 
@@ -804,6 +816,9 @@ async function loadBingx() {
 }
 
 async function loadPnl() {
+  if (appState.referenceRefreshPromise) {
+    await appState.referenceRefreshPromise;
+  }
   if (appState.pnlLoading) {
     return;
   }
@@ -812,6 +827,8 @@ async function loadPnl() {
   appState.pnlError = '';
   appState.externalSheetLoading = true;
   appState.externalSheetError = '';
+  appState.referenceRefreshWarning = '';
+  markReferenceRefreshAttempt();
   renderPnl();
 
   try {
@@ -832,9 +849,19 @@ async function loadPnl() {
     const historical = historicalResponse.historical;
     appState.externalSheetLoadedAt = new Date().toISOString();
     appState.pnlSources = sourcesResponse;
-    appState.replicaAudit = replicaAuditResponse.audit || {
-      error: replicaAuditResponse.error || ''
-    };
+    const replicaAuditError = replicaAuditResponse.audit
+      ? ''
+      : replicaAuditResponse.error || 'No se pudo actualizar la auditoría de réplica.';
+    if (replicaAuditResponse.audit) {
+      appState.replicaAudit = replicaAuditResponse.audit;
+    } else if (!appState.replicaAudit) {
+      appState.replicaAudit = { error: replicaAuditError };
+    }
+    if (replicaAuditError) {
+      markReferenceRefreshFailure(replicaAuditError);
+    } else {
+      markReferenceRefreshSuccess();
+    }
     appState.pnlMeta = {
       cached: Boolean(sourcesResponse.cached),
       stale: Boolean(sourcesResponse.stale),
@@ -885,10 +912,154 @@ async function loadPnl() {
   } catch (error) {
     appState.pnlError = error.message;
     appState.externalSheetError = error.message;
+    markReferenceRefreshFailure(error.message);
   } finally {
     appState.pnlLoading = false;
     appState.externalSheetLoading = false;
     renderPnl();
+  }
+}
+
+function startReferenceRefreshLoop() {
+  if (referenceRefreshTimer) {
+    return;
+  }
+
+  const check = () => {
+    maybeRefreshReferenceData().catch(() => {});
+  };
+  referenceRefreshTimer = window.setInterval(check, REFERENCE_REFRESH_CHECK_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      check();
+    }
+  });
+  check();
+}
+
+async function maybeRefreshReferenceData(now = Date.now()) {
+  if (
+    document.visibilityState !== 'visible'
+    || !viewIsVisible(elements.pnlView)
+    || appState.pnlLoading
+    || appState.referenceRefreshLoading
+    || !referenceRefreshIsDue(now)
+  ) {
+    return;
+  }
+  await refreshReferenceData();
+}
+
+function referenceRefreshIsDue(now = Date.now()) {
+  const failures = Number(appState.referenceRefreshFailures || 0);
+  const anchor = failures
+    ? Number(appState.referenceRefreshLastAttemptAt || 0)
+    : Number(appState.referenceRefreshLastSuccessAt || 0);
+  if (!anchor) {
+    return true;
+  }
+  const backoff = failures
+    ? Math.min(
+      REFERENCE_REFRESH_INTERVAL_MS * (2 ** Math.max(0, failures - 1)),
+      REFERENCE_REFRESH_MAX_BACKOFF_MS
+    )
+    : REFERENCE_REFRESH_INTERVAL_MS;
+  return now - anchor >= backoff;
+}
+
+async function refreshReferenceData() {
+  if (appState.referenceRefreshPromise) {
+    return appState.referenceRefreshPromise;
+  }
+  if (appState.pnlLoading) {
+    return;
+  }
+
+  const refresh = (async () => {
+    appState.referenceRefreshLoading = true;
+    appState.externalSheetLoading = true;
+    appState.externalSheetError = '';
+    appState.referenceRefreshWarning = '';
+    markReferenceRefreshAttempt();
+    renderExternalSheetEmbed();
+
+    const [historicalResult, replicaAuditResult] = await Promise.allSettled([
+      fetchReferenceJson('/api/historical-pnl?months=72'),
+      fetchReferenceJson('/api/replica-audit')
+    ]);
+    const errors = [];
+
+    if (historicalResult.status === 'fulfilled' && historicalResult.value?.historical) {
+      appState.pnl = {
+        ...(appState.pnl || {}),
+        months: appState.pnl?.months || [],
+        historical: historicalResult.value.historical
+      };
+      appState.externalSheetLoadedAt = new Date().toISOString();
+    } else {
+      const message = historicalResult.status === 'rejected'
+        ? historicalResult.reason?.message
+        : 'La hoja no devolvió un histórico válido.';
+      appState.externalSheetError = message || 'No se pudo actualizar la hoja.';
+      errors.push(appState.externalSheetError);
+    }
+
+    if (replicaAuditResult.status === 'fulfilled' && replicaAuditResult.value?.audit) {
+      appState.replicaAudit = replicaAuditResult.value.audit;
+    } else {
+      const message = replicaAuditResult.status === 'rejected'
+        ? replicaAuditResult.reason?.message
+        : replicaAuditResult.value?.error || 'La auditoría no devolvió datos válidos.';
+      errors.push(message || 'No se pudo actualizar la auditoría.');
+    }
+
+    if (errors.length) {
+      markReferenceRefreshFailure(errors.join(' | '));
+    } else {
+      markReferenceRefreshSuccess();
+    }
+  })();
+
+  appState.referenceRefreshPromise = refresh;
+  try {
+    await refresh;
+  } finally {
+    appState.referenceRefreshPromise = null;
+    appState.referenceRefreshLoading = false;
+    appState.externalSheetLoading = false;
+    if (viewIsVisible(elements.pnlView)) {
+      renderPnl();
+    }
+  }
+}
+
+function markReferenceRefreshAttempt() {
+  appState.referenceRefreshLastAttemptAt = Date.now();
+}
+
+function markReferenceRefreshSuccess() {
+  appState.referenceRefreshLastSuccessAt = Date.now();
+  appState.referenceRefreshFailures = 0;
+  appState.referenceRefreshWarning = '';
+}
+
+function markReferenceRefreshFailure(message) {
+  appState.referenceRefreshFailures = Math.min(Number(appState.referenceRefreshFailures || 0) + 1, 10);
+  appState.referenceRefreshWarning = String(message || 'Actualización parcial.');
+}
+
+async function fetchReferenceJson(url) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REFERENCE_REFRESH_TIMEOUT_MS);
+  try {
+    return await fetchJson(url, { signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('La actualización superó el tiempo de espera de 60 segundos.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -1491,12 +1662,17 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
   const costs = Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0);
   const net = Number(summary.bingxNet || 0);
   const marketMismatch = Number(signs.marketMismatch || 0);
-  const tone = coverage.stale
+  const refreshWarning = appState.referenceRefreshWarning;
+  const tone = refreshWarning
+    ? 'warn'
+    : coverage.stale
     ? 'warn'
     : missingRows || marketMismatch || net < 0
       ? 'negative'
       : 'positive';
-  const status = coverage.stale
+  const status = refreshWarning
+    ? 'Actualización parcial'
+    : coverage.stale
     ? 'Hoja desactualizada'
     : missingRows || marketMismatch || net < 0
       ? 'Desalineación abierta'
@@ -1505,7 +1681,9 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
   const lag = Number.isFinite(Number(coverage.lagHours))
     ? formatMilliseconds(Math.max(0, Number(coverage.lagHours)) * unitMs.hour)
     : '-';
-  const explanation = coverage.stale
+  const explanation = refreshWarning
+    ? `Se conserva el último dato válido mientras se reintenta la lectura: ${friendlyBingxError(refreshWarning)}`
+    : coverage.stale
     ? `La hoja llega hasta ${latestSheet} y acumula ${lag} de retraso. ${outsideCoverage} operaciones VST posteriores todavía no pueden compararse.`
     : missingRows
       ? `${missingRows} operaciones de la hoja no tienen una apertura VST emparejada.`
@@ -7318,6 +7496,9 @@ function renderExternalSheetEmbed() {
     : '';
   elements.externalSheetPanel.dataset.sheetState = loadState;
   elements.externalSheetPanel.setAttribute('aria-busy', appState.externalSheetLoading ? 'true' : 'false');
+  elements.externalSheetStatus.title = appState.referenceRefreshWarning
+    ? friendlyBingxError(appState.referenceRefreshWarning)
+    : '';
   elements.externalSheetStatus.textContent = positions.length
     ? appState.externalSheetError
       ? `${positions.length} filas · fallo al actualizar`
@@ -7329,6 +7510,9 @@ function renderExternalSheetEmbed() {
       : appState.externalSheetError
         ? 'No disponible'
         : source.label;
+  if (positions.length && !appState.externalSheetLoading && appState.referenceRefreshWarning) {
+    elements.externalSheetStatus.textContent += ' · actualización parcial';
+  }
   elements.externalSheetLink.classList.toggle('hidden', !source.href);
   if (source.href) {
     elements.externalSheetLink.href = source.href;
@@ -8880,8 +9064,8 @@ async function runAction(action) {
   }
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || `Error HTTP ${response.status}`);

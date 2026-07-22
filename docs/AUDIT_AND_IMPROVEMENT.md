@@ -172,6 +172,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - La cola de aperturas y cierres pendientes se guarda en `.data/execution-retries.json` y se recupera después de reiniciar.
 - Antes de reintentar una apertura, la app reconcilia posiciones para resolver respuestas ambiguas sin duplicar exposición.
 - La auditoría consulta el histórico firmado de órdenes en ventanas de siete días, conserva los identificadores largos sin redondearlos y refresca de forma incremental con solapamiento para no perder órdenes de borde.
+- El frontend refresca de forma pasiva la referencia y la auditoría cada cinco minutos solo cuando PnL está visible. Si una fuente falla, muestra el aviso, conserva la última muestra válida y aumenta temporalmente el intervalo sin tocar la ejecución.
 - Si la lectura exacta falla, conserva la última copia válida como obsoleta; si no existe o no cubre al menos el 80% de los eventos, activa un fallback explícito basado en eventos e ingresos.
 - Si la cobertura detecta en Demo una apertura reciente sin evento de ejecución, vuelve a validarla por la misma ruta idempotente. Las ejecuciones procedentes de otra fuente se enlazan y no se cuentan como huecos.
 - Si el contenido actual de una señal difiere del valor conservado en su evento, la auditoría identifica la corrección posterior campo por campo. El fallo histórico permanece en la muestra, pero deja de aparecer como una apertura ausente sin explicación.

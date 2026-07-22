@@ -4239,8 +4239,12 @@ async function serveStatic(pathname, response) {
     return response.end('Not found');
   }
 
+  const extension = extname(filePath);
   const stream = createReadStream(filePath);
-  response.writeHead(200, { 'content-type': mimeType(extname(filePath)) });
+  response.writeHead(200, {
+    'content-type': mimeType(extension),
+    'cache-control': extension === '.html' ? 'no-store' : 'no-cache'
+  });
   stream.pipe(response);
 }
 
