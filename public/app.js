@@ -5668,6 +5668,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const stopAnalysis = summary.stopAnalysis || {};
   const signAnalysis = summary.signAnalysis || {};
   const pairedOutcomeAnalysis = summary.pairedOutcomeAnalysis || {};
+  const pairedOutcomeImpact = summary.pairedOutcomeImpact || {};
   const fillQuality = summary.fillQuality || {};
   const gapBridge = summary.gapBridge || null;
   const matchedGapAttribution = summary.matchedGapAttribution || null;
@@ -5683,7 +5684,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const unprocessedClosePosts = Number(summary.unprocessedClosePosts || 0);
   const pairedOutcomeRows = Number(pairedOutcomeAnalysis.rows ?? signAnalysis.pairedRows ?? 0);
   const netSignMismatch = Number(pairedOutcomeAnalysis.netSignMismatch ?? signAnalysis.netMismatch ?? 0);
-  const grossSignMismatch = Number(pairedOutcomeAnalysis.grossSignMismatch ?? signAnalysis.marketMismatch ?? 0);
+  const marketDrivenSignMismatch = Number(pairedOutcomeAnalysis.marketDrivenNetMismatch ?? signAnalysis.marketMismatch ?? 0);
   const costFlip = Number(pairedOutcomeAnalysis.costFlip ?? signAnalysis.costFlip ?? 0);
   const coverageDetail = referenceCoverage.latestSheetAt
     ? referenceCoverage.provisionalLatestDay
@@ -5728,7 +5729,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Cobertura de la hoja', coverageLabel, `${coverageDetail} · ${coverageTail}`, coverageClass)}
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
-        ${renderReplicaMetric('Signos divergentes', pairedOutcomeRows ? `${netSignMismatch}/${pairedOutcomeRows} netos` : '-', `${grossSignMismatch} por mercado · ${costFlip} por costes`, netSignMismatch ? 'amount negative' : 'amount positive')}
+        ${renderReplicaMetric('Signos divergentes', pairedOutcomeRows ? `${netSignMismatch}/${pairedOutcomeRows} netos` : '-', `${marketDrivenSignMismatch} antes de costes · ${costFlip} por costes`, netSignMismatch ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Ejecución de entrada', `${Number(fillQuality.entryAboveTolerance || 0)}/${Number(fillQuality.entryMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatExecutionPercent(fillQuality.entryAverageAdversePercent)}`, Number(fillQuality.entryAboveTolerance || 0) ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatExecutionPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
       </div>
@@ -5743,6 +5744,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         </p>
       ` : ''}
       ${renderImprovementCohort(audit.cohort, audit.cohortHistory, audit.cohortComparison)}
+      ${renderPairedOutcomeImpact(pairedOutcomeImpact, appState.replicaAuditFilter)}
       ${renderReplicaOutcomeFilters(pairedOutcomeAnalysis, rows.length, appState.replicaAuditFilter)}
       <div class="replica-issue-strip">
         ${renderReplicaIssuePills(summary.issueCounts)}
@@ -6405,6 +6407,122 @@ function renderReplicaIssuePills(issueCounts = {}) {
   `).join('');
 }
 
+function renderPairedOutcomeImpact(impact = {}, activeFilter = 'all') {
+  const rows = Number(impact.rows || 0);
+  const groups = Array.isArray(impact.groups) ? impact.groups : [];
+  const symbols = Array.isArray(impact.bySymbol) ? impact.bySymbol : [];
+  if (!rows || !groups.length) {
+    return '';
+  }
+  const filterByGroup = {
+    market_driven_mismatch: 'market_mismatch',
+    cost_driven_mismatch: 'cost_mismatch',
+    other_net_mismatch: 'net_mismatch',
+    same_net_sign: 'same_sign',
+    neutral_difference: 'all'
+  };
+  const groupRows = groups.map((group) => `
+    <tr class="${escapeAttribute(outcomeImpactRowClass(group))}">
+      <td>
+        <button class="replica-impact-filter" type="button"
+          data-replica-filter="${escapeAttribute(filterByGroup[group.key] || 'all')}"
+          title="${escapeAttribute(`Filtrar ${group.label || 'resultado'}`)}">
+          ${escapeHtml(group.label || group.key || '-')}
+        </button>
+      </td>
+      <td>${escapeHtml(String(group.rows || 0))}</td>
+      <td class="${amountClass(group.replicaPnl)}">${escapeHtml(formatMoney(group.replicaPnl, 'VST'))}</td>
+      <td class="${amountClass(group.bingxGross)}">${escapeHtml(formatMoney(group.bingxGross, 'VST'))}</td>
+      <td class="${amountClass(group.costs)}">${escapeHtml(formatMoney(group.costs, 'VST'))}</td>
+      <td class="${amountClass(group.bingxNet)}">${escapeHtml(formatMoney(group.bingxNet, 'VST'))}</td>
+      <td class="${amountClass(group.gapVsReplica)}">${escapeHtml(formatMoney(group.gapVsReplica, 'VST'))}</td>
+    </tr>
+  `).join('');
+  const symbolRows = symbols.map((group) => {
+    const symbolFilter = `symbol:${group.key || ''}`;
+    return `
+    <tr>
+      <td>
+        <button class="replica-impact-filter ${activeFilter === symbolFilter ? 'active' : ''}" type="button"
+          data-replica-filter="${escapeAttribute(symbolFilter)}"
+          aria-pressed="${activeFilter === symbolFilter ? 'true' : 'false'}"
+          title="${escapeAttribute(`Filtrar ${group.label || group.key || 'activo'}`)}">
+          ${escapeHtml(group.label || group.key || '-')}
+        </button>
+      </td>
+      <td>${escapeHtml(String(group.rows || 0))}</td>
+      <td>${escapeHtml(String(group.netMismatch || 0))}</td>
+      <td>${escapeHtml(String(group.marketDrivenNetMismatch || 0))}</td>
+      <td>${escapeHtml(String(group.costDrivenNetMismatch || 0))}</td>
+      <td class="${amountClass(group.gapVsReplica)}">${escapeHtml(formatMoney(group.gapVsReplica, 'VST'))}</td>
+    </tr>
+  `;
+  }).join('');
+
+  return `
+    <section class="replica-outcome-impact" aria-label="Impacto económico de los resultados comparables">
+      <div class="replica-outcome-impact-head">
+        <div>
+          <strong>Impacto económico por resultado</strong>
+          <span>${escapeHtml(`${rows} operaciones cerradas comparables · todo expresado en VST`)}</span>
+        </div>
+        <div class="replica-outcome-impact-total">
+          <span>Brecha neta total</span>
+          <strong class="${amountClass(impact.gapVsReplica)}">${escapeHtml(formatMoney(impact.gapVsReplica, 'VST'))}</strong>
+        </div>
+      </div>
+      <p>BingX neto menos réplica escalada. Una brecha negativa significa que la ejecución VST capturó menos resultado que la referencia equivalente.</p>
+      <div class="replica-impact-table-wrap">
+        <table class="replica-impact-table">
+          <thead>
+            <tr>
+              <th>Lectura</th>
+              <th>Ops.</th>
+              <th>Réplica</th>
+              <th>BingX bruto</th>
+              <th>Costes</th>
+              <th>BingX neto</th>
+              <th>Brecha</th>
+            </tr>
+          </thead>
+          <tbody>${groupRows}</tbody>
+        </table>
+      </div>
+      ${symbolRows ? `
+        <div class="replica-impact-symbol-head">
+          <strong>Brecha neta por activo</strong>
+          <span>Los cambios de signo son solo una parte de la diferencia total.</span>
+        </div>
+        <div class="replica-impact-table-wrap compact">
+          <table class="replica-impact-table symbol">
+            <thead>
+              <tr>
+                <th>Activo</th>
+                <th>Pares</th>
+                <th>Cambian signo</th>
+                <th>Antes de costes</th>
+                <th>Por costes</th>
+                <th>Brecha neta</th>
+              </tr>
+            </thead>
+            <tbody>${symbolRows}</tbody>
+          </table>
+        </div>
+      ` : ''}
+    </section>
+  `;
+}
+
+function outcomeImpactRowClass(group = {}) {
+  if (group.netMismatch) {
+    return 'negative';
+  }
+  if (Number(group.gapVsReplica || 0) < 0) {
+    return 'warn';
+  }
+  return 'positive';
+}
+
 function renderReplicaOutcomeFilters(analysis = {}, totalRows = 0, activeFilter = 'all') {
   const comparableRows = Number(analysis.rows || 0);
   const filters = [
@@ -6444,6 +6562,10 @@ function renderReplicaOutcomeFilters(analysis = {}, totalRows = 0, activeFilter 
 function filterReplicaAuditRows(rows = [], filter = 'all') {
   if (filter === 'all') {
     return rows;
+  }
+  if (filter.startsWith('symbol:')) {
+    const symbol = filter.slice('symbol:'.length);
+    return rows.filter((row) => row.symbol === symbol);
   }
   return rows.filter((row) => {
     const outcome = row.outcome || {};

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomeImpact, summarizePairedOutcomes, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -242,6 +242,131 @@ test('distingue un cambio neto de un bruto realineado por costes', () => {
   assert.equal(recovered.key, 'gross_mismatch_recovered');
   assert.equal(recovered.netMismatch, false);
   assert.equal(recovered.grossMismatchRecoveredByCosts, true);
+});
+
+test('cuantifica el impacto neto de cada causa y activo sobre la misma muestra', () => {
+  const impact = summarizePairedOutcomeImpact([
+    {
+      symbol: 'BTC-USDT',
+      sheet: { pnl: 10 },
+      replica: { pnl: 2 },
+      vst: { grossPnl: -1, openingFee: -0.1, closingFee: -0.1, fees: -0.3, funding: -0.1, netPnl: -1.3 }
+    },
+    {
+      symbol: 'BTC-USDT',
+      sheet: { pnl: 10 },
+      replica: { pnl: 3 },
+      vst: { grossPnl: 1, openingFee: -0.6, closingFee: -0.6, fees: -1.2, funding: 0, netPnl: -0.2 }
+    },
+    {
+      symbol: 'SOL-USDT',
+      sheet: { pnl: -10 },
+      replica: { pnl: -2 },
+      vst: { grossPnl: -1.5, openingFee: -0.1, closingFee: -0.1, fees: -0.2, funding: 0, netPnl: -1.7 }
+    },
+    {
+      symbol: 'SOL-USDT',
+      sheet: { pnl: -10 },
+      replica: { pnl: -1 },
+      vst: { grossPnl: 0.4, openingFee: -0.6, closingFee: -0.6, fees: -1.2, funding: 0, netPnl: -0.8 }
+    }
+  ]);
+
+  assert.deepEqual({
+    rows: impact.rows,
+    replicaPnl: impact.replicaPnl,
+    bingxGross: impact.bingxGross,
+    costs: impact.costs,
+    bingxNet: impact.bingxNet,
+    gapVsReplica: impact.gapVsReplica,
+    residual: impact.residual,
+    reconciled: impact.reconciled
+  }, {
+    rows: 4,
+    replicaPnl: 2,
+    bingxGross: -1.1,
+    costs: -2.9,
+    bingxNet: -4,
+    gapVsReplica: -6,
+    residual: 0,
+    reconciled: true
+  });
+  assert.deepEqual(impact.groups, [
+    {
+      key: 'market_driven_mismatch',
+      label: 'Signo distinto antes de costes',
+      rows: 1,
+      sameNetSign: 0,
+      netMismatch: 1,
+      marketDrivenNetMismatch: 1,
+      costDrivenNetMismatch: 0,
+      otherNetMismatch: 0,
+      grossMismatchRecoveredByCosts: 0,
+      replicaPnl: 2,
+      bingxGross: -1,
+      fees: -0.2,
+      funding: -0.1,
+      costs: -0.3,
+      bingxNet: -1.3,
+      gapVsReplica: -3.3,
+      averageGapVsReplica: -3.3,
+      residual: 0,
+      reconciled: true
+    },
+    {
+      key: 'cost_driven_mismatch',
+      label: 'Ganancia absorbida por costes',
+      rows: 1,
+      sameNetSign: 0,
+      netMismatch: 1,
+      marketDrivenNetMismatch: 0,
+      costDrivenNetMismatch: 1,
+      otherNetMismatch: 0,
+      grossMismatchRecoveredByCosts: 0,
+      replicaPnl: 3,
+      bingxGross: 1,
+      fees: -1.2,
+      funding: 0,
+      costs: -1.2,
+      bingxNet: -0.2,
+      gapVsReplica: -3.2,
+      averageGapVsReplica: -3.2,
+      residual: 0,
+      reconciled: true
+    },
+    {
+      key: 'same_net_sign',
+      label: 'Mismo signo neto',
+      rows: 2,
+      sameNetSign: 2,
+      netMismatch: 0,
+      marketDrivenNetMismatch: 0,
+      costDrivenNetMismatch: 0,
+      otherNetMismatch: 0,
+      grossMismatchRecoveredByCosts: 1,
+      replicaPnl: -3,
+      bingxGross: -1.1,
+      fees: -1.4,
+      funding: 0,
+      costs: -1.4,
+      bingxNet: -2.5,
+      gapVsReplica: 0.5,
+      averageGapVsReplica: 0.25,
+      residual: 0,
+      reconciled: true
+    }
+  ]);
+  assert.deepEqual(impact.bySymbol.map((group) => ({
+    key: group.key,
+    rows: group.rows,
+    netMismatch: group.netMismatch,
+    replicaPnl: group.replicaPnl,
+    bingxNet: group.bingxNet,
+    gapVsReplica: group.gapVsReplica
+  })), [
+    { key: 'BTC-USDT', rows: 2, netMismatch: 2, replicaPnl: 5, bingxNet: -1.5, gapVsReplica: -6.5 },
+    { key: 'SOL-USDT', rows: 2, netMismatch: 0, replicaPnl: -3, bingxNet: -2.5, gapVsReplica: 0.5 }
+  ]);
 });
 
 test('conserva solo el fallo terminal de una apertura que nunca se ejecuto', () => {

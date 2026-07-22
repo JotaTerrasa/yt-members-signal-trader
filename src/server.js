@@ -25,7 +25,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomeImpact, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { formatSseEvent, formatSseRetry } from './sseTransport.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
@@ -5381,6 +5381,7 @@ function summarizeReplicaAudit({
     return totals;
   }, {});
   const pairedOutcomeAnalysis = summarizePairedOutcomes(rows);
+  const pairedOutcomeImpact = summarizePairedOutcomeImpact(rows);
   const signAnalysis = {
     marketMismatch: pairedOutcomeAnalysis.marketDrivenNetMismatch,
     grossMismatch: pairedOutcomeAnalysis.grossSignMismatch,
@@ -5455,6 +5456,7 @@ function summarizeReplicaAudit({
     equity: reference?.equity ?? null,
     issueCounts,
     pairedOutcomeAnalysis,
+    pairedOutcomeImpact,
     signAnalysis,
     fillQuality,
     orderHistoryEvidence,

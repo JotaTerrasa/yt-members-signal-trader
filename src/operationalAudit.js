@@ -251,6 +251,138 @@ export function summarizePairedOutcomes(rows = []) {
   };
 }
 
+const PAIRED_OUTCOME_IMPACT_GROUPS = [
+  { key: 'market_driven_mismatch', label: 'Signo distinto antes de costes' },
+  { key: 'cost_driven_mismatch', label: 'Ganancia absorbida por costes' },
+  { key: 'other_net_mismatch', label: 'Signo neto distinto sin atribución' },
+  { key: 'same_net_sign', label: 'Mismo signo neto' },
+  { key: 'neutral_difference', label: 'Resultado neutro' }
+];
+
+export function summarizePairedOutcomeImpact(rows = []) {
+  const pairs = (rows || []).filter((row) => (
+    pairedOutcomeHasResult(row?.sheet?.pnl) && pairedOutcomeHasResult(row?.vst?.netPnl)
+  ));
+  const groups = new Map(PAIRED_OUTCOME_IMPACT_GROUPS.map(({ key, label }) => [
+    key,
+    pairedOutcomeImpactAccumulator(key, label)
+  ]));
+  const bySymbol = new Map();
+  const totals = pairedOutcomeImpactAccumulator('all', 'Todas las operaciones comparables');
+
+  for (const row of pairs) {
+    const outcome = row.outcome?.comparable ? row.outcome : classifyPairedOutcome(row);
+    const groupKey = primaryPairedOutcomeImpactKey(outcome);
+    const group = groups.get(groupKey) || groups.get('neutral_difference');
+    const symbol = row.symbol || 'Sin activo';
+    const symbolGroup = bySymbol.get(symbol) || pairedOutcomeImpactAccumulator(symbol, symbol);
+    addPairedOutcomeImpact(group, row, outcome);
+    addPairedOutcomeImpact(symbolGroup, row, outcome);
+    addPairedOutcomeImpact(totals, row, outcome);
+    bySymbol.set(symbol, symbolGroup);
+  }
+
+  return {
+    ...finalizePairedOutcomeImpact(totals),
+    groups: PAIRED_OUTCOME_IMPACT_GROUPS
+      .map(({ key }) => finalizePairedOutcomeImpact(groups.get(key)))
+      .filter((group) => group.rows > 0),
+    bySymbol: [...bySymbol.values()]
+      .map(finalizePairedOutcomeImpact)
+      .sort((left, right) => left.gapVsReplica - right.gapVsReplica || left.key.localeCompare(right.key))
+  };
+}
+
+function primaryPairedOutcomeImpactKey(outcome = {}) {
+  if (outcome.marketDrivenNetMismatch) {
+    return 'market_driven_mismatch';
+  }
+  if (outcome.costDrivenNetMismatch) {
+    return 'cost_driven_mismatch';
+  }
+  if (outcome.otherNetMismatch) {
+    return 'other_net_mismatch';
+  }
+  if (outcome.sameNetSign) {
+    return 'same_net_sign';
+  }
+  return 'neutral_difference';
+}
+
+function pairedOutcomeImpactAccumulator(key, label) {
+  return {
+    key,
+    label,
+    rows: 0,
+    sameNetSign: 0,
+    netMismatch: 0,
+    marketDrivenNetMismatch: 0,
+    costDrivenNetMismatch: 0,
+    otherNetMismatch: 0,
+    grossMismatchRecoveredByCosts: 0,
+    replicaPnl: 0,
+    bingxGross: 0,
+    fees: 0,
+    funding: 0,
+    bingxNet: 0,
+    gapVsReplica: 0
+  };
+}
+
+function addPairedOutcomeImpact(accumulator, row, outcome) {
+  const replicaPnl = finiteOrNull(row?.replica?.pnl) ?? 0;
+  const bingxGross = finiteOrNull(row?.vst?.grossPnl) ?? 0;
+  const funding = finiteOrNull(row?.vst?.funding) ?? 0;
+  const openingFee = finiteOrNull(row?.vst?.openingFee);
+  const closingFee = finiteOrNull(row?.vst?.closingFee);
+  const fees = openingFee !== null || closingFee !== null
+    ? (openingFee ?? 0) + (closingFee ?? 0)
+    : (finiteOrNull(row?.vst?.fees) ?? 0) - funding;
+  const bingxNet = finiteOrNull(row?.vst?.netPnl) ?? 0;
+
+  accumulator.rows += 1;
+  accumulator.sameNetSign += outcome.sameNetSign ? 1 : 0;
+  accumulator.netMismatch += outcome.netMismatch ? 1 : 0;
+  accumulator.marketDrivenNetMismatch += outcome.marketDrivenNetMismatch ? 1 : 0;
+  accumulator.costDrivenNetMismatch += outcome.costDrivenNetMismatch ? 1 : 0;
+  accumulator.otherNetMismatch += outcome.otherNetMismatch ? 1 : 0;
+  accumulator.grossMismatchRecoveredByCosts += outcome.grossMismatchRecoveredByCosts ? 1 : 0;
+  accumulator.replicaPnl += replicaPnl;
+  accumulator.bingxGross += bingxGross;
+  accumulator.fees += fees;
+  accumulator.funding += funding;
+  accumulator.bingxNet += bingxNet;
+  accumulator.gapVsReplica += bingxNet - replicaPnl;
+}
+
+function finalizePairedOutcomeImpact(accumulator) {
+  const costs = roundMoney(accumulator.fees + accumulator.funding);
+  const residual = roundMoney(accumulator.bingxNet - accumulator.bingxGross - costs);
+  return {
+    key: accumulator.key,
+    label: accumulator.label,
+    rows: accumulator.rows,
+    sameNetSign: accumulator.sameNetSign,
+    netMismatch: accumulator.netMismatch,
+    marketDrivenNetMismatch: accumulator.marketDrivenNetMismatch,
+    costDrivenNetMismatch: accumulator.costDrivenNetMismatch,
+    otherNetMismatch: accumulator.otherNetMismatch,
+    grossMismatchRecoveredByCosts: accumulator.grossMismatchRecoveredByCosts,
+    replicaPnl: roundMoney(accumulator.replicaPnl),
+    bingxGross: roundMoney(accumulator.bingxGross),
+    fees: roundMoney(accumulator.fees),
+    funding: roundMoney(accumulator.funding),
+    costs,
+    bingxNet: roundMoney(accumulator.bingxNet),
+    gapVsReplica: roundMoney(accumulator.gapVsReplica),
+    averageGapVsReplica: accumulator.rows
+      ? roundMoney(accumulator.gapVsReplica / accumulator.rows)
+      : 0,
+    residual,
+    reconciled: Math.abs(residual) <= 0.01
+  };
+}
+
 export function cohortWindowBounds({ startedAt, endedAt = null, monthWindow = {} } = {}) {
   const parsedStart = Date.parse(startedAt || '');
   if (!Number.isFinite(parsedStart) || parsedStart <= 0) {

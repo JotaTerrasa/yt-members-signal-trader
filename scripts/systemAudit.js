@@ -85,6 +85,7 @@ const report = {
     issueCounts: summary.issueCounts || {},
     signAnalysis: summary.signAnalysis || {},
     pairedOutcomeAnalysis: summary.pairedOutcomeAnalysis || {},
+    pairedOutcomeImpact: summary.pairedOutcomeImpact || {},
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
@@ -307,6 +308,30 @@ function buildFindings(report) {
       severity: 'high',
       code: 'paired_win_rate_gap',
       detail: `Sobre las mismas ${outcomes.rows} operaciones cerradas, la hoja gana el ${percent(outcomes.sheetWinRate)} y BingX VST neto el ${percent(outcomes.vstWinRate)}; la brecha es de ${money(outcomes.winRateGapPoints)} puntos y ${outcomes.netSignMismatch} resultados cambian de signo.`
+    });
+  }
+  if (report.replica?.pairedOutcomeImpact?.reconciled === false) {
+    findings.push({
+      severity: 'critical',
+      code: 'paired_outcome_impact_unreconciled',
+      detail: `El impacto económico por resultado deja un residual de ${money(report.replica.pairedOutcomeImpact.residual)} VST.`
+    });
+  }
+  const marketImpact = pairedOutcomeImpactGroup(report.replica?.pairedOutcomeImpact, 'market_driven_mismatch');
+  const costImpact = pairedOutcomeImpactGroup(report.replica?.pairedOutcomeImpact, 'cost_driven_mismatch');
+  if (marketImpact?.rows || costImpact?.rows) {
+    findings.push({
+      severity: 'info',
+      code: 'paired_outcome_gap_by_cause',
+      detail: `${marketImpact?.rows || 0} cambios de signo anteriores a costes aportan ${money(marketImpact?.gapVsReplica)} VST de brecha y ${costImpact?.rows || 0} cambios provocados por costes aportan ${money(costImpact?.gapVsReplica)} VST.`
+    });
+  }
+  const sameSignImpact = pairedOutcomeImpactGroup(report.replica?.pairedOutcomeImpact, 'same_net_sign');
+  if (sameSignImpact?.rows && Number(sameSignImpact.gapVsReplica || 0) < -0.01) {
+    findings.push({
+      severity: 'high',
+      code: 'same_sign_economic_gap',
+      detail: `${sameSignImpact.rows} operaciones coinciden en signo, pero la réplica suma ${money(sameSignImpact.replicaPnl)} VST y BingX neto ${money(sameSignImpact.bingxNet)} VST; la brecha es ${money(sameSignImpact.gapVsReplica)} VST.`
     });
   }
   if (report.replica?.gapBridge?.reconciled === false) {
@@ -587,6 +612,7 @@ function renderMarkdown(report) {
     `- Brecha de win rate VST - hoja: ${money(r.pairedOutcomeAnalysis?.winRateGapPoints)} puntos`,
     `- Mismo signo / signo neto distinto: ${r.pairedOutcomeAnalysis?.sameNetSign ?? 0} / ${r.pairedOutcomeAnalysis?.netSignMismatch ?? 0}`,
     `- Hoja ganadora y VST perdedora / caso inverso: ${r.pairedOutcomeAnalysis?.sheetWinVstLoss ?? 0} / ${r.pairedOutcomeAnalysis?.sheetLossVstWin ?? 0}`,
+    ...renderPairedOutcomeImpactLines(r.pairedOutcomeImpact),
     `- Ejecuciones de entrada > 0,15%: ${r.fillQuality?.entryAboveTolerance ?? 0} de ${r.fillQuality?.entryMeasured ?? 0}`,
     `- Ejecuciones de salida > 0,15%: ${r.fillQuality?.closeAboveTolerance ?? 0} de ${r.fillQuality?.closeMeasured ?? 0}`,
     `- Fuentes de entrada: ${JSON.stringify(r.fillQuality?.entrySources || {})}`,
@@ -664,6 +690,35 @@ function renderGapBridgeLines(bridge) {
     `- Bruto BingX reconstruido: ${money(bridge.reconstructedGross)} VST`,
     `- Neto BingX reconstruido: ${money(bridge.reconstructedNet)} VST`,
     `- Residual: ${money(bridge.residual)} VST (${bridge.reconciled ? 'reconciliado' : 'revisar'})`
+  ];
+}
+
+function pairedOutcomeImpactGroup(impact, key) {
+  return impact?.groups?.find((group) => group.key === key) || null;
+}
+
+function renderPairedOutcomeImpactLines(impact) {
+  if (!impact || !Number(impact.rows || 0)) {
+    return ['- Impacto económico por resultado: sin muestra comparable.'];
+  }
+  const market = pairedOutcomeImpactGroup(impact, 'market_driven_mismatch');
+  const costs = pairedOutcomeImpactGroup(impact, 'cost_driven_mismatch');
+  const other = pairedOutcomeImpactGroup(impact, 'other_net_mismatch');
+  const sameSign = pairedOutcomeImpactGroup(impact, 'same_net_sign');
+  const symbolLines = (impact.bySymbol || []).map((item) => {
+    const mismatchLabel = Number(item.netMismatch || 0) === 1 ? 'cambio de signo' : 'cambios de signo';
+    return `- Impacto ${item.key}: ${item.rows} pares; ${item.netMismatch} ${mismatchLabel}; réplica ${money(item.replicaPnl)} VST; BingX neto ${money(item.bingxNet)} VST; brecha ${money(item.gapVsReplica)} VST.`;
+  });
+  return [
+    `- Impacto comparable réplica / BingX bruto / BingX neto: ${money(impact.replicaPnl)} / ${money(impact.bingxGross)} / ${money(impact.bingxNet)} VST`,
+    `- Costes comparables, comisiones / funding / total: ${money(impact.fees)} / ${money(impact.funding)} / ${money(impact.costs)} VST`,
+    `- Brecha total BingX neto - réplica: ${money(impact.gapVsReplica)} VST`,
+    `- Brecha por signo distinto antes de costes: ${market?.rows || 0} operaciones; ${money(market?.gapVsReplica ?? 0)} VST`,
+    `- Brecha por signo cambiado por costes: ${costs?.rows || 0} operaciones; ${money(costs?.gapVsReplica ?? 0)} VST`,
+    `- Brecha por otro cambio neto: ${other?.rows || 0} operaciones; ${money(other?.gapVsReplica ?? 0)} VST`,
+    `- Brecha aunque coincide el signo: ${sameSign?.rows || 0} operaciones; ${money(sameSign?.gapVsReplica ?? 0)} VST`,
+    `- Residual del impacto: ${money(impact.residual)} VST (${impact.reconciled ? 'reconciliado' : 'revisar'})`,
+    ...symbolLines
   ];
 }
 
@@ -747,6 +802,7 @@ function pickCohortSummary(summary = {}) {
     issueCounts: summary.issueCounts || {},
     signAnalysis: summary.signAnalysis || {},
     pairedOutcomeAnalysis: summary.pairedOutcomeAnalysis || {},
+    pairedOutcomeImpact: summary.pairedOutcomeImpact || {},
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
@@ -790,6 +846,7 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Win rate hoja / BingX VST neto sobre la misma muestra: ${percent(summary.pairedOutcomeAnalysis?.sheetWinRate)} / ${percent(summary.pairedOutcomeAnalysis?.vstWinRate)}`,
     `- Brecha de win rate VST - hoja: ${money(summary.pairedOutcomeAnalysis?.winRateGapPoints)} puntos`,
     `- Mismo signo / signo neto distinto: ${summary.pairedOutcomeAnalysis?.sameNetSign || 0} / ${summary.pairedOutcomeAnalysis?.netSignMismatch || 0}`,
+    ...renderPairedOutcomeImpactLines(summary.pairedOutcomeImpact),
     `- Ejecuciones de entrada / salida > 0,15%: ${summary.fillQuality?.entryAboveTolerance || 0} / ${summary.fillQuality?.closeAboveTolerance || 0}`,
     `- Stops comparables alineados / divergentes: ${summary.stopAnalysis?.aligned || 0} / ${summary.stopAnalysis?.divergent || 0}`,
     `- Divergencias precedidas por cierres fallidos: ${summary.stopAnalysis?.closeFailureDivergent || 0}`,
