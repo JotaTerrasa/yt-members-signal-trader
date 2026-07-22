@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -219,6 +219,26 @@ test('distingue un stop alineado de uno realmente contrario a la hoja', () => {
     grossPnl: -12,
     closeDiffPercent: 0.05
   }), 'not_stop');
+});
+
+test('infiere un stop histórico cuando el cierre genérico coincide con el SL', () => {
+  assert.deepEqual(observedCloseKind({
+    status: 'exchange_position_closed',
+    hasCloseSignal: false,
+    direction: 'LONG',
+    stopLoss: 1860,
+    closePrice: 1860,
+    grossPnl: -13.8
+  }), { kind: 'stop', source: 'price_and_pnl' });
+
+  assert.deepEqual(observedCloseKind({
+    status: 'exchange_position_closed',
+    hasCloseSignal: true,
+    direction: 'LONG',
+    stopLoss: 1860,
+    closePrice: 1860,
+    grossPnl: -13.8
+  }), { kind: 'other', source: 'exchange_position_closed' });
 });
 
 test('resume solo los stops comparables y separa los que no tienen hoja', () => {

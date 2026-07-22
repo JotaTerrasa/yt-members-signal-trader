@@ -95,6 +95,65 @@ test('enlaza PnL y comisiones por ciclo de vida y tradeId', () => {
   assert.equal(row.closingFee.income, -0.5);
 });
 
+test('enlaza la señal de cierre enviada con el cierre confirmado posterior', () => {
+  const open = {
+    ...opening('2026-07-01T10:00:00Z', 'ETH-USDT', 100),
+    response: { data: { order: { avgPrice: '101', executedQty: '2' } } }
+  };
+  const closeSignal = {
+    at: '2026-07-01T10:29:59Z',
+    status: 'demo_close_sent',
+    signal: { action: 'CLOSE', symbol: 'ETH-USDT', direction: 'LONG', closePrice: 105 }
+  };
+  const closeEvent = {
+    at: '2026-07-01T10:30:01Z',
+    status: 'exchange_signal_closed',
+    signal: { symbol: 'ETH-USDT', direction: 'LONG' }
+  };
+  const realized = {
+    symbol: 'ETH-USDT',
+    incomeType: 'REALIZED_PNL',
+    income: '8',
+    time: Date.parse('2026-07-01T10:30:00Z'),
+    tradeId: 'close-eth'
+  };
+
+  const [row] = alignReplicaAuditRecords({
+    sheetRows: [{ orderNumber: 1, symbol: 'ETH-USDT', direction: 'LONG', entryPrice: 100 }],
+    openings: [open],
+    realizedRows: [realized],
+    closeEvents: [closeEvent],
+    closeSignalEvents: [closeSignal]
+  });
+
+  assert.equal(row.closeEvent, closeEvent);
+  assert.equal(row.closeSignalEvent, closeSignal);
+});
+
+test('empareja con la entrada publicada aunque el precio real se desvíe', () => {
+  const first = {
+    ...opening('2026-07-01T10:00:00Z', 'BTC-USDT', 109),
+    signal: { symbol: 'BTC-USDT', direction: 'LONG', entry: { price: 100 } },
+    response: { data: { order: { avgPrice: '109', executedQty: '1' } } }
+  };
+  const second = {
+    ...opening('2026-07-01T10:10:00Z', 'BTC-USDT', 101),
+    signal: { symbol: 'BTC-USDT', direction: 'LONG', entry: { price: 110 } },
+    response: { data: { order: { avgPrice: '101', executedQty: '1' } } }
+  };
+
+  const rows = alignReplicaAuditRecords({
+    sheetRows: [
+      { orderNumber: 1, symbol: 'BTC-USDT', direction: 'LONG', entryPrice: 100 },
+      { orderNumber: 2, symbol: 'BTC-USDT', direction: 'LONG', entryPrice: 110 }
+    ],
+    openings: [first, second]
+  });
+
+  assert.equal(rows[0].opening, first);
+  assert.equal(rows[1].opening, second);
+});
+
 test('un reintento tardío de un activo no cruza los paquetes de otros activos', () => {
   const aligned = alignReplicaAuditRecords({
     sheetRows: [

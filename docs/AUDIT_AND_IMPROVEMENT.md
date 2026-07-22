@@ -33,7 +33,9 @@ La lectura actual separa tres grupos: filas emparejadas, operaciones realmente a
 
 Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio, las **19/19 ausencias** tienen evidencia: seis stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
 
-Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. En el corte del 22 de julio hay **17 de 21 stops comparables alineados** y cuatro divergentes. Tres divergencias BTC estuvieron precedidas por uno, dos y tres cierres fallidos, respectivamente, debido al error histórico `CLOSE_GUARD_MIN_NET_PNL is not defined`; por ello quedaron abiertas y terminaron agregadas en un único stop. La constante está definida y la ruta actual tiene regresiones que obligan a ejecutar el cierre incluso si el guard falla. La cuarta divergencia corresponde a SOL: la publicación `CUERRE TOTAL` del 5 de julio se almacenó, pero no generó eventos para BTC, ETH ni SOL porque la versión del parser vigente todavía no reconocía esa errata. El soporte para `CUERRE` se incorporó el 6 de julio y ahora queda cubierto por una prueba con el mensaje real. Otros cuatro stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
+La auditoría distingue ahora el precio publicado del precio real de ejecución. Para la entrada utiliza el `avgPrice` confirmado por BingX, no la instantánea tomada antes de enviar la orden. Para la salida usa el precio informado por el exchange o lo reconstruye con el PnL realizado y la cantidad cerrada; cada fila indica la fuente utilizada. En el corte del 22 de julio se midieron **161 ejecuciones de entrada**, todas con precio confirmado por BingX, y **110 ejecuciones de salida** con una señal de cierre comparable. De ellas, 78 entradas y 51 salidas superaron el 0,15% de desviación adversa. Las medias adversas fueron del 0,1401% y del 0,1474%, respectivamente.
+
+Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. Cuando BingX guardó históricamente un cierre como `exchange_position_closed`, se infiere que fue un stop únicamente si no existe señal de cierre, el PnL es negativo y el precio ejecutado está en el SL o más allá. Con esta medición hay **27 de 35 stops comparables alineados**, tres con deslizamiento y cinco divergentes. Tres divergencias BTC estuvieron precedidas por cierres fallidos debido al error histórico `CLOSE_GUARD_MIN_NET_PNL is not defined`; una divergencia SOL procede del `CUERRE TOTAL` omitido del 5 de julio; y una divergencia ETH ejecutó el stop publicado en 1860 mientras la fila equivalente de la hoja terminó ganadora. Otros ocho stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
 
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 
@@ -41,13 +43,13 @@ El detalle operación por operación se presenta en una tabla con desplazamiento
 
 ### 1. Entradas perseguidas
 
-De 88 aperturas medibles, 65 entraron a un precio peor que el publicado y 14 superaron el 0,15% de desviación adversa. El arrastre estimado de entrada fue de unos 54,90 VST.
+La línea base original usaba la instantánea de mercado previa al envío y, por tanto, infravaloraba el deslizamiento. Al reprocesar el mes con el precio ejecutado confirmado por BingX, 145 de 161 entradas fueron adversas y 78 superaron el 0,15%. El arrastre neto estimado de entrada asciende a 162,8521 VST.
 
 La estimación usa exposición y diferencia de precio. Sirve para medir magnitud, pero no sustituye el PnL oficial de BingX.
 
 ### 2. Salidas tardías
 
-En 44 de 58 cierres medibles, el mercado estaba peor que el precio publicado. Nueve superaron el 0,15%. El arrastre estimado fue de unos 39,44 VST.
+La línea base también comparaba la señal de cierre con un precio de marca, no con el precio ejecutado. Con el cierre reconstruido a partir del PnL realizado, 51 de 110 salidas comparables superaron el 0,15% de desviación adversa. El arrastre neto estimado asciende a 171,6368 VST.
 
 Esperar a que el precio volviera a la cifra escrita añadía una apuesta nueva que no formaba parte de la orden de cierre.
 
@@ -55,9 +57,11 @@ Esperar a que el precio volviera a la cifra escrita añadía una apuesta nueva q
 
 Las comisiones superaron en valor absoluto el PnL bruto. El tamaño de la cuenta no corrige este problema de ROI: al aumentar tamaño, crecen tanto el PnL como las fees.
 
+La auditoría separa cinco operaciones cuyo PnL bruto tuvo signo contrario a la hoja de otras seis que sí coincidieron en bruto, pero acabaron negativas después de comisiones y funding. De este modo, una divergencia de mercado ya no se confunde con una ganancia absorbida por costes.
+
 ### 4. Operaciones ausentes
 
-La diferencia de 15 aperturas se explica completamente por eventos registrados: diez bloqueos y cinco errores. No hay señales sin rastro ni ejecuciones duplicadas en la ventana auditada.
+Las 19 aperturas ausentes se explican completamente por eventos registrados: seis stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y una desviación de entrada. No hay señales sin rastro ni ejecuciones duplicadas en la ventana auditada.
 
 Nueve bloqueos procedían del filtro anterior, que rechazaba indiscriminadamente todas las entradas a x25. Ese criterio no distinguía una señal con ventaja de otra sin ella.
 

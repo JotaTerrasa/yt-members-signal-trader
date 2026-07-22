@@ -2583,7 +2583,7 @@ function sourceHeroDetail(source) {
     return [
       `${formatSourceMoney(source.total, source)} resultado demo mes`,
       equityBaselineText
-    ].filter(Boolean).join(' Â· ');
+    ].filter(Boolean).join(' · ');
   }
   return `${formatSourceMoney(source.realized, source)} realizado · ${formatSourceMoney(source.floating, source)} flotante`;
 }
@@ -4427,6 +4427,8 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const referenceCoverage = summary.referenceCoverage || {};
   const missingReasonCounts = summary.missingReasonCounts || {};
   const stopAnalysis = summary.stopAnalysis || {};
+  const signAnalysis = summary.signAnalysis || {};
+  const fillQuality = summary.fillQuality || {};
   const missingTotal = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
   const unexplainedMissing = Number(missingReasonCounts.unexplained || 0);
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
@@ -4458,6 +4460,9 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Cobertura de la hoja', referenceCoverage.stale ? 'Desactualizada' : 'Al día', `${coverageDetail} · ${referenceCoverage.outsideCoverageRows || 0} VST posteriores`, referenceCoverage.stale ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Signos divergentes', `${Number(signAnalysis.marketMismatch || 0)} mercado`, `${Number(signAnalysis.costFlip || 0)} absorbidos por costes`, Number(signAnalysis.marketMismatch || 0) ? 'amount negative' : 'amount positive')}
+        ${renderReplicaMetric('Ejecución de entrada', `${Number(fillQuality.entryAboveTolerance || 0)}/${Number(fillQuality.entryMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.entryAverageAdversePercent)}`, Number(fillQuality.entryAboveTolerance || 0) ? 'warn' : 'amount positive')}
+        ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatOptionalPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
       </div>
       ${unprocessedCloseRows ? `
         <p class="notice replica-audit-notice">
@@ -4635,13 +4640,24 @@ function replicaIssueClass(label = '') {
   if (/stop alineado/i.test(label)) {
     return 'positive';
   }
-  if (/no ejecutada|stop|signo|fees|cierre fallido|cierre no procesado/i.test(label)) {
+  if (/no ejecutada|stop|signo|fees|costes|cierre fallido|cierre no procesado/i.test(label)) {
     return 'negative';
   }
   if (/desviada|extra|abierta|diferencia|fuera de cobertura/i.test(label)) {
     return 'warn';
   }
   return 'positive';
+}
+
+function auditPriceSourceLabel(source = '') {
+  return {
+    exchange_fill: 'ejecución BingX',
+    exchange_position: 'posición BingX',
+    derived_position_pnl: 'derivado de PnL',
+    derived_trade_pnl: 'derivado de PnL',
+    market_snapshot: 'instantánea',
+    signal_reference: 'señal'
+  }[source] || 'sin fuente';
 }
 
 function renderReplicaAuditRow(row = {}) {
@@ -4651,6 +4667,9 @@ function renderReplicaAuditRow(row = {}) {
   const diff = row.diff || {};
   const postLink = vst.postUrl
     ? `<a href="${escapeAttribute(vst.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    : '';
+  const closePostLink = vst.closePostUrl
+    ? `<a href="${escapeAttribute(vst.closePostUrl)}" target="_blank" rel="noreferrer">Cierre</a>`
     : '';
   const aggregation = Number(vst.aggregatedOpenings || 1) > 1
     ? `<span>${escapeHtml(`${vst.aggregatedOpenings} entradas agregadas`)}</span>`
@@ -4688,6 +4707,8 @@ function renderReplicaAuditRow(row = {}) {
       <td>
         <strong class="${amountClass(vst.netPnl)}">${escapeHtml(formatOptionalMoney(vst.netPnl, 'VST'))}</strong>
         <span>${escapeHtml(`Bruto ${formatOptionalMoney(vst.grossPnl, 'VST')} / Coste ${formatOptionalMoney(vst.fees, 'VST')}`)}</span>
+        <span>${escapeHtml(`Ejec. E ${formatPrice(vst.entry)} (${auditPriceSourceLabel(vst.entryPriceSource)}) / S ${formatPrice(vst.exit)} (${auditPriceSourceLabel(vst.closePriceSource)})`)}</span>
+        <span>${escapeHtml(`Señal E ${formatPrice(vst.signalEntry)} / S ${formatPrice(vst.signalClose)}`)}</span>
       </td>
       <td>
         <strong class="${amountClass(diff.net)}">${escapeHtml(formatOptionalMoney(diff.net, 'VST'))}</strong>
@@ -4700,6 +4721,7 @@ function renderReplicaAuditRow(row = {}) {
         ${closeFailureEvidence}
         ${unprocessedCloseEvidence}
         ${postLink}
+        ${closePostLink}
       </td>
     </tr>
   `;

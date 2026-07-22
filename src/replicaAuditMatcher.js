@@ -1,3 +1,5 @@
+import { resolveEntryFill, resolveEntryReference, resolveEntryQuantity } from './executionAuditPrices.js';
+
 const GAP_COST = 1;
 const MAX_MATCH_ENTRY_DIFF_PERCENT = 4;
 const MAX_FAILURE_MATCH_ENTRY_DIFF_PERCENT = 0.1;
@@ -9,6 +11,7 @@ export function alignReplicaAuditRecords({
   openings = [],
   realizedRows = [],
   closeEvents = [],
+  closeSignalEvents = [],
   openingFees = [],
   closingFees = [],
   fundingRows = [],
@@ -21,6 +24,7 @@ export function alignReplicaAuditRecords({
     openings,
     realizedRows,
     closeEvents,
+    closeSignalEvents,
     openingFees,
     closingFees,
     fundingRows
@@ -75,7 +79,7 @@ export function attachOpeningFailures(records = [], failures = []) {
       .filter((failure) => utcDateKey(failure?.at) === sheetDate)
       .map((failure) => ({
         failure,
-        entryDiff: percentDiff(record.sheet?.entryPrice, openingPrice(failure))
+        entryDiff: percentDiff(record.sheet?.entryPrice, openingReferencePrice(failure))
       }))
       .filter((item) => item.entryDiff !== null && item.entryDiff <= MAX_FAILURE_MATCH_ENTRY_DIFF_PERCENT)
       .sort((left, right) => left.entryDiff - right.entryDiff || eventTime(left.failure) - eventTime(right.failure))[0];
@@ -216,13 +220,15 @@ export function alignSequences(sheetRows = [], lifecycles = []) {
   return aligned.reverse();
 }
 
-function buildExecutionLifecycles({ openings, realizedRows, closeEvents, openingFees, closingFees, fundingRows }) {
+function buildExecutionLifecycles({ openings, realizedRows, closeEvents, closeSignalEvents, openingFees, closingFees, fundingRows }) {
   const openingsBySymbol = groupBySymbol(openings, eventSymbol);
   const realizedBySymbol = groupBySymbol(realizedRows, incomeSymbol);
   const closeEventsBySymbol = groupBySymbol(closeEvents, eventSymbol);
+  const closeSignalsBySymbol = groupBySymbol(closeSignalEvents, eventSymbol);
   const openingFeesBySymbol = groupBySymbol(openingFees, incomeSymbol);
   const fundingBySymbol = groupBySymbol(fundingRows, incomeSymbol);
   const usedCloseEvents = new Set();
+  const usedCloseSignals = new Set();
   const usedOpeningFees = new Set();
   const lifecycles = [];
 
@@ -251,6 +257,15 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, opening
       );
       if (closeEvent) {
         usedCloseEvents.add(closeEvent);
+      }
+      const closeSignalEvent = nearestUnusedPrecedingEvent(
+        closeSignalsBySymbol.get(symbol) || [],
+        closeEvent ? eventTime(closeEvent) : realizedAt,
+        eventTime(cycleOpenings[0]),
+        usedCloseSignals
+      );
+      if (closeSignalEvent) {
+        usedCloseSignals.add(closeSignalEvent);
       }
       const closingFeeSource = closingFeeForRealized(realizedSource, closingFees);
       const fundingTotal = sumFunding(
@@ -288,6 +303,7 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, opening
           },
           realizedSource,
           closeEvent,
+          closeSignalEvent,
           openingFee,
           closingFee: closingFeeSource ? { ...closingFeeSource, income: allocation.closingFee } : null,
           closingFeeSource,
@@ -312,6 +328,7 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, opening
         realized: null,
         realizedSource: null,
         closeEvent: null,
+        closeSignalEvent: null,
         openingFee,
         closingFee: null,
         funding: 0,
@@ -326,7 +343,7 @@ function buildExecutionLifecycles({ openings, realizedRows, closeEvents, opening
 function allocateCycleAmounts({ openings, realized, closingFee, funding, closeEvent }) {
   const closePrice = closeEventPrice(closeEvent);
   const rawPnlWeights = openings.map((opening) => {
-    const entry = openingPrice(opening);
+    const entry = openingFillPrice(opening);
     const quantity = openingQuantity(opening);
     const direction = normalizeDirection(opening?.signal?.direction);
     if (!Number.isFinite(closePrice) || !Number.isFinite(entry) || !Number.isFinite(quantity)) {
@@ -379,7 +396,7 @@ function matchCost(sheet, lifecycle) {
   if (sheetDirection && openingDirection && sheetDirection !== openingDirection) {
     return Number.POSITIVE_INFINITY;
   }
-  const diff = percentDiff(sheet?.entryPrice, openingPrice(opening));
+  const diff = percentDiff(sheet?.entryPrice, openingReferencePrice(opening));
   if (diff == null) {
     return 0.25;
   }
@@ -514,6 +531,15 @@ function eventTime(event) {
   return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
 }
 
+function nearestUnusedPrecedingEvent(rows, targetTime, minimumTime, used) {
+  return rows
+    .filter((row) => !used.has(row))
+    .filter((row) => eventTime(row) >= minimumTime && eventTime(row) <= targetTime)
+    .map((row) => ({ row, distance: targetTime - eventTime(row) }))
+    .filter((item) => item.distance <= CLOSE_EVENT_MATCH_WINDOW_MS)
+    .sort((left, right) => left.distance - right.distance)[0]?.row || null;
+}
+
 function utcDateKey(value) {
   if (!value) {
     return '';
@@ -527,21 +553,16 @@ function incomeTime(row) {
   return Number.isFinite(value) && value > 0 ? value : Number.POSITIVE_INFINITY;
 }
 
-function openingPrice(event) {
-  return firstFinite([
-    event?.entryPrice,
-    event?.response?.data?.order?.avgPrice,
-    event?.marketPrice,
-    event?.signal?.entry?.price
-  ]);
+function openingReferencePrice(event) {
+  return resolveEntryReference(event)?.price ?? openingFillPrice(event);
+}
+
+function openingFillPrice(event) {
+  return resolveEntryFill(event)?.price ?? null;
 }
 
 function openingQuantity(event) {
-  return firstFinite([
-    event?.order?.quantity,
-    event?.response?.data?.order?.executedQty,
-    event?.response?.data?.order?.quantity
-  ]);
+  return resolveEntryQuantity(event);
 }
 
 function openingExposure(event) {
@@ -555,7 +576,7 @@ function openingExposure(event) {
     return explicit;
   }
   const quantity = openingQuantity(event);
-  const price = openingPrice(event);
+  const price = openingFillPrice(event);
   return quantity && price ? quantity * price : 1;
 }
 

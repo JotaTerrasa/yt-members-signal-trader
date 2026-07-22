@@ -1,6 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { closeSignedDeviationPercent, entrySignedDeviationPercent, resolveEntryFill, resolveEntryReference } from '../src/executionAuditPrices.js';
 import { parseFuturesSignals } from '../src/futuresSignalParser.js';
 import { monitorHealthFinding } from '../src/operationalAudit.js';
 
@@ -33,7 +34,7 @@ const posts = (postsData.posts || []).filter((post) => inWindow(post.firstSeenAt
 const parsedSignals = parsedPostSignals(posts);
 const coverage = buildCoverage(parsedSignals, events);
 const entryQuality = summarizeEntries(events);
-const closeQuality = summarizeCloses(events);
+const closeQuality = summarizeCloses(replica?.rows || []);
 const eventSummary = summarizeEvents(events);
 const duplicateExecutions = findDuplicateExecutions(events);
 const summary = replica?.summary || {};
@@ -81,6 +82,8 @@ const report = {
     aggregatedRows: summary.aggregatedRows || 0,
     aggregatedCycles: summary.aggregatedCycles || 0,
     issueCounts: summary.issueCounts || {},
+    signAnalysis: summary.signAnalysis || {},
+    fillQuality: summary.fillQuality || {},
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -171,15 +174,13 @@ function summarizeEntries(events) {
   const rows = events
     .filter((event) => /_order_sent$/.test(String(event.status || '')) && !event.signal?.action)
     .map((event) => {
-      const reference = Number(event.referenceEntryPrice || event.signal?.entry?.price);
-      const actual = Number(event.entryPrice || event.response?.data?.order?.avgPrice);
+      const reference = resolveEntryReference(event)?.price;
+      const actual = resolveEntryFill(event)?.price;
       if (!Number.isFinite(reference) || reference <= 0 || !Number.isFinite(actual) || actual <= 0) {
         return null;
       }
       const direction = String(event.signal?.direction || '').toUpperCase();
-      const signed = direction === 'SHORT'
-        ? (reference - actual) / reference * 100
-        : (actual - reference) / reference * 100;
+      const signed = entrySignedDeviationPercent({ actual, reference, direction });
       const exposure = Number(event.costGuard?.exposure || 0);
       return { signed, adverse: Math.max(0, signed), drag: exposure * signed / 100 };
     })
@@ -195,21 +196,18 @@ function summarizeEntries(events) {
   };
 }
 
-function summarizeCloses(events) {
-  const rows = events
-    .filter((event) => /_close_sent$/.test(String(event.status || '')) && event.signal?.action === 'CLOSE')
-    .map((event) => {
-      const published = Number(event.closePrice || event.signal?.closePrice);
-      const position = event.exchangeClose?.orders?.[0]?.position || event.exchangeClose?.positions?.[0];
-      const market = Number(position?.markPrice || position?.lastPrice);
-      if (!Number.isFinite(published) || published <= 0 || !Number.isFinite(market) || market <= 0) {
+function summarizeCloses(replicaRows) {
+  const rows = replicaRows
+    .filter((row) => row.vst?.signalClose != null && row.vst?.exit != null)
+    .map((row) => {
+      const published = Number(row.vst.signalClose);
+      const actual = Number(row.vst.exit);
+      if (!Number.isFinite(published) || published <= 0 || !Number.isFinite(actual) || actual <= 0) {
         return null;
       }
-      const direction = String(event.signal?.direction || position?.positionSide || 'LONG').toUpperCase();
-      const signed = direction === 'SHORT'
-        ? (market - published) / published * 100
-        : (published - market) / published * 100;
-      const exposure = Number(position?.positionValue || 0);
+      const direction = String(row.direction || 'LONG').toUpperCase();
+      const signed = closeSignedDeviationPercent({ actual, reference: published, direction });
+      const exposure = Number(row.replica?.notional || 0) * Number(row.replica?.leverage || 1);
       return { signed, adverse: Math.max(0, signed), drag: exposure * signed / 100 };
     })
     .filter(Boolean);
@@ -269,6 +267,20 @@ function buildFindings(report) {
   }
   if (report.replica && Math.abs(report.replica.fees) > Math.abs(report.replica.bingxGross)) {
     findings.push({ severity: 'high', code: 'fees_dominate', detail: 'Las comisiones acumuladas superan el PnL bruto de BingX.' });
+  }
+  if (report.replica?.signAnalysis?.marketMismatch) {
+    findings.push({
+      severity: 'high',
+      code: 'market_sign_mismatch',
+      detail: `${report.replica.signAnalysis.marketMismatch} operaciones terminaron con signo bruto contrario a la hoja; no se explican solo por comisiones.`
+    });
+  }
+  if (report.replica?.signAnalysis?.costFlip) {
+    findings.push({
+      severity: 'high',
+      code: 'profit_absorbed_by_costs',
+      detail: `${report.replica.signAnalysis.costFlip} operaciones coincidieron con la hoja en bruto, pero comisiones y funding convirtieron la ganancia VST en pérdida neta.`
+    });
   }
   if (report.replica?.issueCounts?.['No ejecutada en VST']) {
     const missingSheetOperations = report.replica.issueCounts['No ejecutada en VST'];
@@ -395,6 +407,11 @@ function renderMarkdown(report) {
     `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
     `- Publicaciones históricas de cierre sin evento: ${r.unprocessedClosePosts ?? 0}`,
     `- Posiciones afectadas por cierres no procesados: ${r.unprocessedCloseRows ?? 0}`,
+    `- Signos distintos por mercado / por costes: ${r.signAnalysis?.marketMismatch ?? 0} / ${r.signAnalysis?.costFlip ?? 0}`,
+    `- Ejecuciones de entrada > 0,15%: ${r.fillQuality?.entryAboveTolerance ?? 0} de ${r.fillQuality?.entryMeasured ?? 0}`,
+    `- Ejecuciones de salida > 0,15%: ${r.fillQuality?.closeAboveTolerance ?? 0} de ${r.fillQuality?.closeMeasured ?? 0}`,
+    `- Fuentes de entrada: ${JSON.stringify(r.fillQuality?.entrySources || {})}`,
+    `- Fuentes de salida: ${JSON.stringify(r.fillQuality?.closeSources || {})}`,
     `- Stops comparables alineados / divergentes / con deslizamiento: ${r.stopAnalysis?.aligned ?? 0} / ${r.stopAnalysis?.divergent ?? 0} / ${r.stopAnalysis?.slippage ?? 0}`,
     `- Stops observados sin hoja comparable: ${r.stopAnalysis?.unknown ?? 0}`,
     `- Stops divergentes precedidos por cierres fallidos: ${r.stopAnalysis?.closeFailureDivergent ?? 0}`,
@@ -445,6 +462,8 @@ function pickCohortSummary(summary = {}) {
     actualCommissionRebate: summary.actualCommissionRebate || 0,
     commissionRebateDetected: Boolean(summary.commissionRebateDetected),
     issueCounts: summary.issueCounts || {},
+    signAnalysis: summary.signAnalysis || {},
+    fillQuality: summary.fillQuality || {},
     missingReasonCounts: summary.missingReasonCounts || {},
     stopAnalysis: summary.stopAnalysis || {},
     unprocessedCloseRows: summary.unprocessedCloseRows || 0,
@@ -473,6 +492,8 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
     `- Cierres históricos sin evento / posiciones afectadas: ${summary.unprocessedClosePosts || 0} / ${summary.unprocessedCloseRows || 0}`,
+    `- Signos distintos por mercado / por costes: ${summary.signAnalysis?.marketMismatch || 0} / ${summary.signAnalysis?.costFlip || 0}`,
+    `- Ejecuciones de entrada / salida > 0,15%: ${summary.fillQuality?.entryAboveTolerance || 0} / ${summary.fillQuality?.closeAboveTolerance || 0}`,
     `- Stops comparables alineados / divergentes: ${summary.stopAnalysis?.aligned || 0} / ${summary.stopAnalysis?.divergent || 0}`,
     `- Divergencias precedidas por cierres fallidos: ${summary.stopAnalysis?.closeFailureDivergent || 0}`,
     `- Fallos heurísticos de parseo: ${packages.parseFailures || 0}`,

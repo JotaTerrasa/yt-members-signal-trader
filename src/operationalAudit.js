@@ -332,6 +332,37 @@ export function replicaStopAlignment({
   return 'aligned';
 }
 
+export function observedCloseKind({
+  status = '',
+  hasCloseSignal = false,
+  direction = '',
+  stopLoss = null,
+  closePrice = null,
+  grossPnl = null,
+  tolerancePercent = 0.25
+} = {}) {
+  const normalizedStatus = String(status || '').toLowerCase();
+  if (normalizedStatus.includes('stop')) {
+    return { kind: 'stop', source: 'exchange_status' };
+  }
+  if (hasCloseSignal || normalizedStatus !== 'exchange_position_closed' || Number(grossPnl) >= 0) {
+    return { kind: 'other', source: normalizedStatus || 'unknown' };
+  }
+  const stop = Number(stopLoss);
+  const close = Number(closePrice);
+  if (!Number.isFinite(stop) || stop <= 0 || !Number.isFinite(close) || close <= 0) {
+    return { kind: 'other', source: normalizedStatus || 'unknown' };
+  }
+  const tolerance = Math.max(0, Number(tolerancePercent) || 0) / 100;
+  const side = String(direction || '').toUpperCase();
+  const nearOrBeyondStop = side === 'SHORT'
+    ? close >= stop * (1 - tolerance)
+    : close <= stop * (1 + tolerance);
+  return nearOrBeyondStop
+    ? { kind: 'stop', source: 'price_and_pnl' }
+    : { kind: 'other', source: normalizedStatus || 'unknown' };
+}
+
 export function summarizeReplicaStops(rows = []) {
   const stopRows = (rows || []).filter((row) => (
     row?.vst?.stopAlignment && row.vst.stopAlignment !== 'not_stop'

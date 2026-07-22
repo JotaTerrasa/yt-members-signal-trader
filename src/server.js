@@ -16,10 +16,11 @@ import { buildHistoricalPnl } from './historicalPnl.js';
 import { PaperTradeStore } from './paperTradeStore.js';
 import { detectPortfolioUrl } from './portfolioDetector.js';
 import { editedOpeningSignals } from './editedSignalRecovery.js';
+import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveCloseFill, resolveCloseReference, resolveEntryFill, resolveEntryReference } from './executionAuditPrices.js';
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseFailureAttempts, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -4414,6 +4415,7 @@ function buildReplicaAuditRows({ sheetRows = [], incomeRows = [], events = [], u
     openings: auditOpeningEvents(events),
     realizedRows: auditIncomeByType(incomeRows, 'REALIZED_PNL'),
     closeEvents: auditCloseEvents(events),
+    closeSignalEvents: auditCloseSignalEvents(events),
     openingFailures: buildOpeningFailureAttempts(events),
     closeFailures: buildCloseFailureAttempts(events),
     unprocessedCloses,
@@ -4450,7 +4452,9 @@ function replicaAuditRow({
   sheet,
   opening,
   realized,
+  realizedSource,
   closeEvent,
+  closeSignalEvent,
   openingFee,
   closingFee,
   funding,
@@ -4464,8 +4468,18 @@ function replicaAuditRow({
   const sheetPnl = auditNumber(sheet?.realizedPnl ?? sheet?.paperPnl, null);
   const sheetNotional = auditNumber(sheet?.notional, 0);
   const leverage = auditNumber(sheet?.leverage ?? opening?.signal?.leverage, 1);
-  const entryPrice = auditOpeningPrice(opening);
-  const closePrice = auditClosePrice(closeEvent);
+  const entryFill = resolveEntryFill(opening);
+  const entryReference = resolveEntryReference(opening);
+  const closeReference = resolveCloseReference(closeSignalEvent);
+  const closeFill = resolveCloseFill({
+    opening,
+    closeEvent,
+    closeSignalEvent,
+    realized,
+    realizedSource
+  });
+  const entryPrice = entryFill?.price ?? null;
+  const closePrice = closeFill?.price ?? null;
   const notional = auditNumber(opening?.sizing?.notional, 0) || auditNumber(opening?.notional, 0) || auditNumber(defaultNotional, 0);
   const scaleRatio = sheetNotional > 0 && notional > 0 ? notional / sheetNotional : 0;
   const replicaPnl = sheetPnl == null ? null : roundMoney(sheetPnl * scaleRatio);
@@ -4477,8 +4491,31 @@ function replicaAuditRow({
   const netPnl = grossPnl == null ? null : roundMoney(grossPnl + fees);
   const entryDiffPercent = auditPercentDiff(entryPrice, sheet?.entryPrice);
   const closeDiffPercent = auditPercentDiff(closePrice, sheet?.closePrice || sheet?.currentPrice);
+  const direction = sheet?.direction || opening?.signal?.direction || closeEvent?.signal?.direction || '';
+  const entrySlippagePercent = entryAdverseDeviationPercent({
+    actual: entryPrice,
+    reference: entryReference?.price,
+    direction
+  });
+  const closeSlippagePercent = closeAdverseDeviationPercent({
+    actual: closePrice,
+    reference: closeReference?.price,
+    direction
+  });
+  const stopLoss = auditNumber(
+    closeEvent?.exchangePosition?.stopLoss ?? opening?.signal?.stopLoss,
+    null
+  );
+  const closeKind = observedCloseKind({
+    status: closeEvent?.status,
+    hasCloseSignal: Boolean(closeSignalEvent),
+    direction,
+    stopLoss,
+    closePrice,
+    grossPnl
+  });
   const stopAlignment = replicaStopAlignment({
-    closeStatus: closeEvent?.status,
+    closeStatus: closeKind.kind === 'stop' ? 'exchange_stop_closed' : closeEvent?.status,
     replicaPnl,
     grossPnl,
     closeDiffPercent
@@ -4528,6 +4565,15 @@ function replicaAuditRow({
     vst: {
       entry: auditRound(entryPrice),
       exit: auditRound(closePrice),
+      signalEntry: auditRound(entryReference?.price),
+      signalClose: auditRound(closeReference?.price),
+      stopLoss: auditRound(stopLoss),
+      entryPriceSource: entryFill?.source || '',
+      closePriceSource: closeFill?.source || '',
+      closeKind: closeKind.kind,
+      closeKindSource: closeKind.source,
+      entrySlippagePercent: auditRound(entrySlippagePercent),
+      closeSlippagePercent: auditRound(closeSlippagePercent),
       grossPnl: auditRound(grossPnl),
       fees: auditRound(fees),
       openingFee: auditRound(openingFeeAmount),
@@ -4558,7 +4604,8 @@ function replicaAuditRow({
         postUrl: close.postUrl || ''
       })),
       aggregatedOpenings: Number(aggregatedOpenings || 1),
-      postUrl: opening?.postUrl || openingFailure?.postUrl || closeEvent?.postUrl || ''
+      postUrl: opening?.postUrl || openingFailure?.postUrl || closeEvent?.postUrl || '',
+      closePostUrl: closeSignalEvent?.postUrl || ''
     },
     failure: openingFailure ? {
       status: openingFailure.status || 'error',
@@ -4579,6 +4626,7 @@ function replicaAuditRow({
       openingFailureEventId: openingFailure?.eventId || null,
       executionKey: opening?.executionKey || null,
       closeEventId: closeEvent?.eventId || null,
+      closeSignalEventId: closeSignalEvent?.eventId || null,
       exchangePositionId: closeEvent?.exchangePosition?.id || null,
       tradeId: realized?.tradeId || null,
       openingFeeTradeId: openingFee?.tradeId || null,
@@ -4647,7 +4695,21 @@ function auditRowStatus({
     return { cause: 'Stop con deslizamiento', detail: 'La hoja y BingX pierden en el mismo sentido, pero el precio de stop se desvió más del 0,15%.', severity: 'warn' };
   }
   if (replicaPnl != null && netPnl != null && Math.sign(replicaPnl) !== Math.sign(netPnl) && Math.abs(replicaPnl) > 0.01 && Math.abs(netPnl) > 0.01) {
-    return { cause: 'Signo distinto', detail: 'La hoja gana/pierde en sentido contrario al neto VST.', severity: 'negative' };
+    const grossMatchesReference = grossPnl != null
+      && Math.abs(grossPnl) > 0.01
+      && Math.sign(replicaPnl) === Math.sign(grossPnl);
+    if (grossMatchesReference && Math.sign(grossPnl) !== Math.sign(netPnl)) {
+      return {
+        cause: 'Ganancia absorbida por costes',
+        detail: 'El movimiento bruto coincide con la hoja, pero comisiones y funding vuelven negativo el neto VST.',
+        severity: 'negative'
+      };
+    }
+    return {
+      cause: 'Signo distinto de mercado',
+      detail: 'El PnL bruto de BingX termina con signo contrario a la operación equivalente de la hoja.',
+      severity: 'negative'
+    };
   }
   if (grossPnl != null && Math.abs(Number(fees || 0)) > Math.max(0.5, Math.abs(grossPnl) * 0.6)) {
     return { cause: 'Fees dominan', detail: 'El coste de abrir/cerrar pesa demasiado frente al bruto de la operación.', severity: 'negative' };
@@ -4730,6 +4792,11 @@ function summarizeReplicaAudit({
     totals[row.cause] = (totals[row.cause] || 0) + 1;
     return totals;
   }, {});
+  const signAnalysis = {
+    marketMismatch: Number(issueCounts['Signo distinto de mercado'] || 0),
+    costFlip: Number(issueCounts['Ganancia absorbida por costes'] || 0)
+  };
+  const fillQuality = summarizeReplicaFillQuality(rows);
   const missingReasonCounts = rows
     .filter((row) => row.cause === 'No ejecutada en VST')
     .reduce((totals, row) => {
@@ -4787,6 +4854,8 @@ function summarizeReplicaAudit({
     startingCapital: reference?.startingCapital ?? null,
     equity: reference?.equity ?? null,
     issueCounts,
+    signAnalysis,
+    fillQuality,
     missingReasonCounts,
     stopAnalysis,
     unprocessedCloseRows: unprocessedCloseRows.length,
@@ -4797,6 +4866,41 @@ function summarizeReplicaAudit({
     resetApplied: Number.isFinite(monthWindow.resetAt) && monthWindow.resetAt > 0,
     referenceCoverage
   };
+}
+
+function summarizeReplicaFillQuality(rows = []) {
+  const entryRows = rows.filter((row) => (
+    row.vst?.entrySlippagePercent !== null
+    && row.vst?.entrySlippagePercent !== undefined
+    && Number.isFinite(Number(row.vst.entrySlippagePercent))
+  ));
+  const closeRows = rows.filter((row) => (
+    row.vst?.closeSlippagePercent !== null
+    && row.vst?.closeSlippagePercent !== undefined
+    && Number.isFinite(Number(row.vst.closeSlippagePercent))
+  ));
+  return {
+    entryMeasured: entryRows.length,
+    entryAboveTolerance: entryRows.filter((row) => Number(row.vst.entrySlippagePercent) > 0.15).length,
+    entryAverageAdversePercent: auditRound(entryRows.length
+      ? entryRows.reduce((sum, row) => sum + Number(row.vst.entrySlippagePercent), 0) / entryRows.length
+      : null),
+    closeMeasured: closeRows.length,
+    closeAboveTolerance: closeRows.filter((row) => Number(row.vst.closeSlippagePercent) > 0.15).length,
+    closeAverageAdversePercent: auditRound(closeRows.length
+      ? closeRows.reduce((sum, row) => sum + Number(row.vst.closeSlippagePercent), 0) / closeRows.length
+      : null),
+    entrySources: countReplicaPriceSources(rows, 'entryPriceSource'),
+    closeSources: countReplicaPriceSources(rows, 'closePriceSource')
+  };
+}
+
+function countReplicaPriceSources(rows = [], key = '') {
+  return rows.reduce((totals, row) => {
+    const source = String(row.vst?.[key] || 'unavailable');
+    totals[source] = (totals[source] || 0) + 1;
+    return totals;
+  }, {});
 }
 
 function auditMonthWindow({ month, resetAt = null }) {
@@ -4862,6 +4966,16 @@ function auditCloseEvents(events = []) {
     .sort(compareAuditEventTime);
 }
 
+function auditCloseSignalEvents(events = []) {
+  return events
+    .filter((event) => (
+      String(event.status || '') === 'demo_close_sent'
+      && (String(event.signal?.action || '').toUpperCase() === 'CLOSE'
+        || String(event.signal?.action || '').toUpperCase() === 'CLOSE_ALL')
+    ))
+    .sort(compareAuditEventTime);
+}
+
 function auditIncomeByType(rows = [], type = '') {
   const target = String(type || '').toUpperCase();
   return rows
@@ -4920,16 +5034,6 @@ function auditEventSymbol(event = {}) {
 function auditIncomeSymbol(record = {}) {
   record = record || {};
   return normalizePositionSymbol(record.symbol || '');
-}
-
-function auditOpeningPrice(event = {}) {
-  event = event || {};
-  return auditNumber(event.entryPrice ?? event.response?.data?.order?.avgPrice ?? event.marketPrice, null);
-}
-
-function auditClosePrice(event = {}) {
-  event = event || {};
-  return auditNumber(event.exchangePosition?.closePrice ?? event.exchangePosition?.currentPrice ?? event.closePrice, null);
 }
 
 function auditPercentDiff(actual, expected) {
