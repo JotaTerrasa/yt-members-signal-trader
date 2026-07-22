@@ -172,6 +172,7 @@ jotaterrasa <165782559+JotaTerrasa@users.noreply.github.com>
 
 9. Si tocaste persistencia, verificaste un backup y una restauración en ruta aislada.
 10. Si tocaste Docker, ejecutaste `npm run docker:check -- --image futures-magician:local` después de construir la imagen.
+11. Si tocaste secretos o despliegue en Windows, ejecutaste `npm run security:check`, no mostraste valores privados y no aplicaste ACL recursivas con PM2 activo.
 
 ## Git y publicación
 

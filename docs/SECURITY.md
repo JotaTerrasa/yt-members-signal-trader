@@ -25,6 +25,29 @@ tmp/
 
 `.yt-profile/` contiene sesiones Chromium de YouTube y Telegram Web.
 
+## Protección local en Windows
+
+Las credenciales de la UI se guardan en texto legible para el proceso dentro de `.data/config.json`. El archivo está fuera de Git y los backups son cifrados, pero eso no sustituye los permisos del sistema operativo.
+
+Audita los permisos sin modificarlos:
+
+```powershell
+npm run security:check
+```
+
+Aplica ACL privadas a `.data`, `.yt-profile` y `.env` durante una ventana de mantenimiento:
+
+```powershell
+pm2 stop yt-members-signal-trader
+npm run security:harden
+pm2 start ecosystem.config.cjs --only yt-members-signal-trader
+pm2 save --force
+```
+
+El endurecimiento conserva acceso completo para el usuario actual, SYSTEM y administradores, elimina la herencia de permisos ajenos y propaga las reglas a los descendientes. Si la validación falla, restaura el ACL raíz anterior. El comando rechaza una primera aplicación si detecta PM2 activo y omite cualquier ruta que ya esté protegida, evitando reinicios inesperados por cambios recursivos en el perfil Chromium abierto.
+
+Estas ACL protegen frente a otras cuentas locales, pero no frente a software malicioso ejecutado como tu propio usuario. Rota las claves si sospechas de una intrusión.
+
 ## Tokens y claves
 
 Reglas:

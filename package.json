@@ -24,6 +24,8 @@
     "backup:secure": "node scripts/secureBackup.js create",
     "backup:secure:profile": "node scripts/secureBackup.js create --include-profile",
     "backup:secure:profile:maintenance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profileBackup.ps1",
+    "security:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hardenLocalSecrets.ps1 -Mode Check",
+    "security:harden": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hardenLocalSecrets.ps1 -Mode Apply",
     "windows:tasks": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/registerWindowsTasks.ps1"
   },
   "dependencies": {

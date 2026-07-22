@@ -342,6 +342,7 @@ Reglas recomendadas:
 - Configurar máximo de órdenes por dia.
 - No expongas `localhost:5178` a internet sin autenticación.
 - No subas `.data/config.json`.
+- En Windows, ejecuta `npm run security:check` y `npm run security:harden` para limitar los secretos al usuario actual, SYSTEM y administradores.
 - No borres `.yt-profile/` si quieres conservar sesiones de YouTube/Telegram Web.
 
 Botones de emergencia disponibles:

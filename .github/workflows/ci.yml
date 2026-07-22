@@ -72,3 +72,40 @@ jobs:
 
       - name: Comprobar arranque, healthcheck y persistencia
         run: npm run docker:check -- --image futures-magician:ci --port 15178
+
+  windows-security:
+    name: ACL privadas en Windows
+    runs-on: windows-latest
+    steps:
+      - name: Obtener el repositorio
+        uses: actions/checkout@v7
+
+      - name: Comprobar auditoría y endurecimiento
+        shell: powershell
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'futures-magician-security'
+          New-Item -ItemType Directory -Path (Join-Path $fixture '.data\nested') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $fixture '.yt-profile\Default') -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $fixture '.data\config.json') -Value '{}'
+          Set-Content -LiteralPath (Join-Path $fixture '.data\nested\event.json') -Value '{}'
+          Set-Content -LiteralPath (Join-Path $fixture '.yt-profile\Default\Cookies') -Value 'probe'
+          Set-Content -LiteralPath (Join-Path $fixture '.env') -Value 'APP_BASIC_USER=probe'
+
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\hardenLocalSecrets.ps1 -Mode Check -Root $fixture | Out-Null
+          if ($LASTEXITCODE -ne 1) {
+            throw "La auditoría inicial debía detectar permisos heredados."
+          }
+
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\hardenLocalSecrets.ps1 -Mode Apply -Root $fixture | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "No se pudieron aplicar las ACL privadas."
+          }
+
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\hardenLocalSecrets.ps1 -Mode Check -Root $fixture | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "La auditoría final no confirmó las ACL privadas."
+          }
+
+          if ((Get-Content -LiteralPath (Join-Path $fixture '.data\config.json') -Raw).Trim() -ne '{}') {
+            throw "El endurecimiento modificó el contenido protegido."
+          }
