@@ -42,6 +42,7 @@ const elements = {
   reliabilityPanel: document.querySelector('#reliability-panel'),
   reliabilityStatus: document.querySelector('#reliability-status'),
   reliabilitySummary: document.querySelector('#reliability-summary'),
+  netEntryFilterAudit: document.querySelector('#net-entry-filter-audit'),
   reliabilityCriteria: document.querySelector('#reliability-criteria'),
   costControlPanel: document.querySelector('#cost-control-panel'),
   costControlStatus: document.querySelector('#cost-control-status'),
@@ -1437,6 +1438,7 @@ function renderReliabilityPanel() {
     renderReliabilityMetric('Pendientes', String(openingRetries.length + closeRetries.length), `${openingRetries.length} aperturas · ${closeRetries.length} cierres`),
     renderReliabilityMetric('Último paquete', latestPackage ? `${latestPackage.executedCount}/${latestPackage.expectedCount}` : '-', latestPackage ? formatSignalPackageStatus(latestPackage.status) : 'Sin paquete reciente')
   ].join('');
+  renderNetEntryFilterAudit(appState.state?.netEntryFilterAudit || {});
   elements.reliabilityCriteria.innerHTML = (gate.criteria || []).map((item) => `
     <div class="reliability-check ${item.ok ? 'ok' : 'missing'} ${escapeAttribute(item.group || '')}">
       <i data-lucide="${item.ok ? 'check' : item.group === 'sample' || item.group === 'transient' || (item.group === 'economics' && item.available === false) ? 'clock-3' : 'triangle-alert'}"></i>
@@ -1446,6 +1448,51 @@ function renderReliabilityPanel() {
       </span>
     </div>
   `).join('');
+}
+
+function renderNetEntryFilterAudit(audit = {}) {
+  if (!elements.netEntryFilterAudit) {
+    return;
+  }
+  const recommendation = audit.recommendation || {};
+  const tone = recommendation.key === 'candidate_block'
+    ? 'negative'
+    : recommendation.key === 'keep_shadow' ? 'positive' : 'warn';
+  const netValue = audit.closedFlagged > 0
+    ? formatMoney(audit.estimatedNetFlagged, 'VST')
+    : '-';
+  const reason = audit.topReason
+    ? `${netEntryReasonLabel(audit.topReason.reason)} · ${audit.topReason.count}`
+    : 'Sin motivo dominante';
+  const thresholdWarning = audit.nonDiscriminatingBreakEven
+    ? `Con x${audit.observedLeverage || '-'}, el break-even base es ${formatPercent(audit.inherentBreakEvenMarginPercent)} y supera el umbral ${formatPercent(audit.configuredMaxBreakEven)}: así marca todas esas entradas.`
+    : 'El filtro sigue en observación y no modifica ninguna orden.';
+
+  elements.netEntryFilterAudit.dataset.tone = tone;
+  elements.netEntryFilterAudit.innerHTML = `
+    <div class="net-entry-audit-header">
+      <div>
+        <strong>Filtro neto en sombra</strong>
+        <span>${escapeHtml(thresholdWarning)}</span>
+      </div>
+      <span class="ledger-status ${escapeAttribute(tone)}">${escapeHtml(recommendation.label || 'Esperando muestra')}</span>
+    </div>
+    <div class="net-entry-audit-grid">
+      ${renderReliabilityMetric('Evaluadas', String(audit.sample || 0), `${audit.closed || 0} ya cerradas`)}
+      ${renderReliabilityMetric('Habría evitado', String(audit.flagged || 0), `${audit.closedFlagged || 0} con resultado`)}
+      ${renderReliabilityMetric('Neto estimado evitado', netValue, `${audit.winnersFlagged || 0} ganadoras · ${audit.losersFlagged || 0} perdedoras`)}
+      ${renderReliabilityMetric('Motivo principal', reason, recommendation.detail || 'Sin conclusión todavía')}
+    </div>
+  `;
+}
+
+function netEntryReasonLabel(reason = '') {
+  return {
+    break_even_margin: 'Break-even de margen',
+    cost_to_stop_risk: 'Coste frente al riesgo',
+    reward_risk: 'Relación riesgo/recompensa',
+    target_net: 'Objetivo neto'
+  }[reason] || String(reason || '-').replaceAll('_', ' ');
 }
 
 function renderReliabilityMetric(label, value, detail) {

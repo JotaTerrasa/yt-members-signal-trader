@@ -43,6 +43,8 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Asigna a cada apertura un identificador determinista: un timeout o un reinicio no puede convertir un reintento en una segunda posición.
 - Conserva en `.data/execution-retries.json` las aperturas y los cierres pendientes para recuperarlos después de reiniciar el proceso.
 - Mantiene en Demo VST una reserva técnica de margen antes de cada paquete y descuenta esas aportaciones de la equity estratégica y del ROI.
+- Evalúa en Demo VST un filtro neto de entrada que marca operaciones con coste/riesgo, break-even o R/R desfavorables. Por defecto opera en sombra; solo bloquea si se cambia explícitamente a modo bloqueo.
+- Empareja las entradas marcadas en sombra con sus cierres y muestra su PnL neto estimado. También avisa cuando un umbral marcaría por construcción todas las señales con el apalancamiento observado.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
 - Limita el trabajo visual de Posts y Eventos mediante paginación progresiva, y mantiene el canal SSE compacto durante el monitor continuo.
@@ -67,7 +69,7 @@ flowchart LR
 
   scraper --> parser["Parser de señales<br/>src/futuresSignalParser.js"]
   parser --> trader["Motor de futuros<br/>src/futuresTrader.js"]
-  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>riesgo BingX, antigüedad y desvío"]
+  trader --> risk["Validaciones<br/>SL obligatorio, anti-duplicados,<br/>riesgo BingX, antigüedad,<br/>desvío y filtro neto Demo"]
   risk --> bingxClient["Cliente BingX REST<br/>src/bingxClient.js"]
   bingxClient <--> bingx["BingX Futures"]
 
@@ -93,7 +95,7 @@ Flujo principal:
 1. La UI configura fuentes, Telegram, BingX, límites y modo de ejecución a través de la API local.
 2. Playwright mantiene sesiones persistentes en `.yt-profile/` y lee YouTube/Telegram Web.
 3. El parser convierte texto libre en eventos operables: apertura, cierre, TP, SL, break even o cierre total.
-4. El motor de futuros procesa las señales en una cola única y valida stop loss, distancia del stop, duplicados, riesgo de la cuenta, antigüedad, desvío adverso y modo.
+4. El motor de futuros procesa las señales en una cola única y valida stop loss, distancia del stop, duplicados, riesgo de la cuenta, antigüedad, desvío adverso, filtro neto Demo y modo.
 5. BingX ejecuta o reconcilia según el modo activo; la app compara periódicamente estado local contra estado real.
 6. El bot de Telegram avisa de señales, ejecuciones, errores, descuadres, salud del monitor y acciones críticas.
 7. Los almacenes locales, backups redactados e informes permiten auditar lo ocurrido sin subir secretos al repo.
@@ -273,11 +275,13 @@ No escribas tokens en README, issues, commits ni capturas.
 3. Pega API key y API secret.
 4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
 5. El filtro de coste avisa cuando las fees exigen demasiado margen. En modo bloqueo solo rechaza una entrada cuando existe un TP explícito y ese objetivo no cubre la ida y vuelta estimada; una señal sin TP no se descarta solo por usar x25.
-6. En Demo VST, activa la reserva técnica para asegurar margen libre antes de cada paquete. La base estadística sigue siendo 300 VST y cada ticker sigue usando 45 VST; las recargas son colateral virtual externo y no cuentan como beneficio.
-7. Configura el disparador del stop loss por entorno. Demo VST usa `Último precio` (`CONTRACT_PRICE`) y live real conserva `Precio de marca` (`MARK_PRICE`).
-8. Activa `Exigir stop loss`.
-9. Si vas a live, revisa el checklist `Preparado para live`.
-10. Arma live solo desde la UI y con confirmación consciente.
+6. En Demo VST, deja el filtro neto en sombra para auditar entradas que no compensan por coste/riesgo, break-even o R/R. Los valores por defecto son 18% de coste/riesgo máximo, 3% de break-even de margen máximo y 0,9 de R/R mínimo.
+   El panel de fiabilidad contrasta las señales marcadas con sus cierres y no recomienda valorar el bloqueo antes de reunir al menos 20 operaciones marcadas cerradas.
+7. En Demo VST, activa la reserva técnica para asegurar margen libre antes de cada paquete. La base estadística sigue siendo 300 VST y cada ticker sigue usando 45 VST; las recargas son colateral virtual externo y no cuentan como beneficio.
+8. Configura el disparador del stop loss por entorno. Demo VST usa `Último precio` (`CONTRACT_PRICE`) y live real conserva `Precio de marca` (`MARK_PRICE`).
+9. Activa `Exigir stop loss`.
+10. Si vas a live, revisa el checklist `Preparado para live`.
+11. Arma live solo desde la UI y con confirmación consciente.
 
 El disparador elegido se aplica a los próximos SL creados o modificados. Guardar la configuración no cancela ni reemplaza los stops que ya estén abiertos en BingX.
 
@@ -290,7 +294,7 @@ Antes de dejar la app funcionando:
 - En la UI, `Monitor live activo` debe estar verde.
 - `API BingX validada` debe estar verde si usas BingX.
 - `Stop loss obligatorio` debe estar verde.
-- La antigüedad máxima, el desvío adverso y la distancia máxima del stop deben coincidir con la política operativa.
+- La antigüedad máxima, el desvío adverso, la distancia máxima del stop y el filtro neto Demo deben coincidir con la política operativa.
 - `Seguro real BingX` debe indicar que no faltan SL/TP críticos.
 - `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestión.
 - `Guardia nocturna` debe estar estable.

@@ -147,6 +147,8 @@ Configuración importante:
 - `Desvío entrada`: en mercado, bloquea únicamente el desplazamiento desfavorable superior al 0,15%; un precio mejor sí se acepta.
 - `Distancia máxima SL`: bloquea stops anormalmente alejados, incluidos posibles errores tipográficos.
 - `Filtro de coste`: siempre avisa si el coste es alto. En modo `block` solo rechaza cuando hay un TP explícito que no cubre la ida y vuelta estimada.
+- `Filtro neto Demo`: se aplica solo en Demo VST. Por defecto está activo en modo `shadow`; avisa si la entrada supera 18% de coste/riesgo, 3% de break-even de margen, baja de 0,9 R/R o deja un TP neto no positivo. En modo `block` esos mismos criterios bloquean la apertura Demo.
+- `Auditoría del filtro neto`: el panel de fiabilidad enlaza las aperturas evaluadas con sus cierres, resta el coste de ida y vuelta estimado y señala si el umbral de break-even marca automáticamente todas las operaciones con el apalancamiento observado.
 - `Devolución fees estimada`: crea un escenario comparativo; no modifica la equity real ni da por abonado el reembolso.
 - `Capital mes USDT`: capital inicial mensual para futuros reales.
 - `Capital mes VST`: capital inicial mensual para Demo VST.
@@ -180,7 +182,7 @@ curl -X POST http://localhost:5178/api/bingx/vst-reserve \
 Cuando detecta una apertura:
 
 1. Valida que BingX esté activado.
-2. Valida allowlist, stop loss, distancia del stop, riesgo real de la cuenta, antigüedad, desvío y filtro de coste.
+2. Valida allowlist, stop loss, distancia del stop, riesgo real de la cuenta, antigüedad, desvío, filtro de coste y filtro neto Demo.
 3. En Demo VST, hace un único preflight de margen para el paquete completo y repone la reserva técnica si es necesario.
 4. Consulta contrato y ticker en BingX.
 5. Usa el apalancamiento exacto de la señal, salvo bloqueo por máximo.
@@ -196,6 +198,8 @@ Tipo de orden:
 - Si `Entradas siempre a mercado` está activo, ignora el precio de entrada de la señal y envía `MARKET`.
 - Incluso en mercado, el stop debe seguir siendo válido: en LONG por debajo del mercado y en SHORT por encima.
 - Si el precio se ha alejado más de un 0,15% en contra, la entrada espera como máximo tres minutos a que vuelva a zona; después caduca.
+- El filtro neto Demo deja trazas en cada evento. En `shadow` no corta la ejecución; en `block` devuelve razón `net_entry_filter:*` y no envía la orden Demo.
+- La recomendación del panel permanece exploratoria hasta reunir 20 operaciones marcadas cerradas. Nunca cambia el modo a `block` de forma automática.
 - Los fallos transitorios de red, rate limit y precio inválido se guardan en `.data/execution-retries.json`.
 - Antes de reenviar una apertura, la app reconcilia las posiciones de BingX. Si la primera petición fue aceptada aunque su respuesta se perdiera, el reintento se cancela.
 - La cola se recupera después de reiniciar PM2, Node o el contenedor. Conserva su caducidad original y no convierte una señal antigua en una nueva.
@@ -336,7 +340,7 @@ No compartas esa URL: la UI permite operar.
 
 - Comprueba que Chromium esté logueado.
 - Abre el canal desde la UI.
-- Revisa `maxMessages` y `refreshSeconds`.
+- Revisa `maxMessages`, `pollSeconds` y `refreshSeconds`.
 
 `BingX bloquea una señal`
 
@@ -344,6 +348,7 @@ No compartas esa URL: la UI permite operar.
 - Revisa stop loss.
 - Revisa apalancamiento máximo.
 - Revisa el filtro de coste, su modo y el break-even máximo de margen.
+- Revisa el filtro neto Demo: en modo `shadow` solo avisa; en modo `block` puede bloquear por coste/riesgo, break-even, R/R o TP neto no positivo.
 - Revisa capital disponible.
 - Revisa confirmación live.
 

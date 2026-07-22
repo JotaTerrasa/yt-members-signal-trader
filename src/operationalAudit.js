@@ -144,6 +144,221 @@ export function monitorHealthFinding(health = {}) {
   return null;
 }
 
+export function buildNetEntryShadowAudit({ events = [], config = {} } = {}) {
+  const openings = (events || [])
+    .filter((event) => event?.status === 'demo_order_sent' && event?.netEntryFilter?.enabled)
+    .sort(compareEventTime);
+  const closures = uniquePositionClosures(events);
+  const usedClosures = new Set();
+  const rows = openings.map((opening) => {
+    const closure = matchingPositionClosure(opening, closures, usedClosures);
+    if (closure?.key) {
+      usedClosures.add(closure.key);
+    }
+    const grossPnl = closure ? positionGrossPnl(closure.event?.exchangePosition) : null;
+    const estimatedCost = nonNegativeFinite(opening.netEntryFilter?.estimatedRoundTripCost);
+    const estimatedNetPnl = grossPnl === null ? null : roundMoney(grossPnl - estimatedCost);
+    return {
+      at: opening.at || null,
+      symbol: opening.signal?.symbol || null,
+      decision: opening.netEntryFilter?.decision || 'enter',
+      reason: opening.netEntryFilter?.reason || '',
+      closed: grossPnl !== null,
+      grossPnl,
+      estimatedCost,
+      estimatedNetPnl
+    };
+  });
+  const flagged = rows.filter((row) => row.decision === 'avoid_shadow' || row.decision === 'blocked');
+  const closedFlagged = flagged.filter((row) => row.closed);
+  const closedEntered = rows.filter((row) => row.decision === 'enter' && row.closed);
+  const estimatedGrossFlagged = sumFinite(closedFlagged.map((row) => row.grossPnl));
+  const estimatedCostFlagged = sumFinite(closedFlagged.map((row) => row.estimatedCost));
+  const estimatedNetFlagged = sumFinite(closedFlagged.map((row) => row.estimatedNetPnl));
+  const configuredMaxBreakEven = finiteOrNull(config.netEntryFilterMaxBreakEvenMarginPercent);
+  const observedLeverage = mostCommonPositiveNumber(openings.map((event) => event.netEntryFilter?.leverage));
+  const feeBuffer = positiveFinite(config.costGuardFeeBuffer, 2);
+  const feeRate = positiveFinite(openings[0]?.costGuard?.feeRate, 0.0005);
+  const inherentBreakEvenMarginPercent = observedLeverage === null
+    ? null
+    : roundMoney(feeRate * 2 * feeBuffer * observedLeverage * 100);
+  const nonDiscriminatingBreakEven = configuredMaxBreakEven !== null
+    && configuredMaxBreakEven > 0
+    && inherentBreakEvenMarginPercent !== null
+    && inherentBreakEvenMarginPercent > configuredMaxBreakEven;
+  const reasonCounts = countFailureReasons(flagged);
+  const topReason = Object.entries(reasonCounts).sort((left, right) => right[1] - left[1])[0] || null;
+
+  return {
+    enabled: config.netEntryFilterEnabled !== false,
+    mode: String(config.netEntryFilterMode || 'shadow').toLowerCase() === 'block' ? 'block' : 'shadow',
+    sample: rows.length,
+    flagged: flagged.length,
+    entered: rows.length - flagged.length,
+    closed: rows.filter((row) => row.closed).length,
+    open: rows.filter((row) => !row.closed).length,
+    closedFlagged: closedFlagged.length,
+    closedEntered: closedEntered.length,
+    winnersFlagged: closedFlagged.filter((row) => Number(row.estimatedNetPnl) > 0).length,
+    losersFlagged: closedFlagged.filter((row) => Number(row.estimatedNetPnl) < 0).length,
+    estimatedGrossFlagged,
+    estimatedCostFlagged,
+    estimatedNetFlagged,
+    observedLeverage,
+    configuredMaxBreakEven,
+    inherentBreakEvenMarginPercent,
+    nonDiscriminatingBreakEven,
+    topReason: topReason ? { reason: topReason[0], count: topReason[1] } : null,
+    recommendation: netEntryAuditRecommendation({
+      sample: rows.length,
+      closedFlagged: closedFlagged.length,
+      estimatedNetFlagged,
+      nonDiscriminatingBreakEven
+    }),
+    recent: rows.slice(-8).reverse()
+  };
+}
+
+function uniquePositionClosures(events = []) {
+  const byPosition = new Map();
+  for (const event of events || []) {
+    if (!['exchange_signal_closed', 'exchange_position_closed', 'exchange_stop_closed'].includes(event?.status)) {
+      continue;
+    }
+    const position = event.exchangePosition;
+    const symbol = position?.symbol || event.signal?.symbol;
+    if (!position || !symbol) {
+      continue;
+    }
+    const key = position.id || `${symbol}|${position.openedAt || event.at || ''}`;
+    const existing = byPosition.get(key);
+    if (!existing || positionGrossPnl(position) !== null) {
+      byPosition.set(key, { key, event });
+    }
+  }
+  return [...byPosition.values()].sort((left, right) => compareEventTime(left.event, right.event));
+}
+
+function matchingPositionClosure(opening, closures, usedClosures) {
+  const symbol = String(opening.signal?.symbol || '').toUpperCase();
+  const openedAt = Date.parse(opening.at || '');
+  if (!symbol || !Number.isFinite(openedAt)) {
+    return null;
+  }
+  const candidates = closures.filter((closure) => {
+    if (usedClosures.has(closure.key)) {
+      return false;
+    }
+    const position = closure.event?.exchangePosition || {};
+    if (String(position.symbol || closure.event?.signal?.symbol || '').toUpperCase() !== symbol) {
+      return false;
+    }
+    const positionOpenedAt = Date.parse(position.openedAt || '');
+    const closedAt = Date.parse(closure.event?.at || '');
+    return Number.isFinite(positionOpenedAt)
+      ? Math.abs(positionOpenedAt - openedAt) <= 2 * 60 * 1000
+      : Number.isFinite(closedAt) && closedAt >= openedAt;
+  });
+  return candidates.sort((left, right) => {
+    const leftOpenedAt = Date.parse(left.event?.exchangePosition?.openedAt || left.event?.at || '');
+    const rightOpenedAt = Date.parse(right.event?.exchangePosition?.openedAt || right.event?.at || '');
+    return Math.abs(leftOpenedAt - openedAt) - Math.abs(rightOpenedAt - openedAt);
+  })[0] || null;
+}
+
+function positionGrossPnl(position = {}) {
+  const candidates = [position.paperPnl, position.unrealizedPnl, position.realizedPnl];
+  for (const value of candidates) {
+    const number = Number(value);
+    if (Number.isFinite(number) && (number !== 0 || value !== undefined)) {
+      return roundMoney(number);
+    }
+  }
+  return null;
+}
+
+function countFailureReasons(rows = []) {
+  const counts = {};
+  for (const row of rows) {
+    const reason = String(row.reason || '').replace(/^net_entry_filter:/, '');
+    for (const item of reason.split('|').filter(Boolean)) {
+      const key = item.split(':')[0] || item;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function netEntryAuditRecommendation({ sample, closedFlagged, estimatedNetFlagged, nonDiscriminatingBreakEven }) {
+  if (!sample) {
+    return { key: 'waiting', label: 'Esperando muestra', detail: 'Todavia no hay entradas evaluadas.' };
+  }
+  if (nonDiscriminatingBreakEven) {
+    return {
+      key: 'review_threshold',
+      label: 'Revisar umbral',
+      detail: 'El break-even configurado marca por construccion todas las entradas con el apalancamiento observado.'
+    };
+  }
+  if (closedFlagged < 20) {
+    return {
+      key: 'measuring',
+      label: 'Seguir midiendo',
+      detail: `${closedFlagged}/20 operaciones marcadas con cierre; muestra aun exploratoria.`
+    };
+  }
+  if (estimatedNetFlagged < 0) {
+    return {
+      key: 'candidate_block',
+      label: 'Candidata a bloqueo',
+      detail: 'La muestra marcada pierde neto estimado; requiere revision humana antes de cambiar el modo.'
+    };
+  }
+  return {
+    key: 'keep_shadow',
+    label: 'Mantener sombra',
+    detail: 'Las operaciones marcadas no muestran una perdida neta que justifique bloquearlas.'
+  };
+}
+
+function compareEventTime(left, right) {
+  return Date.parse(left?.at || 0) - Date.parse(right?.at || 0);
+}
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function positiveFinite(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function nonNegativeFinite(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+function mostCommonPositiveNumber(values = []) {
+  const counts = new Map();
+  for (const value of values) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) {
+      continue;
+    }
+    counts.set(number, (counts.get(number) || 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+}
+
+function sumFinite(values = []) {
+  return roundMoney(values.reduce((sum, value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? sum + number : sum;
+  }, 0));
+}
+
 function firstValidTimestamp(values) {
   for (const value of values) {
     const timestamp = Date.parse(value || '');

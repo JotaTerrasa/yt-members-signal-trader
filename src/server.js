@@ -17,7 +17,7 @@ import { PaperTradeStore } from './paperTradeStore.js';
 import { detectPortfolioUrl } from './portfolioDetector.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { auditRowBelongsToWindow, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError } from './operationalAudit.js';
+import { auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
 import { PostStore } from './store.js';
@@ -2149,6 +2149,10 @@ function currentState() {
   state.health = buildHealth();
   state.priceFeed = priceFeed.status();
   state.promotionGate = buildCurrentPromotionGate();
+  state.netEntryFilterAudit = buildNetEntryShadowAudit({
+    events: tradeEventStore.list(),
+    config: configStore.getBingX()
+  });
   return {
     ...state,
     browserOpen: scraper.isBrowserOpen,

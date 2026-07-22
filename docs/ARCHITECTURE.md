@@ -69,7 +69,7 @@ sequenceDiagram
   Parser-->>Server: señales normalizadas
   Server->>Server: encolar por orden de llegada
   Server->>Trader: processPosts
-  Trader->>Trader: validar modo, SL, distancia, duplicado, riesgo, antigüedad y desvío
+  Trader->>Trader: validar modo, SL, distancia, duplicado, riesgo, antigüedad, desvío y filtro neto Demo
   Trader->>Trader: generar clientOrderId determinista por señal
   opt demo VST con reserva técnica
     Trader->>BingX: balance demo y, si falta margen libre, getVst
@@ -129,6 +129,8 @@ Orquesta:
 - Cierre inmediato a mercado con auditoría de slippage.
 - Reintentos idempotentes de cierres que fallen por red o error transitorio de BingX.
 - Cohorte posterior a mejoras y cobertura de paquetes de señales.
+- Filtro neto de entrada Demo con modo sombra por defecto y modo bloqueo opcional.
+- Auditoría del filtro neto que enlaza cada apertura evaluada con el cierre de su posición, estima el resultado tras costes y detecta umbrales no discriminantes.
 - Reserva técnica Demo VST activada solo con confirmación explícita y endpoint dedicado.
 - Portfolio dinámico.
 - PnL histórico.
@@ -204,6 +206,8 @@ Gestiona ejecución:
 
 - valida configuración y riesgo;
 - en Demo VST, puede hacer un preflight único de margen por paquete y pedir solo la diferencia necesaria de reserva técnica;
+- calcula `netEntryFilter` para comparar coste/riesgo, break-even de margen, R/R y TP neto; en modo sombra solo audita y en modo bloqueo corta aperturas Demo desfavorables;
+- publica `netEntryFilterAudit` en el estado para que la UI muestre muestra, operaciones marcadas, resultado neto estimado, motivo dominante y advertencias de configuración;
 - consulta contrato y ticker en BingX;
 - calcula cantidad;
 - envía órdenes `MARKET` o `LIMIT`;

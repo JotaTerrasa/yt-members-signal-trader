@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { auditRowBelongsToWindow, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding } from '../src/operationalAudit.js';
+import { auditRowBelongsToWindow, buildNetEntryShadowAudit, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -127,6 +127,52 @@ test('audita paquetes completos e incompletos desde el inicio de cohorte', () =>
   assert.equal(coverage.latestPackage.executedCount, 1);
   assert.equal(coverage.latestPackage.missingCount, 1);
   assert.equal(coverage.summary.incompletePackages, 1);
+});
+
+test('mide el resultado del filtro neto en sombra sin activar bloqueos', () => {
+  const events = [{
+    at: '2026-07-21T09:42:32.000Z',
+    status: 'demo_order_sent',
+    signal: { symbol: 'BTC-USDT', direction: 'LONG' },
+    netEntryFilter: {
+      enabled: true,
+      mode: 'shadow',
+      decision: 'avoid_shadow',
+      reason: 'net_entry_filter:break_even_margin:5>3',
+      leverage: 25,
+      estimatedRoundTripCost: 1.125
+    },
+    costGuard: { feeRate: 0.0005 }
+  }, {
+    at: '2026-07-21T10:00:00.000Z',
+    status: 'exchange_signal_closed',
+    signal: { symbol: 'BTC-USDT', direction: 'LONG' },
+    exchangePosition: {
+      id: 'btc-position',
+      symbol: 'BTC-USDT',
+      openedAt: '2026-07-21T09:42:35.000Z',
+      paperPnl: 9.125
+    }
+  }];
+
+  const audit = buildNetEntryShadowAudit({
+    events,
+    config: {
+      netEntryFilterEnabled: true,
+      netEntryFilterMode: 'shadow',
+      netEntryFilterMaxBreakEvenMarginPercent: 3,
+      costGuardFeeBuffer: 2
+    }
+  });
+
+  assert.equal(audit.sample, 1);
+  assert.equal(audit.flagged, 1);
+  assert.equal(audit.closedFlagged, 1);
+  assert.equal(audit.estimatedGrossFlagged, 9.125);
+  assert.equal(audit.estimatedNetFlagged, 8);
+  assert.equal(audit.inherentBreakEvenMarginPercent, 5);
+  assert.equal(audit.nonDiscriminatingBreakEven, true);
+  assert.equal(audit.recommendation.key, 'review_threshold');
 });
 
 test('enlaza la misma apertura cuando Telegram la ejecuta antes que YouTube', () => {
