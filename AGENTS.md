@@ -29,7 +29,7 @@ La app es un servidor Node.js local con frontend estático:
 - `src/tradeEventStore.js`: auditoría de eventos reales/demo/paper.
 - `public/app.js`, `public/index.html`, `public/styles.css`: UI local.
 - `scripts/strategyStudy.js`: informe estadístico de operativa.
-- `scripts/systemAudit.js`: auditoría integral reproducible y segura para Git.
+- `scripts/systemAudit.js`: auditoría integral reproducible y segura para Git; actualiza `latest.md` y un único snapshot por día.
 - `scripts/secureBackup.js`: backup cifrado verificable y restauración aislada.
 - `scripts/registerWindowsTasks.ps1`: registro reproducible de PM2 y backups en el Programador de tareas.
 - `docs/`: documentación operativa.

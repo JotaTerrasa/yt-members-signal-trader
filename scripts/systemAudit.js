@@ -109,17 +109,18 @@ const report = {
 report.findings = buildFindings(report);
 
 const markdown = renderMarkdown(report);
-const stamp = generatedAt.slice(0, 19).replaceAll(':', '-').replace('T', '-');
+const archiveName = `system-audit-${localDayKey()}.md`;
 await Promise.all([
   writeFile(join(dataReportDir, 'system-audit.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8'),
   writeFile(join(reportDir, 'latest.md'), markdown, 'utf8'),
-  writeFile(join(reportDir, `system-audit-${stamp}.md`), markdown, 'utf8')
+  writeFile(join(reportDir, archiveName), markdown, 'utf8')
 ]);
 
 console.log(JSON.stringify({
   ok: true,
   month,
   report: join(reportDir, 'latest.md'),
+  archive: join(reportDir, archiveName),
   data: join(dataReportDir, 'system-audit.json'),
   findings: report.findings,
   coverage: report.coverage,
@@ -1030,6 +1031,14 @@ function argument(name) {
 
 function localMonthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function localDayKey(date = new Date()) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-');
 }
 
 function finite(value) {

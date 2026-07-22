@@ -190,8 +190,10 @@ Salidas:
 ```text
 .data/audits/system-audit.json
 docs/audits/latest.md
-docs/audits/system-audit-*.md
+docs/audits/system-audit-AAAA-MM-DD.md
 ```
+
+La salida fechada conserva un único snapshot por día. Ejecutar de nuevo la auditoría durante la misma jornada actualiza ese archivo y `latest.md`, sin multiplicar informes equivalentes.
 
 Comprobaciones técnicas:
 

@@ -486,8 +486,10 @@ Genera un JSON local y una copia segura para Git:
 ```text
 .data/audits/system-audit.json
 docs/audits/latest.md
-docs/audits/system-audit-*.md
+docs/audits/system-audit-AAAA-MM-DD.md
 ```
+
+`latest.md` se actualiza en cada ejecución. El archivo fechado es un único snapshot diario: las repeticiones del mismo día lo actualizan en lugar de crear decenas de copias casi idénticas.
 
 El panel separa el resultado bruto teórico, el neto estimado con entrada y salida a mercado, el escenario con entrada maker y la devolución realmente acreditada por BingX. Ningún descuento hipotético modifica la equity observada.
 
