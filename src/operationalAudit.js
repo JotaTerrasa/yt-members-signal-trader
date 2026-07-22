@@ -100,13 +100,85 @@ export function estimateReplicaEconomics({
   };
 }
 
+export function classifyPairedOutcome(row = {}) {
+  const sheetPnl = row?.sheet?.pnl;
+  const netPnl = row?.vst?.netPnl;
+  if (!pairedOutcomeHasResult(sheetPnl) || !pairedOutcomeHasResult(netPnl)) {
+    return {
+      comparable: false,
+      key: 'not_comparable',
+      label: 'Sin resultado comparable',
+      sameNetSign: false,
+      netMismatch: false,
+      grossMeasured: false,
+      grossMismatch: false,
+      marketDrivenNetMismatch: false,
+      costDrivenNetMismatch: false,
+      otherNetMismatch: false,
+      grossMismatchRecoveredByCosts: false
+    };
+  }
+
+  const sheetSign = outcomeSign(sheetPnl);
+  const netSign = outcomeSign(netPnl);
+  const grossMeasured = pairedOutcomeHasResult(row?.vst?.grossPnl);
+  const grossSign = grossMeasured ? outcomeSign(row.vst.grossPnl) : 0;
+  const sameNetSign = sheetSign === netSign;
+  const netMismatch = !sameNetSign && sheetSign !== 0 && netSign !== 0;
+  const grossMismatch = grossMeasured
+    && sheetSign !== 0
+    && grossSign !== 0
+    && sheetSign !== grossSign;
+  const costDrivenNetMismatch = netMismatch
+    && sheetSign > 0
+    && grossSign > 0
+    && netSign < 0;
+  const marketDrivenNetMismatch = netMismatch && grossMismatch;
+  const otherNetMismatch = netMismatch
+    && !marketDrivenNetMismatch
+    && !costDrivenNetMismatch;
+  const grossMismatchRecoveredByCosts = grossMismatch && sameNetSign;
+  const key = marketDrivenNetMismatch
+    ? 'market_driven_mismatch'
+    : costDrivenNetMismatch
+      ? 'cost_driven_mismatch'
+      : otherNetMismatch
+        ? 'other_net_mismatch'
+        : grossMismatchRecoveredByCosts
+          ? 'gross_mismatch_recovered'
+          : sameNetSign
+            ? 'same_net_sign'
+            : 'neutral_difference';
+  const label = {
+    market_driven_mismatch: 'Signo distinto antes de costes',
+    cost_driven_mismatch: 'Ganancia absorbida por costes',
+    other_net_mismatch: 'Signo neto distinto',
+    gross_mismatch_recovered: 'Bruto distinto; neto realineado por costes',
+    same_net_sign: 'Mismo signo neto',
+    neutral_difference: 'Resultado neutro'
+  }[key];
+
+  return {
+    comparable: true,
+    key,
+    label,
+    sheetSign,
+    grossSign: grossMeasured ? grossSign : null,
+    netSign,
+    sameNetSign,
+    netMismatch,
+    grossMeasured,
+    grossMismatch,
+    marketDrivenNetMismatch,
+    costDrivenNetMismatch,
+    otherNetMismatch,
+    grossMismatchRecoveredByCosts
+  };
+}
+
 export function summarizePairedOutcomes(rows = []) {
-  const hasResult = (value) => value !== null
-    && value !== undefined
-    && value !== ''
-    && Number.isFinite(Number(value));
   const pairs = (rows || []).filter((row) => (
-    hasResult(row?.sheet?.pnl) && hasResult(row?.vst?.netPnl)
+    pairedOutcomeHasResult(row?.sheet?.pnl) && pairedOutcomeHasResult(row?.vst?.netPnl)
   ));
   let sheetWins = 0;
   let vstWins = 0;
@@ -119,15 +191,17 @@ export function summarizePairedOutcomes(rows = []) {
   let grossSignMeasured = 0;
   let grossSignMismatch = 0;
   let costFlip = 0;
+  let marketDrivenNetMismatch = 0;
+  let costDrivenNetMismatch = 0;
+  let otherNetMismatch = 0;
+  let grossMismatchRecoveredByCosts = 0;
 
   for (const row of pairs) {
     const sheetPnl = Number(row.sheet.pnl);
     const netPnl = Number(row.vst.netPnl);
-    const grossPnl = Number(row.vst.grossPnl);
     const sheetWin = sheetPnl > 0;
     const vstWin = netPnl > 0;
-    const sheetSign = outcomeSign(sheetPnl);
-    const netSign = outcomeSign(netPnl);
+    const outcome = classifyPairedOutcome(row);
 
     sheetWins += sheetWin ? 1 : 0;
     vstWins += vstWin ? 1 : 0;
@@ -135,23 +209,18 @@ export function summarizePairedOutcomes(rows = []) {
     bothLoss += !sheetWin && !vstWin ? 1 : 0;
     sheetWinVstLoss += sheetWin && !vstWin ? 1 : 0;
     sheetLossVstWin += !sheetWin && vstWin ? 1 : 0;
-    if (sheetSign === netSign) {
+    if (outcome.sameNetSign) {
       sameNetSign += 1;
-    } else if (sheetSign !== 0 && netSign !== 0) {
+    } else if (outcome.netMismatch) {
       netSignMismatch += 1;
     }
-
-    if (!Number.isFinite(grossPnl)) {
-      continue;
-    }
-    const grossSign = outcomeSign(grossPnl);
-    grossSignMeasured += 1;
-    if (sheetSign !== 0 && grossSign !== 0 && sheetSign !== grossSign) {
-      grossSignMismatch += 1;
-    }
-    if (sheetSign > 0 && grossSign > 0 && netSign < 0) {
-      costFlip += 1;
-    }
+    grossSignMeasured += outcome.grossMeasured ? 1 : 0;
+    grossSignMismatch += outcome.grossMismatch ? 1 : 0;
+    costFlip += outcome.costDrivenNetMismatch ? 1 : 0;
+    marketDrivenNetMismatch += outcome.marketDrivenNetMismatch ? 1 : 0;
+    costDrivenNetMismatch += outcome.costDrivenNetMismatch ? 1 : 0;
+    otherNetMismatch += outcome.otherNetMismatch ? 1 : 0;
+    grossMismatchRecoveredByCosts += outcome.grossMismatchRecoveredByCosts ? 1 : 0;
   }
 
   const sheetWinRate = pairs.length ? roundMoney((sheetWins / pairs.length) * 100) : null;
@@ -174,7 +243,11 @@ export function summarizePairedOutcomes(rows = []) {
     sheetLossVstWin,
     grossSignMeasured,
     grossSignMismatch,
-    costFlip
+    costFlip,
+    marketDrivenNetMismatch,
+    costDrivenNetMismatch,
+    otherNetMismatch,
+    grossMismatchRecoveredByCosts
   };
 }
 
@@ -327,6 +400,13 @@ function outcomeSign(value) {
     return 0;
   }
   return Math.sign(number);
+}
+
+function pairedOutcomeHasResult(value) {
+  return value !== null
+    && value !== undefined
+    && value !== ''
+    && Number.isFinite(Number(value));
 }
 
 export function buildOpeningFailureAttempts(events = []) {

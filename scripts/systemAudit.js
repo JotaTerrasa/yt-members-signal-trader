@@ -283,7 +283,7 @@ function buildFindings(report) {
     findings.push({
       severity: 'high',
       code: 'market_sign_mismatch',
-      detail: `${report.replica.signAnalysis.marketMismatch} operaciones terminaron con signo bruto contrario a la hoja; no se explican solo por comisiones.`
+      detail: `${report.replica.signAnalysis.marketMismatch} operaciones terminaron con signo neto contrario a la hoja y la diferencia ya estaba presente antes de costes.`
     });
   }
   if (report.replica?.signAnalysis?.costFlip) {
@@ -291,6 +291,13 @@ function buildFindings(report) {
       severity: 'high',
       code: 'profit_absorbed_by_costs',
       detail: `${report.replica.signAnalysis.costFlip} operaciones coincidieron con la hoja en bruto, pero comisiones y funding convirtieron la ganancia VST en pérdida neta.`
+    });
+  }
+  if (report.replica?.signAnalysis?.grossMismatchRecoveredByCosts) {
+    findings.push({
+      severity: 'info',
+      code: 'gross_sign_recovered_after_costs',
+      detail: `${report.replica.signAnalysis.grossMismatchRecoveredByCosts} operación tuvo signo bruto contrario a la hoja, pero volvió a coincidir en neto después de costes; no forma parte de los cambios de signo neto.`
     });
   }
   if (Number(report.replica?.pairedOutcomeAnalysis?.rows || 0)
@@ -572,7 +579,9 @@ function renderMarkdown(report) {
     `- Motivos de aperturas ausentes: ${missingReasonSummary(r.missingReasonCounts)}`,
     `- Publicaciones históricas de cierre sin evento: ${r.unprocessedClosePosts ?? 0}`,
     `- Posiciones afectadas por cierres no procesados: ${r.unprocessedCloseRows ?? 0}`,
-    `- Signos distintos por mercado / por costes: ${r.signAnalysis?.marketMismatch ?? 0} / ${r.signAnalysis?.costFlip ?? 0}`,
+    `- Signos netos distintos antes de costes / por costes: ${r.signAnalysis?.marketMismatch ?? 0} / ${r.signAnalysis?.costFlip ?? 0}`,
+    `- Brutos de signo distinto / realineados después de costes: ${r.signAnalysis?.grossMismatch ?? 0} / ${r.signAnalysis?.grossMismatchRecoveredByCosts ?? 0}`,
+    `- Cambios netos sin atribución: ${r.pairedOutcomeAnalysis?.otherNetMismatch ?? 0}`,
     `- Muestra cerrada emparejada: ${r.pairedOutcomeAnalysis?.rows ?? 0} operaciones`,
     `- Win rate hoja / BingX VST neto sobre la misma muestra: ${percent(r.pairedOutcomeAnalysis?.sheetWinRate)} / ${percent(r.pairedOutcomeAnalysis?.vstWinRate)}`,
     `- Brecha de win rate VST - hoja: ${money(r.pairedOutcomeAnalysis?.winRateGapPoints)} puntos`,
@@ -774,7 +783,9 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Faltantes con corrección posterior demostrada: ${packages.correctedAfterEventMissingOpenings || 0}`,
     `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
     `- Cierres históricos sin evento / posiciones afectadas: ${summary.unprocessedClosePosts || 0} / ${summary.unprocessedCloseRows || 0}`,
-    `- Signos distintos por mercado / por costes: ${summary.signAnalysis?.marketMismatch || 0} / ${summary.signAnalysis?.costFlip || 0}`,
+    `- Signos netos distintos antes de costes / por costes: ${summary.signAnalysis?.marketMismatch || 0} / ${summary.signAnalysis?.costFlip || 0}`,
+    `- Brutos de signo distinto / realineados después de costes: ${summary.signAnalysis?.grossMismatch || 0} / ${summary.signAnalysis?.grossMismatchRecoveredByCosts || 0}`,
+    `- Cambios netos sin atribución: ${summary.pairedOutcomeAnalysis?.otherNetMismatch || 0}`,
     `- Muestra cerrada emparejada: ${summary.pairedOutcomeAnalysis?.rows || 0} operaciones`,
     `- Win rate hoja / BingX VST neto sobre la misma muestra: ${percent(summary.pairedOutcomeAnalysis?.sheetWinRate)} / ${percent(summary.pairedOutcomeAnalysis?.vstWinRate)}`,
     `- Brecha de win rate VST - hoja: ${money(summary.pairedOutcomeAnalysis?.winRateGapPoints)} puntos`,

@@ -56,7 +56,7 @@ La lectura actual separa tres grupos: filas emparejadas, operaciones realmente a
 
 El frontend resume esta situación inmediatamente debajo de las fuentes de PnL. El bloque `Estado de alineación` muestra filas emparejadas, ausencias, entradas y salidas por encima del 0,15% adverso, costes acumulados y neto de BingX. Distingue una hoja al día, una hoja desactualizada y una última jornada provisional con filas abiertas. En los dos últimos casos separa las operaciones VST que todavía quedan fuera de cobertura. Es una lectura informativa y no activa filtros ni cambia la ejecución.
 
-El win rate ya no compara universos distintos. En el corte del 22 de julio hay **159 pares cerrados con resultado en ambos lados**: Google Sheet registra 119 ganadoras (**74,8%**) y BingX VST neto registra 98 (**61,6%**). La brecha comparable es de **-13,2 puntos porcentuales**. En 138 pares coincide el signo neto y en 21 cambia; los pares abiertos, las operaciones ausentes y las que todavía no tienen resultado de hoja permanecen visibles en sus contadores, pero no entran en estos porcentajes.
+El win rate ya no compara universos distintos. En el corte del 22 de julio hay **159 pares cerrados con resultado en ambos lados**: Google Sheet registra 119 ganadoras (**74,8%**) y BingX VST neto registra 98 (**61,6%**). La brecha comparable es de **-13,2 puntos porcentuales**. En 138 pares coincide el signo neto y en 21 cambia: 15 diferencias ya existían antes de costes y seis ganancias brutas fueron absorbidas por fees y funding. Los pares abiertos, las operaciones ausentes y las que todavía no tienen resultado de hoja permanecen visibles en sus contadores, pero no entran en estos porcentajes.
 
 Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio hay **18 ausencias**, todas con evidencia concreta: cinco stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
 
@@ -80,7 +80,7 @@ La latencia también se separa entre reacción inicial y espera por reintentos. 
 
 Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. Cuando BingX guardó históricamente un cierre como `exchange_position_closed`, se infiere que fue un stop únicamente si no existe señal de cierre, el PnL es negativo y el precio ejecutado está en el SL o más allá. Con la evidencia exacta hay **33 de 47 stops comparables alineados**, seis con deslizamiento y ocho divergentes. Tres divergencias estuvieron precedidas por el fallo histórico de cierre `CLOSE_GUARD_MIN_NET_PNL is not defined` y tres proceden de la publicación de cierre no procesada; cinco filas divergentes pertenecen a posiciones agregadas. Otros dos stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
 
-El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
+El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los filtros permiten aislar los 21 cambios netos, sus 15 causas anteriores a costes, los seis cambios provocados por costes, los 138 resultados del mismo signo y las filas no comparables. Cada fila comparable muestra su clasificación causal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 
 ## Causas demostradas
 
@@ -104,7 +104,7 @@ El desglose reconciliado asigna **-301,6238 VST** a la diferencia de salida. Inc
 
 Las comisiones superaron en valor absoluto el PnL bruto. El tamaño de la cuenta no corrige este problema de ROI: al aumentar tamaño, crecen tanto el PnL como las fees.
 
-La auditoría separa 16 operaciones cuyo PnL bruto tuvo signo contrario a la hoja de otras seis que sí coincidieron en bruto, pero acabaron negativas después de comisiones y funding. De este modo, una divergencia de mercado ya no se confunde con una ganancia absorbida por costes.
+La auditoría identifica 21 cambios de signo neto: en 15 el PnL ya era contrario a la hoja antes de costes y en seis el bruto coincidía, pero comisiones y funding lo convirtieron en pérdida. Existen 16 brutos de signo contrario en total porque un caso adicional volvió a coincidir con la hoja después de costes; ese caso no se cuenta entre los 21 cambios netos. De este modo, una divergencia previa a costes ya no se confunde con una ganancia absorbida por costes.
 
 ### 4. Operaciones ausentes
 

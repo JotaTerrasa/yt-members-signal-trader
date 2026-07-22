@@ -25,7 +25,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { formatSseEvent, formatSseRetry } from './sseTransport.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
@@ -4610,7 +4610,10 @@ async function buildReplicaAudit({ month = currentMonthKey(), forceRefresh = fal
     unprocessedCloses,
     defaultNotional: publicConfig.defaultNotionalUSDT || publicConfig.monthlyOrderNotionalUSDT || 0
   }), sheetRows);
-  const rows = rowAudit.rows;
+  const rows = rowAudit.rows.map((row) => ({
+    ...row,
+    outcome: classifyPairedOutcome(row)
+  }));
   const summary = summarizeReplicaAudit({
     rows,
     sheetRows,
@@ -5379,7 +5382,9 @@ function summarizeReplicaAudit({
   }, {});
   const pairedOutcomeAnalysis = summarizePairedOutcomes(rows);
   const signAnalysis = {
-    marketMismatch: pairedOutcomeAnalysis.grossSignMismatch,
+    marketMismatch: pairedOutcomeAnalysis.marketDrivenNetMismatch,
+    grossMismatch: pairedOutcomeAnalysis.grossSignMismatch,
+    grossMismatchRecoveredByCosts: pairedOutcomeAnalysis.grossMismatchRecoveredByCosts,
     costFlip: pairedOutcomeAnalysis.costFlip,
     netMismatch: pairedOutcomeAnalysis.netSignMismatch,
     pairedRows: pairedOutcomeAnalysis.rows

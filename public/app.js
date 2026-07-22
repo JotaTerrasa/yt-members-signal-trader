@@ -316,6 +316,7 @@ const appState = {
   ledgerVisibleLimit: LEDGER_PAGE_SIZE,
   externalSheetVisibleLimit: EXTERNAL_SHEET_PAGE_SIZE,
   replicaAuditVisibleLimit: REPLICA_AUDIT_PAGE_SIZE,
+  replicaAuditFilter: 'all',
   alignmentAnchorSettled: false,
   externalSheetRenderKey: '',
   externalSheetLoading: false,
@@ -520,6 +521,14 @@ function bindEvents() {
   });
   const alignmentPanel = document.querySelector('#sheet-vst-alignment');
   alignmentPanel?.addEventListener('click', async (event) => {
+    const filterButton = event.target.closest('[data-replica-filter]');
+    if (filterButton) {
+      appState.replicaAuditFilter = filterButton.dataset.replicaFilter || 'all';
+      appState.replicaAuditVisibleLimit = REPLICA_AUDIT_PAGE_SIZE;
+      renderReplicaControlPreservingScroll(appState.replicaAudit, { resetScroll: true });
+      window.lucide?.createIcons();
+      return;
+    }
     const loadMoreButton = event.target.closest('[data-replica-load-more]');
     if (loadMoreButton) {
       appState.replicaAuditVisibleLimit += REPLICA_AUDIT_PAGE_SIZE;
@@ -4956,9 +4965,9 @@ function settleAlignmentAnchor() {
   });
 }
 
-function renderReplicaControlPreservingScroll(audit) {
+function renderReplicaControlPreservingScroll(audit, { resetScroll = false } = {}) {
   const previous = elements.replicaControl.querySelector('.replica-audit-wrap');
-  const scroll = previous ? {
+  const scroll = previous && !resetScroll ? {
     top: previous.scrollTop,
     left: previous.scrollLeft
   } : null;
@@ -5647,9 +5656,10 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
 
   const summary = audit.summary || {};
   const rows = audit.rows || [];
-  const visibleRows = rows.slice(0, appState.replicaAuditVisibleLimit);
-  const criticalRows = rows.filter((row) => row.severity === 'negative').length;
-  const warningRows = rows.filter((row) => row.severity === 'warn').length;
+  const filteredRows = filterReplicaAuditRows(rows, appState.replicaAuditFilter);
+  const visibleRows = filteredRows.slice(0, appState.replicaAuditVisibleLimit);
+  const criticalRows = filteredRows.filter((row) => row.severity === 'negative').length;
+  const warningRows = filteredRows.filter((row) => row.severity === 'warn').length;
   const bingxFees = Number(summary.bingxFees || 0);
   const bingxFunding = Number(summary.bingxFunding || 0);
   const actualRebate = Number(summary.actualCommissionRebate || 0);
@@ -5691,13 +5701,17 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const coverageTail = referenceCoverage.provisionalLatestDay
     ? `${referenceCoverage.openReferenceRows || 0} filas abiertas · ${referenceCoverage.outsideCoverageRows || 0} VST pendientes`
     : `${referenceCoverage.outsideCoverageRows || 0} VST posteriores`;
+  const filterIsActive = appState.replicaAuditFilter !== 'all';
+  const rowCountLabel = filterIsActive
+    ? `${filteredRows.length} filtradas de ${rows.length} - ${criticalRows} críticas - ${warningRows} por revisar`
+    : `${rows.length} filas - ${criticalRows} críticas - ${warningRows} por revisar`;
 
   return `
     <div class="replica-audit">
       <div class="replica-box-title">
         <div>
           <strong>Auditoría operación por operación</strong>
-          <span>${escapeHtml(`${rows.length} filas - ${criticalRows} críticas - ${warningRows} por revisar`)}</span>
+          <span>${escapeHtml(rowCountLabel)}</span>
         </div>
         <button class="button secondary replica-cohort-button" type="button" data-start-improvement-cohort>Nueva cohorte</button>
       </div>
@@ -5729,6 +5743,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         </p>
       ` : ''}
       ${renderImprovementCohort(audit.cohort, audit.cohortHistory, audit.cohortComparison)}
+      ${renderReplicaOutcomeFilters(pairedOutcomeAnalysis, rows.length, appState.replicaAuditFilter)}
       <div class="replica-issue-strip">
         ${renderReplicaIssuePills(summary.issueCounts)}
       </div>
@@ -5746,14 +5761,14 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
             </tr>
           </thead>
           <tbody>
-            ${visibleRows.length ? visibleRows.map(renderReplicaAuditRow).join('') : '<tr><td colspan="7">Sin filas auditables todavía.</td></tr>'}
+            ${visibleRows.length ? visibleRows.map(renderReplicaAuditRow).join('') : '<tr><td colspan="7">No hay operaciones en este filtro.</td></tr>'}
           </tbody>
         </table>
       </div>
-      ${rows.length ? `
+      ${filteredRows.length ? `
         <div class="list-pagination table-pagination replica-audit-pagination">
-          <span role="status" aria-live="polite">Mostrando ${visibleRows.length} de ${rows.length} operaciones</span>
-          <button class="button secondary ${visibleRows.length >= rows.length ? 'hidden' : ''}" type="button" data-replica-load-more ${visibleRows.length >= rows.length ? 'disabled' : ''}>
+          <span role="status" aria-live="polite">Mostrando ${visibleRows.length} de ${filteredRows.length} operaciones${filterIsActive ? ` · ${rows.length} totales` : ''}</span>
+          <button class="button secondary ${visibleRows.length >= filteredRows.length ? 'hidden' : ''}" type="button" data-replica-load-more ${visibleRows.length >= filteredRows.length ? 'disabled' : ''}>
             <i data-lucide="chevrons-down"></i>
             <span>Mostrar más</span>
           </button>
@@ -6390,6 +6405,58 @@ function renderReplicaIssuePills(issueCounts = {}) {
   `).join('');
 }
 
+function renderReplicaOutcomeFilters(analysis = {}, totalRows = 0, activeFilter = 'all') {
+  const comparableRows = Number(analysis.rows || 0);
+  const filters = [
+    { key: 'all', label: 'Todas', count: totalRows, title: 'Mostrar toda la auditoría' },
+    { key: 'net_mismatch', label: 'Cambian signo', count: Number(analysis.netSignMismatch || 0), title: 'La hoja y el neto VST terminan con signo diferente' },
+    { key: 'market_mismatch', label: 'Antes de costes', count: Number(analysis.marketDrivenNetMismatch || 0), title: 'El cambio de signo ya existe antes de aplicar costes' },
+    { key: 'cost_mismatch', label: 'Por costes', count: Number(analysis.costDrivenNetMismatch || 0), title: 'El bruto gana, pero fees y funding convierten el neto en pérdida' },
+    { key: 'same_sign', label: 'Mismo signo', count: Number(analysis.sameNetSign || 0), title: 'La hoja y el neto VST terminan con el mismo signo' },
+    { key: 'not_comparable', label: 'Sin comparar', count: Math.max(0, totalRows - comparableRows), title: 'Filas abiertas, ausentes o sin resultado en ambos lados' }
+  ];
+  const recovered = Number(analysis.grossMismatchRecoveredByCosts || 0);
+  const other = Number(analysis.otherNetMismatch || 0);
+  const explanation = `${Number(analysis.netSignMismatch || 0)} cambios netos: ${Number(analysis.marketDrivenNetMismatch || 0)} nacen antes de costes y ${Number(analysis.costDrivenNetMismatch || 0)} aparecen por costes.${other ? ` ${other} requieren otra atribución.` : ''}${recovered ? ` ${recovered} bruto divergente vuelve al signo de la hoja después de costes.` : ''}`;
+
+  return `
+    <div class="replica-outcome-controls">
+      <div class="replica-outcome-head">
+        <strong>Filtrar por resultado comparable</strong>
+        <span>${escapeHtml(explanation)}</span>
+      </div>
+      <div class="replica-outcome-filters" role="group" aria-label="Filtrar auditoría por resultado comparable">
+        ${filters.map((filter) => `
+          <button type="button"
+            class="replica-outcome-filter ${activeFilter === filter.key ? 'active' : ''}"
+            data-replica-filter="${escapeAttribute(filter.key)}"
+            aria-pressed="${activeFilter === filter.key ? 'true' : 'false'}"
+            title="${escapeAttribute(filter.title)}">
+            <span>${escapeHtml(filter.label)}</span>
+            <strong>${escapeHtml(String(filter.count))}</strong>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function filterReplicaAuditRows(rows = [], filter = 'all') {
+  if (filter === 'all') {
+    return rows;
+  }
+  return rows.filter((row) => {
+    const outcome = row.outcome || {};
+    return {
+      net_mismatch: Boolean(outcome.netMismatch),
+      market_mismatch: Boolean(outcome.marketDrivenNetMismatch),
+      cost_mismatch: Boolean(outcome.costDrivenNetMismatch),
+      same_sign: Boolean(outcome.sameNetSign),
+      not_comparable: !outcome.comparable
+    }[filter] || false;
+  });
+}
+
 function replicaIssueClass(label = '') {
   if (/stop alineado/i.test(label)) {
     return 'positive';
@@ -6412,6 +6479,16 @@ function auditPriceSourceLabel(source = '') {
     market_snapshot: 'instantánea',
     signal_reference: 'señal'
   }[source] || 'sin fuente';
+}
+
+function replicaOutcomeBadgeClass(outcome = {}) {
+  if (outcome.netMismatch) {
+    return 'negative';
+  }
+  if (outcome.grossMismatchRecoveredByCosts) {
+    return 'warn';
+  }
+  return 'positive';
 }
 
 function renderReplicaAuditRow(row = {}) {
@@ -6438,6 +6515,9 @@ function renderReplicaAuditRow(row = {}) {
   const lastUnprocessedClose = Array.isArray(vst.unprocessedCloses) ? vst.unprocessedCloses.at(-1) : null;
   const unprocessedCloseEvidence = lastUnprocessedClose
     ? `<span>${escapeHtml(formatUnprocessedCloseEvidence(vst.unprocessedCloses))}${lastUnprocessedClose.postUrl ? ` · <a href="${escapeAttribute(lastUnprocessedClose.postUrl)}" target="_blank" rel="noreferrer">Cierre omitido</a>` : ''}</span>`
+    : '';
+  const outcomeEvidence = row.outcome?.comparable
+    ? `<span class="replica-outcome-badge ${escapeAttribute(replicaOutcomeBadgeClass(row.outcome))}">${escapeHtml(row.outcome.label || 'Resultado comparable')}</span>`
     : '';
   return `
     <tr class="${escapeAttribute(row.severity || 'neutral')}">
@@ -6469,6 +6549,7 @@ function renderReplicaAuditRow(row = {}) {
         <span>${escapeHtml(`E ${formatOptionalPercent(diff.entryPercent)} / S ${formatOptionalPercent(diff.closePercent)}`)}</span>
       </td>
       <td>
+        ${outcomeEvidence}
         <strong>${escapeHtml(row.cause || '-')}</strong>
         <span>${escapeHtml(row.detail || '')}</span>
         ${failureEvidence}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -213,8 +213,35 @@ test('compara win rate y signos sobre la misma muestra emparejada', () => {
     sheetLossVstWin: 1,
     grossSignMeasured: 5,
     grossSignMismatch: 2,
-    costFlip: 1
+    costFlip: 1,
+    marketDrivenNetMismatch: 2,
+    costDrivenNetMismatch: 1,
+    otherNetMismatch: 0,
+    grossMismatchRecoveredByCosts: 0
   });
+});
+
+test('distingue un cambio neto de un bruto realineado por costes', () => {
+  const marketMismatch = classifyPairedOutcome({
+    sheet: { pnl: 10 },
+    vst: { grossPnl: -2, netPnl: -3 }
+  });
+  const costMismatch = classifyPairedOutcome({
+    sheet: { pnl: 10 },
+    vst: { grossPnl: 1, netPnl: -0.5 }
+  });
+  const recovered = classifyPairedOutcome({
+    sheet: { pnl: -10 },
+    vst: { grossPnl: 0.4, netPnl: -0.7 }
+  });
+
+  assert.equal(marketMismatch.key, 'market_driven_mismatch');
+  assert.equal(marketMismatch.netMismatch, true);
+  assert.equal(costMismatch.key, 'cost_driven_mismatch');
+  assert.equal(costMismatch.costDrivenNetMismatch, true);
+  assert.equal(recovered.key, 'gross_mismatch_recovered');
+  assert.equal(recovered.netMismatch, false);
+  assert.equal(recovered.grossMismatchRecoveredByCosts, true);
 });
 
 test('conserva solo el fallo terminal de una apertura que nunca se ejecuto', () => {

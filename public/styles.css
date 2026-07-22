@@ -3670,6 +3670,106 @@ summary.dashboard-section-title {
   color: var(--danger);
 }
 
+.replica-outcome-controls {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.replica-outcome-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.replica-outcome-head strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.replica-outcome-head span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.replica-outcome-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.replica-outcome-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid #c9dcda;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-align: left;
+}
+
+.replica-outcome-filter:hover,
+.replica-outcome-filter:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.replica-outcome-filter.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.08);
+}
+
+.replica-outcome-filter span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.replica-outcome-filter strong {
+  color: currentColor;
+  font-size: 0.76rem;
+  font-weight: 950;
+}
+
+@media (max-width: 1080px) {
+  .replica-outcome-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .replica-outcome-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .replica-outcome-head span {
+    text-align: left;
+  }
+
+  .replica-outcome-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .replica-audit-wrap {
   height: min(58vh, 620px);
   min-height: 360px;
@@ -3766,6 +3866,37 @@ summary.dashboard-section-title {
   font-size: 0.75rem;
   font-weight: 900;
   text-decoration: none;
+}
+
+.replica-audit-table td .replica-outcome-badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 7px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-size: 0.67rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.replica-audit-table td .replica-outcome-badge.positive {
+  border-color: rgba(15, 118, 110, 0.18);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.replica-audit-table td .replica-outcome-badge.warn {
+  border-color: rgba(154, 103, 0, 0.18);
+  background: #fff8e7;
+  color: #8a5b00;
+}
+
+.replica-audit-table td .replica-outcome-badge.negative {
+  border-color: rgba(220, 38, 38, 0.16);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .replica-audit-table tr.positive td {
