@@ -243,6 +243,14 @@ La primera apertura del paquete promedia un 0,0558% de desviación adversa; las 
 
 La posición no es una causa aislada: suele coincidir con el activo, ya que BTC aparece primero y ETH, SOL o SUI después. El tramo `cotización → fill` actual es del 0,0052% en BTC, 0,1037% en ETH, 0,1214% en SOL y 0,1315% en SUI, con tiempos de inicio a fill muy parecidos. Esto es compatible con diferencias de spread o liquidez del entorno Demo VST, pero no las demuestra porque la cotización almacenada es `lastPrice`, no el mejor ask ejecutable.
 
+### Captura prospectiva de microestructura
+
+Para resolver esa última ambigüedad sin alterar la operativa, la aplicación suscribe el canal público `bookTicker` de BingX junto a `lastPrice`. Cada apertura nueva conservará el mejor bid y ask recibido antes del envío, el spread, la antigüedad de la instantánea, el RTT de la lectura de precio y el RTT local de la petición de orden. En LONG se toma el ask como precio ejecutable; en SHORT, el bid.
+
+La descomposición prospectiva tendrá tres tramos: `señal → lastPrice`, `lastPrice → precio ejecutable` y `precio ejecutable → fill`. Esto permitirá distinguir movimiento previo, spread visible y diferencia posterior a la instantánea. La marca de fill de BingX mantiene precisión de un segundo, mientras que los RTT locales se registran en milisegundos.
+
+Las 38 aperturas ya incluidas en la cohorte vigente son anteriores a esta instrumentación y, por tanto, no tienen bid/ask histórico. El panel muestra inicialmente `0/38` con cobertura de microestructura y empezará a crecer con la siguiente apertura. No se imputan ceros, no se usa el spread actual para rellenar el pasado y ninguna de estas métricas alimenta guards, tamaños, stops, reintentos o cierres.
+
 La lectura por activo, posición, ruta, latencia y franja horaria es descriptiva. No demuestra causalidad, no justifica bloquear un ticker o una hora, ni permite sumar el efecto por activo al efecto por posición. Tampoco sustituye una prueba controlada con suficiente muestra. Su finalidad es señalar dónde investigar antes de proponer otra modificación del camino de ejecución.
 
 ## Límites de la mejora

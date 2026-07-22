@@ -28,7 +28,7 @@ flowchart TB
     server --> matcher["ReplicaAuditMatcher<br/>hoja ↔ apertura ↔ cierre ↔ fees"]
     trader --> bingxClient["BingXClient<br/>REST firmado"]
     trader --> paper["PaperTradeStore<br/>test/paper local"]
-    server --> priceWs["BingXPriceWebSocket<br/>precios"]
+    server --> priceWs["BingXPriceWebSocket<br/>lastPrice + bid/ask"]
   end
 
   bingxClient <--> bingx["BingX Futures<br/>demo VST / live USDT"]
@@ -271,7 +271,9 @@ Entornos:
 
 ### `src/bingxPriceWebSocket.js`
 
-Conecta al WebSocket de mercado de BingX y emite precios para símbolos con posiciones paper abiertas.
+Conecta al WebSocket público de mercado de BingX. Mantiene `lastPrice` para valorar posiciones y procesar cierres paper, y `bookTicker` para observar el mejor bid/ask cada 200 ms. Ambos canales están separados: una actualización de bid/ask nunca se emite como precio de mercado ni puede disparar un cierre.
+
+Cuando se detecta un paquete de aperturas, todos sus símbolos quedan observados durante diez minutos. La suscripción se inicia antes de procesar la primera orden y no introduce ninguna espera. `FuturesTrader` lee la última instantánea fresca de forma síncrona justo antes de enviar la orden; si falta o está caducada, conserva ese hecho como ausencia de evidencia y continúa con la operativa original.
 
 Se usa para:
 
@@ -404,6 +406,8 @@ La respuesta incorpora asimismo `cohortComparison`. El servidor selecciona la co
 Los totales se normalizan por cierre o por operación emparejada. El contraste económico usa un bootstrap determinista de 4.000 remuestreos sobre el PnL neto enlazado de cada ciclo y publica media, intervalo exploratorio del 95% y proporción de remuestreos favorables. La cobertura inferior al 80% o menos de 30 operaciones comparables se etiqueta como parcial. Todo este flujo es de solo lectura y queda fuera del camino que procesa o ejecuta señales.
 
 Cada resumen de cohorte incorpora `entryExecutionAnalysis`, calculado en `src/operationalAudit.js`. Las aperturas se deduplican por identidad de evento u orden y se separan en dos tramos: `señal → cotización previa` y `cotización previa → fill`. El resumen conserva muestra, desviación adversa, ruta inmediata o reintentada, latencia, activo, franja horaria de Madrid, posición dentro del paquete e impacto económico únicamente cuando existe una operación emparejada. La ausencia de evidencia económica se representa como `null`, nunca como un cero observado.
+
+Los eventos nuevos incorporan `executionTelemetry` con dos lecturas temporizadas de `lastPrice`, la instantánea `bookTicker` más próxima al envío y el RTT local de la petición de orden. La fila auditada lo expone como `vst.entryTelemetry`. A partir de esa evidencia, la auditoría separa spread, `lastPrice → ask` para LONG o `lastPrice → bid` para SHORT, y `precio ejecutable → fill`. La cobertura es prospectiva: no reconstruye bid/ask históricos ni convierte su ausencia en cero.
 
 La fila auditada diferencia `openingAttemptAt`, tomado del inicio del intento local, de `openingFillAt`, procedente de `historyOrder.time` en el histórico firmado de BingX. Con ambos valores se separan reacción, espera por reintento, inicio del intento a fill y latencia total. La marca temporal del exchange tiene precisión de un segundo; pequeñas diferencias negativas debidas al redondeo se acotan a cero y no se presentan como latencia negativa.
 

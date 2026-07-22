@@ -904,12 +904,21 @@ function entryExecutionPoint(row, eventId) {
   const firstAttemptAt = validTimestamp(row?.vst?.openingFirstAttemptAt);
   const successfulAttemptAt = validTimestamp(row?.vst?.openingAttemptAt || row?.vst?.openingAt);
   const exchangeFillAt = validTimestamp(row?.vst?.openingFillAt);
+  const telemetry = row?.vst?.entryTelemetry || null;
+  const topOfBook = telemetry?.topOfBook || null;
+  const orderRequestStartedAt = validTimestamp(telemetry?.orderRequest?.startedAt);
+  const executableQuote = direction === 'SHORT'
+    ? positiveNumber(topOfBook?.bidPrice)
+    : positiveNumber(topOfBook?.askPrice);
+  const quoteAvailable = Boolean(topOfBook?.available) && !topOfBook?.stale && executableQuote !== null;
   const validQueueTiming = [detectedAt, firstAttemptAt, successfulAttemptAt].every(Number.isFinite)
     && firstAttemptAt >= detectedAt
     && successfulAttemptAt >= firstAttemptAt;
   const reactionSeconds = validQueueTiming ? (firstAttemptAt - detectedAt) / 1000 : null;
   const retryWaitSeconds = validQueueTiming ? (successfulAttemptAt - firstAttemptAt) / 1000 : null;
   const attemptToFillSeconds = timestampDeltaSeconds(exchangeFillAt, successfulAttemptAt, { precisionToleranceSeconds: 2 });
+  const preparationSeconds = timestampDeltaSeconds(orderRequestStartedAt, successfulAttemptAt);
+  const requestToFillSeconds = timestampDeltaSeconds(exchangeFillAt, orderRequestStartedAt, { precisionToleranceSeconds: 2 });
   const detectedToFillSeconds = timestampDeltaSeconds(exchangeFillAt, detectedAt, { precisionToleranceSeconds: 2 });
   const totalLatencySeconds = detectedToFillSeconds
     ?? (validQueueTiming ? (successfulAttemptAt - detectedAt) / 1000 : null);
@@ -940,6 +949,28 @@ function entryExecutionPoint(row, eventId) {
     signalToQuoteSignedPercent: entrySignedDeviationPercent({ actual: quote, reference: signal, direction }),
     quoteToFillAdversePercent: entryAdverseDeviationPercent({ actual: fill, reference: quote, direction }),
     quoteToFillSignedPercent: entrySignedDeviationPercent({ actual: fill, reference: quote, direction }),
+    telemetryCaptured: Boolean(telemetry),
+    topOfBookCaptured: quoteAvailable,
+    topOfBookStale: Boolean(topOfBook?.stale),
+    executableQuote: quoteAvailable ? executableQuote : null,
+    spreadPercent: quoteAvailable ? nullableNumber(topOfBook?.spreadPercent) : null,
+    quoteAgeMs: quoteAvailable ? nullableNumber(topOfBook?.ageMs) : null,
+    lastToExecutableAdversePercent: quoteAvailable
+      ? entryAdverseDeviationPercent({ actual: executableQuote, reference: quote, direction })
+      : null,
+    lastToExecutableSignedPercent: quoteAvailable
+      ? entrySignedDeviationPercent({ actual: executableQuote, reference: quote, direction })
+      : null,
+    executableToFillAdversePercent: quoteAvailable
+      ? entryAdverseDeviationPercent({ actual: fill, reference: executableQuote, direction })
+      : null,
+    executableToFillSignedPercent: quoteAvailable
+      ? entrySignedDeviationPercent({ actual: fill, reference: executableQuote, direction })
+      : null,
+    tickerRoundTripMs: nullableNumber(telemetry?.preOrderMarketRead?.roundTripMs),
+    orderRequestRoundTripMs: nullableNumber(telemetry?.orderRequest?.roundTripMs),
+    preparationSeconds,
+    requestToFillSeconds,
     reactionSeconds,
     retryWaitSeconds,
     attemptToFillSeconds,
@@ -957,6 +988,8 @@ function entryExecutionEvidenceScore(point = {}) {
     point.signal,
     point.quote,
     point.fill,
+    point.executableQuote,
+    point.orderRequestRoundTripMs,
     point.totalAdversePercent,
     point.attemptToFillSeconds,
     point.totalLatencySeconds,
@@ -972,6 +1005,8 @@ function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
   const reactionValues = items.map((point) => point.reactionSeconds);
   const retryWaitValues = items.map((point) => point.retryWaitSeconds);
   const attemptToFillValues = items.map((point) => point.attemptToFillSeconds);
+  const preparationValues = items.map((point) => point.preparationSeconds);
+  const requestToFillValues = items.map((point) => point.requestToFillSeconds);
   const matchedImpacts = items.map((point) => point.matchedEntryImpact).filter((value) => value !== null);
   const signalToQuote = entryStageStats(items, 'signalToQuote');
   const quoteToFill = entryStageStats(items, 'quoteToFill');
@@ -980,6 +1015,8 @@ function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
   const reaction = entryValueStats(reactionValues, { allowNegative: false });
   const retryWait = entryValueStats(retryWaitValues, { allowNegative: false });
   const attemptToFill = entryValueStats(attemptToFillValues, { allowNegative: false });
+  const preparation = entryValueStats(preparationValues, { allowNegative: false });
+  const requestToFill = entryValueStats(requestToFillValues, { allowNegative: false });
   const matchedEntryImpact = sumFinite(matchedImpacts);
 
   return {
@@ -1018,8 +1055,21 @@ function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
         averageSeconds: attemptToFill.average,
         medianSeconds: attemptToFill.median,
         p95Seconds: attemptToFill.p95
+      },
+      preparation: {
+        measured: preparation.count,
+        averageSeconds: preparation.average,
+        medianSeconds: preparation.median,
+        p95Seconds: preparation.p95
+      },
+      requestToFill: {
+        measured: requestToFill.count,
+        averageSeconds: requestToFill.average,
+        medianSeconds: requestToFill.median,
+        p95Seconds: requestToFill.p95
       }
     },
+    microstructure: summarizeEntryMicrostructure(items),
     matchedEconomicRows: matchedImpacts.length,
     matchedEntryImpact: matchedImpacts.length ? roundMoney(matchedEntryImpact) : null,
     matchedEntryImpactPerRow: matchedImpacts.length ? roundMoney(matchedEntryImpact / matchedImpacts.length) : null
@@ -1027,6 +1077,44 @@ function summarizeEntryExecutionGroup(key, label, points, tolerancePercent) {
 }
 
 function entryStageStats(points, prefix) {
+  const adverse = entryPercentStats(points.map((point) => point[`${prefix}AdversePercent`]));
+  const signed = entryValueStats(points.map((point) => point[`${prefix}SignedPercent`]));
+  return {
+    measured: adverse.count,
+    averageAdversePercent: adverse.average,
+    medianAdversePercent: adverse.median,
+    p95AdversePercent: adverse.p95,
+    averageSignedPercent: signed.average
+  };
+}
+
+function summarizeEntryMicrostructure(points = []) {
+  const instrumented = points.filter((point) => point.telemetryCaptured).length;
+  const topOfBookMeasured = points.filter((point) => point.topOfBookCaptured).length;
+  const spread = entryPercentStats(points.map((point) => point.spreadPercent));
+  const quoteAge = entryValueStats(points.map((point) => point.quoteAgeMs), { allowNegative: false });
+  const tickerRoundTrip = entryValueStats(points.map((point) => point.tickerRoundTripMs), { allowNegative: false });
+  const orderRequestRoundTrip = entryValueStats(points.map((point) => point.orderRequestRoundTripMs), { allowNegative: false });
+  return {
+    instrumented,
+    topOfBookMeasured,
+    staleQuotes: points.filter((point) => point.topOfBookStale).length,
+    coveragePercent: points.length ? roundMoney(topOfBookMeasured / points.length * 100) : null,
+    spread: {
+      measured: spread.count,
+      averagePercent: spread.average,
+      medianPercent: spread.median,
+      p95Percent: spread.p95
+    },
+    lastToExecutable: entryTelemetryStageStats(points, 'lastToExecutable'),
+    executableToFill: entryTelemetryStageStats(points, 'executableToFill'),
+    quoteAgeMs: quoteAge,
+    tickerRoundTripMs: tickerRoundTrip,
+    orderRequestRoundTripMs: orderRequestRoundTrip
+  };
+}
+
+function entryTelemetryStageStats(points, prefix) {
   const adverse = entryPercentStats(points.map((point) => point[`${prefix}AdversePercent`]));
   const signed = entryValueStats(points.map((point) => point[`${prefix}SignedPercent`]));
   return {

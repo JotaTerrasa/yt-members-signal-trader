@@ -287,7 +287,7 @@ function buildEntryDiagnosis({ current, previous }) {
       key: stageKey,
       label: stageLabel,
       detail: `${symbolDetail} ${comparableDetail} ${packageDetail} ${mixDetail} ${retryDetail}`,
-      caveat: 'Es una asociación descriptiva. Activo y posición dentro del paquete están correlacionados; sus desgloses son lecturas alternativas y no deben sumarse como causas. No justifica cambiar la ejecución sin una muestra posterior controlada.',
+      caveat: 'Es una asociación descriptiva. Activo y posición dentro del paquete están correlacionados; sus desgloses son lecturas alternativas y no deben sumarse como causas. La microestructura solo se mide en aperturas nuevas con bookTicker fresco y no modifica la ejecución.',
       currentOpenings: Number(currentTotal.openings || 0),
       currentAboveTolerance: totalAbove,
       immediateAboveTolerance: immediateAbove,
@@ -303,6 +303,7 @@ function buildEntryDiagnosis({ current, previous }) {
     byRoute,
     byPackageSlot,
     mixAnalysis,
+    prospectiveMicrostructure: currentTotal.microstructure || null,
     timing: compareEntryTiming(previousAnalysis.totals?.latency, currentAnalysis.totals?.latency),
     currentByLatency: currentAnalysis.byLatency || [],
     currentByTimeWindow: currentAnalysis.byTimeWindow || []

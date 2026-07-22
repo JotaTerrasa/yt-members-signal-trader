@@ -75,7 +75,7 @@ flowchart LR
   risk --> bingxClient["Cliente BingX REST<br/>src/bingxClient.js"]
   bingxClient <--> bingx["BingX Futures"]
 
-  api --> priceWs["Precios WebSocket<br/>src/bingxPriceWebSocket.js"]
+  api --> priceWs["Precios y bid/ask WebSocket<br/>src/bingxPriceWebSocket.js"]
   priceWs <--> bingx
   api --> reconcile["Reconciliación real<br/>posiciones, SL/TP y órdenes huérfanas"]
   reconcile <--> bingx
@@ -477,9 +477,11 @@ El bloque `Efecto observado de las mejoras` compara la cohorte vigente con la in
 
 Dentro de ese bloque, `Dónde se deterioran las entradas` descompone el desplazamiento adverso entre `señal → cotización previa` y `cotización previa → fill`. Compara además activos, aperturas inmediatas y reintentadas, bandas de latencia, franjas horarias de Madrid y posición dentro de cada paquete. La hora de inicio del intento se mantiene separada de la marca temporal de la orden en el histórico firmado de BingX.
 
+La sección `Microestructura prospectiva` suscribe también el canal público `bookTicker` de BingX. Para cada apertura nueva conserva el mejor bid y ask, el spread, la antigüedad de la instantánea, el tiempo de la consulta de precio y el tiempo de ida y vuelta de la orden. Así puede separar `lastPrice → precio ejecutable` de `precio ejecutable → fill`. Los eventos históricos anteriores no se rellenan con estimaciones: aparecen fuera de cobertura hasta que exista una muestra nueva.
+
 El panel distingue también el cambio de composición del cambio ocurrido dentro de cada grupo. Así evita afirmar que la ejecución ha empeorado cuando la cohorte actual contiene simplemente más operaciones de activos o posiciones históricamente costosos. Los desgloses por activo y posición son lentes alternativas, porque ambas variables están correlacionadas; no se suman como si fueran causas independientes. Los grupos con menos de tres observaciones comparables se marcan como muestra insuficiente y ninguna asociación descriptiva se convierte automáticamente en una guarda de ejecución.
 
-La comparación es de solo lectura. No interviene en el parser, las validaciones, los reintentos, los stops, el tamaño de las órdenes ni los cierres. La hoja puede quedar temporalmente por detrás de BingX; en ese caso las métricas de alineación se marcan como parciales y no se extrapolan al resto de la cohorte.
+La comparación y la captura de microestructura son de solo lectura. No intervienen en el parser, las validaciones, los reintentos, los stops, el tamaño de las órdenes ni los cierres; tampoco añaden una petición REST al camino crítico. La hoja puede quedar temporalmente por detrás de BingX; en ese caso las métricas de alineación se marcan como parciales y no se extrapolan al resto de la cohorte.
 
 El comparador reconstruye además la cadena `hoja → señal/objetivo → cotización previa → fill` y la representa con Plotly. La latencia se divide entre reacción inicial y espera por reintentos, de modo que un movimiento previo, un retry y una diferencia entre cotización y fill no se mezclen bajo una única etiqueta de slippage.
 
@@ -541,7 +543,7 @@ src/
   promotionGate.js       Criterios de promoción sin activación automática
   httpSecurity.js        Autenticación opcional y protecciones HTTP
   bingxClient.js         Cliente REST BingX
-  bingxPriceWebSocket.js WebSocket de precios
+  bingxPriceWebSocket.js WebSocket de precios y bid/ask
   referenceLedger.js     hoja de Google de referencia
   replicaAuditMatcher.js Emparejamiento hoja/apertura/cierre/fees
   portfolioDetector.js   Detección de portfolio

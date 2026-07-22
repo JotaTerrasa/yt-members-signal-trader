@@ -12,10 +12,12 @@ const CLOSE_GUARD_MAX_SIGNAL_SLIPPAGE_PERCENT = 0.15;
 const VST_TECHNICAL_RESERVE_BUFFER_PERCENT = 5;
 
 export class FuturesTrader {
-  constructor({ configStore, paperStore, tradeEventStore, onLog, onTrade }) {
+  constructor({ configStore, paperStore, tradeEventStore, watchMarketSymbols, marketQuoteSnapshot, onLog, onTrade }) {
     this.configStore = configStore;
     this.paperStore = paperStore;
     this.tradeEventStore = tradeEventStore;
+    this.watchMarketSymbols = watchMarketSymbols;
+    this.marketQuoteSnapshot = marketQuoteSnapshot;
     this.onLog = onLog;
     this.onTrade = onTrade;
     this.contractCache = new Map();
@@ -483,8 +485,14 @@ export class FuturesTrader {
     const filteredReason = options.filteredReason || 'signal_filtered';
     for (const post of posts) {
       const signals = parseFuturesSignals(post.text || '').filter((signal) => signal.isSignal);
+      const openingSignals = signals.filter(isOpeningSignal);
+      try {
+        this.watchMarketSymbols?.(openingSignals.map((signal) => signal.symbol));
+      } catch (error) {
+        this.log(`Telemetria de mercado: ${error.message}`, 'warn');
+      }
       const packageContext = {
-        openingSignals: signals.filter(isOpeningSignal),
+        openingSignals,
         vstReservePromise: null
       };
       for (const signal of signals) {
@@ -976,7 +984,8 @@ export class FuturesTrader {
 
     const forceMarketEntry = Boolean(config.forceMarketEntries);
     const referenceEntryPrice = signal.entry?.price ? Number(signal.entry.price) : null;
-    const marketPrice = await this.fetchMarketPrice(marketClient, signal.symbol);
+    const initialMarketRead = await this.measureMarketPrice(marketClient, signal.symbol);
+    const marketPrice = initialMarketRead.price;
     const entryPrice = !forceMarketEntry && signal.entry?.type === 'LIMIT' && Number.isFinite(referenceEntryPrice) && referenceEntryPrice > 0
       ? referenceEntryPrice
       : marketPrice;
@@ -1031,9 +1040,10 @@ export class FuturesTrader {
     const sizing = await this.resolveOrderSizing({ client, signal, config });
     const notional = sizing.notional;
     const exposure = notional * leverage;
-    const preOrderMarketPrice = forceMarketEntry
-      ? await this.fetchMarketPrice(marketClient, signal.symbol)
-      : marketPrice;
+    const preOrderMarketRead = forceMarketEntry
+      ? await this.measureMarketPrice(marketClient, signal.symbol)
+      : initialMarketRead;
+    const preOrderMarketPrice = preOrderMarketRead.price;
     const executionEntryPrice = forceMarketEntry ? preOrderMarketPrice : entryPrice;
     const preOrderStopValidation = validateStopLossAgainstMarket(signal, executionEntryPrice);
     const costGuard = buildCostGuard({
@@ -1127,13 +1137,25 @@ export class FuturesTrader {
       })
     });
     const test = config.mode === 'test';
+    const topOfBook = this.captureMarketQuote(signal.symbol);
+    const orderRequestStartedAtMs = Date.now();
     let response;
+    let orderRequestCompletedAtMs;
     try {
       response = await client.placeOrder(order, { test });
+      orderRequestCompletedAtMs = Date.now();
       if (!test) {
         this.clearOpenOrdersCacheForConfig(config);
       }
     } catch (error) {
+      orderRequestCompletedAtMs = Date.now();
+      const executionTelemetry = buildEntryExecutionTelemetry({
+        initialMarketRead,
+        preOrderMarketRead,
+        topOfBook,
+        orderRequestStartedAtMs,
+        orderRequestCompletedAtMs
+      });
       if (isExchangeStopPriceInvalid(error)) {
         return this.emitTrade({
           ...baseEvent,
@@ -1146,11 +1168,20 @@ export class FuturesTrader {
           referenceEntryPrice,
           executionEntryType: order.type,
           costGuard,
-          netEntryFilter
+          netEntryFilter,
+          executionTelemetry
         });
       }
+      error.executionTelemetry = executionTelemetry;
       throw error;
     }
+    const executionTelemetry = buildEntryExecutionTelemetry({
+      initialMarketRead,
+      preOrderMarketRead,
+      topOfBook,
+      orderRequestStartedAtMs,
+      orderRequestCompletedAtMs
+    });
     const paperPosition = test && this.paperStore
       ? await this.paperStore.openPosition({ signal: executionSignal, post, phase, order, response, entryPrice: executionEntryPrice, quantity, leverage, notional, exposure })
       : null;
@@ -1168,6 +1199,7 @@ export class FuturesTrader {
       executionEntryType: order.type,
       costGuard,
       netEntryFilter,
+      executionTelemetry,
       vstReserve,
       paperPosition,
       bingx
@@ -1223,6 +1255,29 @@ export class FuturesTrader {
       throw new Error(`no_market_price:${symbol}`);
     }
     return price;
+  }
+
+  async measureMarketPrice(client, symbol) {
+    const requestedAtMs = Date.now();
+    const price = await this.fetchMarketPrice(client, symbol);
+    const receivedAtMs = Date.now();
+    return {
+      price,
+      requestedAt: new Date(requestedAtMs).toISOString(),
+      receivedAt: new Date(receivedAtMs).toISOString(),
+      roundTripMs: Math.max(0, receivedAtMs - requestedAtMs)
+    };
+  }
+
+  captureMarketQuote(symbol) {
+    try {
+      return compactMarketQuote(this.marketQuoteSnapshot?.(symbol));
+    } catch (error) {
+      return {
+        available: false,
+        reason: `quote_provider_error:${error.message}`
+      };
+    }
   }
 
   async resolveOrderSizing({ client, signal, config }) {
@@ -1847,7 +1902,8 @@ export class FuturesTrader {
         signal
       }),
       status: 'error',
-      reason: error.message
+      reason: error.message,
+      executionTelemetry: error.executionTelemetry || null
     });
     this.log(`BingX ${modePrefix(config)} ${signal.symbol || 'senal'}: ${error.message}`, 'error');
     return failed;
@@ -1865,6 +1921,70 @@ export class FuturesTrader {
       at: new Date().toISOString()
     });
   }
+}
+
+function buildEntryExecutionTelemetry({
+  initialMarketRead,
+  preOrderMarketRead,
+  topOfBook,
+  orderRequestStartedAtMs,
+  orderRequestCompletedAtMs
+}) {
+  return {
+    schemaVersion: 1,
+    mode: 'observational_only',
+    initialMarketRead: compactMarketRead(initialMarketRead),
+    preOrderMarketRead: compactMarketRead(preOrderMarketRead),
+    topOfBook: topOfBook || { available: false, reason: 'quote_unavailable' },
+    orderRequest: {
+      startedAt: new Date(orderRequestStartedAtMs).toISOString(),
+      completedAt: new Date(orderRequestCompletedAtMs).toISOString(),
+      roundTripMs: Math.max(0, orderRequestCompletedAtMs - orderRequestStartedAtMs)
+    }
+  };
+}
+
+function compactMarketRead(read) {
+  return {
+    price: telemetryNumber(read?.price),
+    requestedAt: read?.requestedAt || null,
+    receivedAt: read?.receivedAt || null,
+    roundTripMs: telemetryNumber(read?.roundTripMs)
+  };
+}
+
+function compactMarketQuote(quote) {
+  if (!quote) {
+    return { available: false, reason: 'quote_unavailable' };
+  }
+  const bidPrice = telemetryNumber(quote.bidPrice);
+  const askPrice = telemetryNumber(quote.askPrice);
+  const stale = Boolean(quote.stale);
+  const valid = bidPrice !== null && askPrice !== null && bidPrice > 0 && askPrice >= bidPrice;
+  return {
+    available: valid && !stale,
+    reason: !valid ? 'quote_invalid' : stale ? 'quote_stale' : '',
+    symbol: quote.symbol || null,
+    bidPrice,
+    askPrice,
+    bidQuantity: telemetryNumber(quote.bidQuantity),
+    askQuantity: telemetryNumber(quote.askQuantity),
+    midPrice: telemetryNumber(quote.midPrice),
+    spreadAbsolute: telemetryNumber(quote.spreadAbsolute),
+    spreadPercent: telemetryNumber(quote.spreadPercent),
+    receivedAt: quote.receivedAt || null,
+    exchangeAt: quote.exchangeAt || null,
+    ageMs: telemetryNumber(quote.ageMs),
+    stale
+  };
+}
+
+function telemetryNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function validateSignal(signal, config) {

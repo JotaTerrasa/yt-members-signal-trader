@@ -809,6 +809,12 @@ function renderEntryDiagnosisLines(diagnosis) {
     `- Mezcla por posición del paquete: ${signedPercentPoints(mix.compositionEffect)}; cambio dentro de cada posición: ${signedPercentPoints(mix.withinGroupEffect)}; variación observada: ${signedPercentPoints(mix.observedDelta)}.`,
     `- Proporción descriptiva asociada a la mezcla por posición: ${percent(mix.compositionSharePercent)}. Este desglose no se suma al desglose por activo.`
   ] : [];
+  const microstructure = diagnosis.prospectiveMicrostructure || {};
+  const microstructureLines = [
+    `- Cobertura bid/ask prospectiva: ${microstructure.topOfBookMeasured || 0}/${diagnosis.summary.currentOpenings || 0} aperturas; ${microstructure.staleQuotes || 0} instantáneas caducadas.`,
+    `- Spread medio observado: ${percent(microstructure.spread?.averagePercent)}; last a precio ejecutable ${percent(microstructure.lastToExecutable?.averageAdversePercent)}; precio ejecutable a fill ${percent(microstructure.executableToFill?.averageAdversePercent)}.`,
+    `- RTT local medio: ticker ${milliseconds(microstructure.tickerRoundTripMs?.average)}; orden ${milliseconds(microstructure.orderRequestRoundTripMs?.average)}; antigüedad mediana de la cotización ${milliseconds(microstructure.quoteAgeMs?.median)}.`
+  ];
   return [
     `- Diagnóstico de entrada: ${withFinalPeriod(diagnosis.summary.label)} ${withFinalPeriod(diagnosis.summary.detail)}`.trim(),
     '- Descomposición por fase:',
@@ -819,6 +825,8 @@ function renderEntryDiagnosisLines(diagnosis) {
     ...routeLines,
     '- Tiempo observado hasta el fill:',
     ...timingLines,
+    '- Microestructura prospectiva (solo aperturas nuevas):',
+    ...microstructureLines,
     '- Comparación por posición dentro del paquete:',
     ...packageLines,
     ...mixLines,
@@ -1027,6 +1035,17 @@ function seconds(value) {
   return Number.isFinite(number) ? `${number.toFixed(number < 10 ? 2 : 1)} s` : 'sin datos';
 }
 
+function milliseconds(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'sin datos';
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(0)} ms` : 'sin datos';
+}
+
 function percent(value) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : '-';
+  if (value === null || value === undefined || value === '') {
+    return 'sin datos';
+  }
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : 'sin datos';
 }

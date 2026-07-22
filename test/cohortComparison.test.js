@@ -148,7 +148,7 @@ test('no construye un contraste sin una cohorte anterior completa', () => {
 });
 
 test('explica dónde se concentra el deterioro de entrada sin culpar automáticamente a los reintentos', () => {
-  const analysis = ({ signalStage, fillStage, symbols, routes, slots, openings, above, reaction, attemptToFill }) => ({
+  const analysis = ({ signalStage, fillStage, symbols, routes, slots, openings, above, reaction, attemptToFill, microstructure = null }) => ({
     tolerancePercent: 0.15,
     timezone: 'Europe/Madrid',
     totals: {
@@ -162,7 +162,8 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
         p95Seconds: reaction + attemptToFill,
         reaction: { averageSeconds: reaction },
         attemptToFill: { averageSeconds: attemptToFill }
-      }
+      },
+      microstructure
     },
     bySymbol: symbols,
     byRoute: routes,
@@ -197,6 +198,14 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
     above: 5,
     reaction: 1.5,
     attemptToFill: 2.1,
+    microstructure: {
+      instrumented: 3,
+      topOfBookMeasured: 3,
+      spread: { measured: 3, averagePercent: 0.02 },
+      lastToExecutable: { measured: 3, averageAdversePercent: 0.01 },
+      executableToFill: { measured: 3, averageAdversePercent: 0.03 },
+      orderRequestRoundTripMs: { count: 3, average: 180 }
+    },
     symbols: [
       { key: 'SOL-USDT', label: 'SOL-USDT', openings: 4, measured: 4, averageAdversePercent: 0.25, aboveTolerancePercent: 100, latency: {} },
       { key: 'BTC-USDT', label: 'BTC-USDT', openings: 4, measured: 4, averageAdversePercent: 0.04, aboveTolerancePercent: 25, latency: {} }
@@ -236,4 +245,6 @@ test('explica dónde se concentra el deterioro de entrada sin culpar automática
   assert.equal(comparison.entryDiagnosis.mixAnalysis.byPackageSlot.observedDelta, 0.0625);
   assert.equal(comparison.entryDiagnosis.mixAnalysis.byPackageSlot.compositionSharePercent, 10);
   assert.equal(comparison.entryDiagnosis.timing.attemptToFillAverageSeconds.current, 2.1);
+  assert.equal(comparison.entryDiagnosis.prospectiveMicrostructure.topOfBookMeasured, 3);
+  assert.equal(comparison.entryDiagnosis.prospectiveMicrostructure.orderRequestRoundTripMs.average, 180);
 });

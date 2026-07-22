@@ -70,6 +70,7 @@ const CLOSE_GUARD_RETRY_INTERVAL_MS = 15_000;
 const CLOSE_GUARD_RETRY_MAX_AGE_MS = 3 * 60 * 1000;
 const CLOSE_GUARD_RETRY_MAX_ATTEMPTS = 12;
 const SIGNAL_COVERAGE_CHECK_MS = 60_000;
+const ENTRY_QUOTE_WATCH_MS = 10 * 60 * 1000;
 
 await mkdir(dataDir, { recursive: true });
 await mkdir(profileDir, { recursive: true });
@@ -105,6 +106,8 @@ const futuresTrader = new FuturesTrader({
   configStore,
   paperStore,
   tradeEventStore,
+  watchMarketSymbols: (symbols) => watchEntryMarketSymbols(symbols),
+  marketQuoteSnapshot: (symbol) => priceFeed.quoteSnapshot(symbol, { maxAgeMs: 5000 }),
   onLog: (entry) => pushLog(entry),
   onTrade: (event) => {
     pnlSourcesCache = null;
@@ -136,6 +139,8 @@ let lastBackupStatus = {
   lastError: null
 };
 const lastPriceBroadcast = new Map();
+const entryQuoteWatchUntil = new Map();
+let entryQuoteWatchTimer = null;
 let exchangeOpenSymbols = new Set();
 let exchangePositionsCache = [];
 let exchangeBalancesCache = {};
@@ -2736,8 +2741,47 @@ function syncPriceSubscriptions(exchangePositionsOrSymbols) {
   if (Array.isArray(exchangePositionsOrSymbols)) {
     exchangeOpenSymbols = new Set(exchangePositionsOrSymbols.map(positionSymbol).filter(Boolean));
   }
-  priceFeed.setSymbols([...paperStore.openSymbols(), ...exchangeOpenSymbols]);
+  const watchedSymbols = activeEntryQuoteSymbols();
+  priceFeed.setSymbols([...paperStore.openSymbols(), ...exchangeOpenSymbols, ...watchedSymbols]);
   state.priceFeed = priceFeed.status();
+  scheduleEntryQuoteWatchCleanup();
+}
+
+function watchEntryMarketSymbols(symbols = []) {
+  const expiresAt = Date.now() + ENTRY_QUOTE_WATCH_MS;
+  for (const value of symbols) {
+    const symbol = positionSymbol(value);
+    if (symbol) {
+      entryQuoteWatchUntil.set(symbol, expiresAt);
+    }
+  }
+  syncPriceSubscriptions();
+}
+
+function activeEntryQuoteSymbols() {
+  const now = Date.now();
+  for (const [symbol, expiresAt] of entryQuoteWatchUntil) {
+    if (Number(expiresAt) <= now) {
+      entryQuoteWatchUntil.delete(symbol);
+    }
+  }
+  return [...entryQuoteWatchUntil.keys()];
+}
+
+function scheduleEntryQuoteWatchCleanup() {
+  if (entryQuoteWatchTimer) {
+    clearTimeout(entryQuoteWatchTimer);
+    entryQuoteWatchTimer = null;
+  }
+  const nextExpiry = Math.min(...entryQuoteWatchUntil.values());
+  if (!Number.isFinite(nextExpiry)) {
+    return;
+  }
+  entryQuoteWatchTimer = setTimeout(() => {
+    entryQuoteWatchTimer = null;
+    syncPriceSubscriptions();
+  }, Math.max(50, nextExpiry - Date.now() + 50));
+  entryQuoteWatchTimer.unref();
 }
 
 async function syncExchangePositions({ reason = 'poll' } = {}) {
@@ -4782,6 +4826,7 @@ function replicaAuditRow({
       signalEntry: auditRound(entryReference?.price),
       signalClose: auditRound(closeReference?.price),
       preOrderMarket: auditRound(preOrderMarket),
+      entryTelemetry: auditEntryTelemetry(opening?.executionTelemetry),
       closeTarget: auditRound(closeTarget),
       preCloseMarket: auditRound(preCloseMarket),
       stopLoss: auditRound(stopLoss),
@@ -5353,6 +5398,47 @@ function auditRound(value) {
   return value == null || !Number.isFinite(Number(value)) ? null : roundMoney(value);
 }
 
+function auditEntryTelemetry(telemetry) {
+  if (!telemetry || typeof telemetry !== 'object') {
+    return null;
+  }
+  const marketRead = (read) => read && typeof read === 'object' ? {
+    price: auditRound(read.price),
+    requestedAt: read.requestedAt || null,
+    receivedAt: read.receivedAt || null,
+    roundTripMs: auditRound(read.roundTripMs)
+  } : null;
+  const quote = telemetry.topOfBook && typeof telemetry.topOfBook === 'object'
+    ? {
+        available: Boolean(telemetry.topOfBook.available),
+        reason: telemetry.topOfBook.reason || '',
+        bidPrice: auditRound(telemetry.topOfBook.bidPrice),
+        askPrice: auditRound(telemetry.topOfBook.askPrice),
+        bidQuantity: auditRound(telemetry.topOfBook.bidQuantity),
+        askQuantity: auditRound(telemetry.topOfBook.askQuantity),
+        midPrice: auditRound(telemetry.topOfBook.midPrice),
+        spreadAbsolute: auditRound(telemetry.topOfBook.spreadAbsolute),
+        spreadPercent: auditRound(telemetry.topOfBook.spreadPercent),
+        receivedAt: telemetry.topOfBook.receivedAt || null,
+        exchangeAt: telemetry.topOfBook.exchangeAt || null,
+        ageMs: auditRound(telemetry.topOfBook.ageMs),
+        stale: Boolean(telemetry.topOfBook.stale)
+      }
+    : null;
+  return {
+    schemaVersion: Number(telemetry.schemaVersion || 1),
+    mode: telemetry.mode || 'observational_only',
+    initialMarketRead: marketRead(telemetry.initialMarketRead),
+    preOrderMarketRead: marketRead(telemetry.preOrderMarketRead),
+    topOfBook: quote,
+    orderRequest: telemetry.orderRequest && typeof telemetry.orderRequest === 'object' ? {
+      startedAt: telemetry.orderRequest.startedAt || null,
+      completedAt: telemetry.orderRequest.completedAt || null,
+      roundTripMs: auditRound(telemetry.orderRequest.roundTripMs)
+    } : null
+  };
+}
+
 function formatMonthLabel(month) {
   const [year, value] = String(month || '').split('-');
   return value && year ? `${value}/${year}` : String(month || '');
@@ -5431,6 +5517,10 @@ async function performShutdown() {
   }
   clients.clear();
   priceFeed.destroy();
+  if (entryQuoteWatchTimer) {
+    clearTimeout(entryQuoteWatchTimer);
+    entryQuoteWatchTimer = null;
+  }
   if (backupTimer) {
     clearInterval(backupTimer);
   }

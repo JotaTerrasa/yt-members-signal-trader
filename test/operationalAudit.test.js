@@ -500,8 +500,8 @@ test('mide reacción y reintentos sin duplicar un mismo cierre', () => {
   assert.equal(summary.closing.total.medianSeconds, 1);
 });
 
-test('localiza la desviación de entrada por fase, activo, paquete y fill sin duplicar aperturas', () => {
-  const row = ({ id, postId, symbol, direction = 'LONG', signal, quote, fill, detectedAt, firstAttemptAt, openingAt, fillAt }) => ({
+test('localiza la desviación de entrada por fase, activo, paquete, microestructura y fill sin duplicar aperturas', () => {
+  const row = ({ id, postId, symbol, direction = 'LONG', signal, quote, fill, detectedAt, firstAttemptAt, openingAt, fillAt, telemetry = null }) => ({
     id,
     symbol,
     direction,
@@ -519,7 +519,8 @@ test('localiza la desviación de entrada por fase, activo, paquete y fill sin du
       openingFirstAttemptAt: firstAttemptAt,
       openingAttemptAt: openingAt,
       openingFillAt: fillAt,
-      openingAt
+      openingAt,
+      entryTelemetry: telemetry
     }
   });
   const btc = row({
@@ -532,7 +533,12 @@ test('localiza la desviación de entrada por fase, activo, paquete y fill sin du
     detectedAt: '2026-07-20T08:00:00.000Z',
     firstAttemptAt: '2026-07-20T08:00:01.000Z',
     openingAt: '2026-07-20T08:00:01.000Z',
-    fillAt: '2026-07-20T08:00:02.000Z'
+    fillAt: '2026-07-20T08:00:02.000Z',
+    telemetry: {
+      preOrderMarketRead: { price: 100.1, roundTripMs: 40 },
+      topOfBook: { available: true, bidPrice: 100.09, askPrice: 100.11, spreadPercent: 0.01998, ageMs: 75 },
+      orderRequest: { startedAt: '2026-07-20T08:00:01.500Z', roundTripMs: 120 }
+    }
   });
   const eth = row({
     id: 'eth-1',
@@ -545,7 +551,12 @@ test('localiza la desviación de entrada por fase, activo, paquete y fill sin du
     detectedAt: '2026-07-20T12:00:00.000Z',
     firstAttemptAt: '2026-07-20T12:00:01.000Z',
     openingAt: '2026-07-20T12:00:01.000Z',
-    fillAt: '2026-07-20T12:00:02.000Z'
+    fillAt: '2026-07-20T12:00:02.000Z',
+    telemetry: {
+      preOrderMarketRead: { price: 99.95, roundTripMs: 50 },
+      topOfBook: { available: true, bidPrice: 99.94, askPrice: 99.96, spreadPercent: 0.02001, ageMs: 125 },
+      orderRequest: { startedAt: '2026-07-20T12:00:01.500Z', roundTripMs: 140 }
+    }
   });
   const sol = row({
     id: 'sol-1',
@@ -575,6 +586,14 @@ test('localiza la desviación de entrada por fase, activo, paquete y fill sin du
   assert.equal(analysis.totals.quoteToFill.measured, 3);
   assert.equal(analysis.totals.latency.exchangeBacked, 3);
   assert.equal(analysis.totals.latency.attemptToFill.medianSeconds, 1);
+  assert.equal(analysis.totals.latency.preparation.measured, 2);
+  assert.equal(analysis.totals.microstructure.instrumented, 2);
+  assert.equal(analysis.totals.microstructure.topOfBookMeasured, 2);
+  assert.equal(analysis.totals.microstructure.spread.measured, 2);
+  assert.equal(analysis.totals.microstructure.lastToExecutable.measured, 2);
+  assert.equal(analysis.totals.microstructure.executableToFill.measured, 2);
+  assert.equal(analysis.totals.microstructure.orderRequestRoundTripMs.average, 130);
+  assert.equal(analysis.totals.microstructure.tickerRoundTripMs.average, 45);
   assert.equal(analysis.timezone, 'Europe/Madrid');
   assert.equal(analysis.exchangeTimestampPrecisionSeconds, 1);
 });

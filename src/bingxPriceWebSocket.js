@@ -5,6 +5,8 @@ import WebSocket from 'ws';
 const DEFAULT_URL = 'wss://open-api-swap.bingx.com/swap-market';
 const MARKET_TYPE = 'BingX Futuros Perpetuo USDⓈ';
 const PRICE_CHANNEL = 'lastPrice';
+const QUOTE_CHANNEL = 'bookTicker';
+const MARKET_CHANNELS = [PRICE_CHANNEL, QUOTE_CHANNEL];
 const RECONNECT_MS = 3000;
 const STALE_MS = 45000;
 
@@ -16,6 +18,7 @@ export class BingXPriceWebSocket extends EventEmitter {
     this.ws = null;
     this.symbols = new Set();
     this.prices = new Map();
+    this.quotes = new Map();
     this.connected = false;
     this.connecting = false;
     this.lastMessageAt = null;
@@ -38,6 +41,7 @@ export class BingXPriceWebSocket extends EventEmitter {
 
     for (const symbol of removed) {
       this.prices.delete(symbol);
+      this.quotes.delete(symbol);
       this.unsubscribe(symbol);
     }
 
@@ -65,8 +69,10 @@ export class BingXPriceWebSocket extends EventEmitter {
       connecting: this.connecting,
       symbols: [...this.symbols].sort(),
       prices: [...this.prices.values()].sort((a, b) => a.symbol.localeCompare(b.symbol)),
+      quotes: [...this.quotes.values()].sort((a, b) => a.symbol.localeCompare(b.symbol)),
       marketType: MARKET_TYPE,
       channel: PRICE_CHANNEL,
+      channels: [...MARKET_CHANNELS],
       lastMessageAt: this.lastMessageAt,
       lastConnectAt: this.lastConnectAt,
       lastError: this.lastError,
@@ -143,19 +149,37 @@ export class BingXPriceWebSocket extends EventEmitter {
   }
 
   subscribe(symbol) {
-    this.send({
-      id: `sub-${symbol}-${Date.now()}`,
-      reqType: 'sub',
-      dataType: `${symbol}@${PRICE_CHANNEL}`
-    });
+    for (const channel of MARKET_CHANNELS) {
+      this.send({
+        id: `sub-${symbol}-${channel}-${Date.now()}`,
+        reqType: 'sub',
+        dataType: `${symbol}@${channel}`
+      });
+    }
   }
 
   unsubscribe(symbol) {
-    this.send({
-      id: `unsub-${symbol}-${Date.now()}`,
-      reqType: 'unsub',
-      dataType: `${symbol}@${PRICE_CHANNEL}`
-    });
+    for (const channel of MARKET_CHANNELS) {
+      this.send({
+        id: `unsub-${symbol}-${channel}-${Date.now()}`,
+        reqType: 'unsub',
+        dataType: `${symbol}@${channel}`
+      });
+    }
+  }
+
+  quoteSnapshot(symbol, { maxAgeMs = 5000 } = {}) {
+    const quote = this.quotes.get(normalizeSymbol(symbol));
+    if (!quote) {
+      return null;
+    }
+    const receivedAtMs = Date.parse(quote.receivedAt || quote.at || '');
+    const ageMs = Number.isFinite(receivedAtMs) ? Math.max(0, Date.now() - receivedAtMs) : null;
+    return {
+      ...quote,
+      ageMs,
+      stale: ageMs === null || ageMs > Math.max(0, Number(maxAgeMs) || 0)
+    };
   }
 
   send(payload) {
@@ -192,6 +216,25 @@ export class BingXPriceWebSocket extends EventEmitter {
     if (message.ping || message.Ping) {
       this.send(message.ping ? { pong: message.ping } : 'Pong');
       this.emitStatus();
+      return;
+    }
+
+    if (messageChannel(message) === QUOTE_CHANNEL) {
+      const quotes = extractQuotes(message);
+      for (const quote of quotes) {
+        if (!this.symbols.has(quote.symbol)) {
+          continue;
+        }
+        const normalizedQuote = {
+          ...quote,
+          source: 'bingx_ws',
+          marketType: MARKET_TYPE,
+          channel: QUOTE_CHANNEL,
+          receivedAt: this.lastMessageAt
+        };
+        this.quotes.set(quote.symbol, normalizedQuote);
+        this.emit('quote', normalizedQuote);
+      }
       return;
     }
 
@@ -274,6 +317,40 @@ function decodeMessage(raw) {
   }
 }
 
+function extractQuotes(message) {
+  const defaultSymbol = symbolFromChannel(message.dataType || message.stream || message.topic || message.channel);
+  const payload = message.data ?? message.tick ?? message;
+  const rows = Array.isArray(payload) ? payload : [payload];
+
+  return rows
+    .map((row) => {
+      const symbol = normalizeSymbol(row?.symbol || row?.s || row?.pair || defaultSymbol);
+      const bidPrice = firstFiniteNumber(row?.bidPrice, row?.bid, row?.b);
+      const askPrice = firstFiniteNumber(row?.askPrice, row?.ask, row?.a);
+      const bidQuantity = firstFiniteNumber(row?.bidQuantity, row?.bidQty, row?.B);
+      const askQuantity = firstFiniteNumber(row?.askQuantity, row?.askQty, row?.A);
+      if (!symbol || !Number.isFinite(bidPrice) || !Number.isFinite(askPrice) || bidPrice <= 0 || askPrice < bidPrice) {
+        return null;
+      }
+      const midPrice = (bidPrice + askPrice) / 2;
+      const exchangeTimestamp = firstFiniteNumber(row?.T, row?.time, row?.timestamp, message?.T);
+      return {
+        symbol,
+        bidPrice,
+        askPrice,
+        bidQuantity: Number.isFinite(bidQuantity) ? bidQuantity : null,
+        askQuantity: Number.isFinite(askQuantity) ? askQuantity : null,
+        midPrice,
+        spreadAbsolute: askPrice - bidPrice,
+        spreadPercent: midPrice > 0 ? ((askPrice - bidPrice) / midPrice) * 100 : null,
+        exchangeAt: Number.isFinite(exchangeTimestamp) && exchangeTimestamp > 0
+          ? new Date(exchangeTimestamp).toISOString()
+          : null
+      };
+    })
+    .filter(Boolean);
+}
+
 function extractTicks(message) {
   const defaultSymbol = symbolFromChannel(message.dataType || message.stream || message.topic || message.channel);
   const payload = message.data ?? message.tick ?? message;
@@ -310,6 +387,11 @@ function firstFiniteNumber(...values) {
     }
   }
   return NaN;
+}
+
+function messageChannel(message) {
+  const channel = String(message?.dataType || message?.stream || message?.topic || message?.channel || '').toLowerCase();
+  return channel.includes(QUOTE_CHANNEL.toLowerCase()) ? QUOTE_CHANNEL : PRICE_CHANNEL;
 }
 
 function symbolFromChannel(channel) {

@@ -5096,6 +5096,46 @@ function renderEntryDiagnosis(diagnosis) {
       <small>${escapeHtml(`${formatOptionalPercent(mix.compositionSharePercent)} del aumento queda asociado al cambio de mezcla por posición. Es una descomposición contable, no una prueba causal.`)}</small>
     </div>
   ` : '';
+  const microstructure = diagnosis.prospectiveMicrostructure || {};
+  const microstructureMeasured = Number(microstructure.topOfBookMeasured || 0);
+  const microstructureOpenings = Number(summary.currentOpenings || 0);
+  const microstructurePanel = `
+    <div class="entry-diagnosis-microstructure">
+      <div class="entry-diagnosis-subheading">
+        <strong>Microestructura prospectiva</strong>
+        <span>${escapeHtml(`${microstructureMeasured}/${microstructureOpenings} aperturas con bid/ask fresco`)}</span>
+      </div>
+      <div class="entry-diagnosis-stages entry-diagnosis-micro-grid">
+        <div class="entry-diagnosis-stage">
+          <span>Spread medio</span>
+          <strong>${escapeHtml(formatTelemetryPercent(microstructure.spread?.averagePercent))}</strong>
+          <small>${escapeHtml(`${microstructure.spread?.measured || 0} aperturas medidas`)}</small>
+          <b>Bid/ask de BingX</b>
+        </div>
+        <div class="entry-diagnosis-stage">
+          <span>Último precio a ejecutable</span>
+          <strong>${escapeHtml(formatTelemetryPercent(microstructure.lastToExecutable?.averageAdversePercent))}</strong>
+          <small>Ask para LONG; bid para SHORT</small>
+          <b>Coste previo al envío</b>
+        </div>
+        <div class="entry-diagnosis-stage">
+          <span>Ejecutable a fill</span>
+          <strong>${escapeHtml(formatTelemetryPercent(microstructure.executableToFill?.averageAdversePercent))}</strong>
+          <small>Movimiento posterior a la instantánea</small>
+          <b>Sin alterar la orden</b>
+        </div>
+        <div class="entry-diagnosis-stage">
+          <span>RTT de la orden</span>
+          <strong>${escapeHtml(formatTelemetryMilliseconds(microstructure.orderRequestRoundTripMs?.average))}</strong>
+          <small>${escapeHtml(`Antigüedad mediana: ${formatTelemetryMilliseconds(microstructure.quoteAgeMs?.median)}`)}</small>
+          <b>Reloj local preciso</b>
+        </div>
+      </div>
+      <p>${escapeHtml(microstructureMeasured
+        ? 'Esta muestra separa spread, movimiento hasta el precio ejecutable y movimiento posterior hasta el fill.'
+        : 'La captura ya está preparada. Los históricos anteriores no contienen bid/ask; la lectura empezará con la próxima apertura.')}</p>
+    </div>
+  `;
 
   return `
     <section class="entry-diagnosis" aria-labelledby="entry-diagnosis-title">
@@ -5116,6 +5156,7 @@ function renderEntryDiagnosis(diagnosis) {
         <span>La hora del histórico firmado de BingX tiene precisión de un segundo</span>
       </div>
       <div class="entry-diagnosis-stages entry-diagnosis-timing">${timingCards}</div>
+      ${microstructurePanel}
       ${mixPanel}
       <div class="entry-diagnosis-subheading">
         <strong>Comparación por activo</strong>
@@ -5161,6 +5202,24 @@ function formatSignedSeconds(value) {
     return '-';
   }
   return `${number > 0 ? '+' : ''}${number.toLocaleString('es-ES', { maximumFractionDigits: 2 })} s`;
+}
+
+function formatTelemetryMilliseconds(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'Sin datos';
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return 'Sin datos';
+  }
+  return `${number.toLocaleString('es-ES', { maximumFractionDigits: 0 })} ms`;
+}
+
+function formatTelemetryPercent(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'Sin datos';
+  }
+  return formatCohortPercent(value);
 }
 
 function renderCohortPeriod(label, period = {}) {

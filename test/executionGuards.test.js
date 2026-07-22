@@ -251,6 +251,7 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
   let externalFunding = 0;
   const adjustments = [];
   const orders = [];
+  const watchedPackages = [];
   const prices = {
     'BTC-USDT': 64010,
     'ETH-USDT': 1816,
@@ -312,7 +313,19 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
       }
     },
     paperStore: null,
-    tradeEventStore: { countOpeningExecutions: () => 0 }
+    tradeEventStore: { countOpeningExecutions: () => 0 },
+    watchMarketSymbols: (symbols) => watchedPackages.push(symbols),
+    marketQuoteSnapshot: (symbol) => ({
+      symbol,
+      bidPrice: prices[symbol] - 0.01,
+      askPrice: prices[symbol] + 0.01,
+      midPrice: prices[symbol],
+      spreadAbsolute: 0.02,
+      spreadPercent: 0.001,
+      receivedAt: new Date().toISOString(),
+      ageMs: 5,
+      stale: false
+    })
   });
   trader.client = () => client;
   trader.marketClient = () => ({});
@@ -353,6 +366,10 @@ test('un paquete de tres aperturas comparte un único preflight de reserva VST',
   assert.deepEqual(adjustments, [{ amount: 360, adjustType: 0 }]);
   assert.equal(externalFunding, 360);
   assert.equal(available, 365);
+  assert.deepEqual(watchedPackages, [['BTC-USDT', 'ETH-USDT', 'SOL-USDT']]);
+  assert.ok(results.every((event) => event.executionTelemetry?.mode === 'observational_only'));
+  assert.ok(results.every((event) => event.executionTelemetry?.topOfBook?.available === true));
+  assert.ok(results.every((event) => event.executionTelemetry?.orderRequest?.roundTripMs >= 0));
 });
 
 test('una modificación de SL en Demo VST usa último precio', async () => {
