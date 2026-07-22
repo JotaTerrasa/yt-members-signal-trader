@@ -25,7 +25,7 @@ import { closeAdverseDeviationPercent, entryAdverseDeviationPercent, resolveClos
 import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js';
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
-import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from './operationalAudit.js';
+import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { formatSseEvent, formatSseRetry } from './sseTransport.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
@@ -5377,9 +5377,12 @@ function summarizeReplicaAudit({
     totals[row.cause] = (totals[row.cause] || 0) + 1;
     return totals;
   }, {});
+  const pairedOutcomeAnalysis = summarizePairedOutcomes(rows);
   const signAnalysis = {
-    marketMismatch: Number(issueCounts['Signo distinto de mercado'] || 0),
-    costFlip: Number(issueCounts['Ganancia absorbida por costes'] || 0)
+    marketMismatch: pairedOutcomeAnalysis.grossSignMismatch,
+    costFlip: pairedOutcomeAnalysis.costFlip,
+    netMismatch: pairedOutcomeAnalysis.netSignMismatch,
+    pairedRows: pairedOutcomeAnalysis.rows
   };
   const fillQuality = summarizeReplicaFillQuality(rows);
   const gapBridge = buildReplicaGapBridge({ rows, bingxFees, bingxFunding });
@@ -5446,6 +5449,7 @@ function summarizeReplicaAudit({
     startingCapital: reference?.startingCapital ?? null,
     equity: reference?.equity ?? null,
     issueCounts,
+    pairedOutcomeAnalysis,
     signAnalysis,
     fillQuality,
     orderHistoryEvidence,

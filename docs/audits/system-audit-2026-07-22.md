@@ -1,16 +1,17 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-22T20:30:04.765Z
+Generada: 2026-07-22T20:53:51.252Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T20:30:05.193Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T20:53:51.845Z
 
 ## Resumen ejecutivo
 
 - **HIGH · entry_chasing:** 82 entradas superaron el 0,15% de desviación adversa.
 - **HIGH · close_slippage:** 52 cierres superaron el 0,15% de desviación adversa.
 - **HIGH · fees_dominate:** Las comisiones acumuladas superan el PnL bruto de BingX.
-- **HIGH · market_sign_mismatch:** 7 operaciones terminaron con signo bruto contrario a la hoja; no se explican solo por comisiones.
+- **HIGH · market_sign_mismatch:** 16 operaciones terminaron con signo bruto contrario a la hoja; no se explican solo por comisiones.
 - **HIGH · profit_absorbed_by_costs:** 6 operaciones coincidieron con la hoja en bruto, pero comisiones y funding convirtieron la ganancia VST en pérdida neta.
+- **HIGH · paired_win_rate_gap:** Sobre las mismas 159 operaciones cerradas, la hoja gana el 74.84% y BingX VST neto el 61.64%; la brecha es de -13.2075 puntos y 21 resultados cambian de signo.
 - **INFO · historical_close_incidents_isolated:** 7 operaciones están asociadas a incidencias históricas ya corregidas, con un gap observado de -107.3859 VST; no se interpreta como contrafactual recuperable.
 - **INFO · openings_recovered_from_exchange:** 3 aperturas ausentes en los eventos locales fueron recuperadas desde BingX.
 - **HIGH · sheet_operations_missing:** 18 operaciones de la hoja no tienen apertura VST emparejada. Motivos: 5 stop inválido, 9 filtro de costes, 3 margen VST insuficiente, 1 desviación de entrada.
@@ -75,7 +76,12 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T20:30:05.193Z
 - Motivos de aperturas ausentes: 5 stop inválido, 9 filtro de costes, 3 margen VST insuficiente, 1 desviación de entrada
 - Publicaciones históricas de cierre sin evento: 1
 - Posiciones afectadas por cierres no procesados: 3
-- Signos distintos por mercado / por costes: 7 / 6
+- Signos distintos por mercado / por costes: 16 / 6
+- Muestra cerrada emparejada: 159 operaciones
+- Win rate hoja / BingX VST neto sobre la misma muestra: 74.84% / 61.64%
+- Brecha de win rate VST - hoja: -13.2075 puntos
+- Mismo signo / signo neto distinto: 138 / 21
+- Hoja ganadora y VST perdedora / caso inverso: 21 / 0
 - Ejecuciones de entrada > 0,15%: 82 de 170
 - Ejecuciones de salida > 0,15%: 52 de 113
 - Fuentes de entrada: {"exchange_fill":170,"unavailable":18}
@@ -173,7 +179,11 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T20:30:05.193Z
 - Faltantes con corrección posterior demostrada: 1
 - Motivos de aperturas ausentes: ninguna
 - Cierres históricos sin evento / posiciones afectadas: 0 / 0
-- Signos distintos por mercado / por costes: 2 / 0
+- Signos distintos por mercado / por costes: 3 / 0
+- Muestra cerrada emparejada: 35 operaciones
+- Win rate hoja / BingX VST neto sobre la misma muestra: 68.57% / 62.86%
+- Brecha de win rate VST - hoja: -5.7143 puntos
+- Mismo signo / signo neto distinto: 33 / 2
 - Ejecuciones de entrada / salida > 0,15%: 27 / 10
 - Stops comparables alineados / divergentes: 7 / 0
 - Divergencias precedidas por cierres fallidos: 0
@@ -264,7 +274,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-22T20:30:05.193Z
 - Recarga Telegram: 30 s
 - Puerta de promoción: Bloqueada por fiabilidad
 - Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes
-- Reloj REST BingX: +804 ms de offset; RTT 427 ms; antigüedad 20.2 s; warn; solo observación
+- Reloj REST BingX: +701 ms de offset; RTT 205 ms; antigüedad 166.1 s; warn; solo observación
 
 ## Interpretación
 

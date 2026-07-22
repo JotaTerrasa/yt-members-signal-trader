@@ -31,22 +31,22 @@ La línea base anterior se conserva como referencia histórica. Tras incorporar 
 
 | Métrica | Resultado observado |
 |---|---:|
-| Operaciones de la hoja | 151 |
-| Aperturas VST reconstruidas | 164 |
-| Órdenes de cierre ejecutadas | 160 |
-| Ciclos con fill de cierre exacto | 164/164 |
+| Operaciones de la hoja | 180 |
+| Aperturas VST reconstruidas | 170 |
+| Órdenes de cierre ejecutadas | 165 |
+| Ciclos con fill de cierre exacto | 169/169 |
 | Aperturas recuperadas desde BingX | 3 |
 | Cierres sin apertura enlazada | 0 |
-| PnL teórico escalado de la hoja | +453,8039 VST |
-| PnL bruto de BingX | -65,1177 VST |
+| PnL teórico escalado de la hoja | +540,1042 VST |
+| PnL bruto de BingX | -78,8946 VST |
 | Comisiones | -174,9805 VST |
 | Funding | -4,8178 VST |
-| Neto observado | -244,9160 VST |
+| Neto observado | -258,6929 VST |
 | Devolución acreditada por BingX | 0,0000 VST |
 | Devolución estimada al 22% | +38,4957 VST |
-| Neto con devolución estimada | -206,4203 VST |
+| Neto con devolución estimada | -220,1972 VST |
 
-La auditoría leyó 451 registros del histórico de órdenes. Esa cifra incluye estados no ejecutados y no equivale al número de operaciones cerradas. La evidencia ejecutada relevante son 160 órdenes de cierre, repartidas entre 164 ciclos de apertura pertenecientes a 155 posiciones del exchange. El puente contable y la cadena de precios tienen residual cero.
+La auditoría leyó 465 registros del histórico de órdenes. Esa cifra incluye estados no ejecutados y no equivale al número de operaciones cerradas. La evidencia ejecutada relevante son 165 órdenes de cierre, repartidas entre 169 ciclos cerrados pertenecientes a 160 posiciones del exchange. El puente contable y la cadena de precios tienen residual cero.
 
 ## Lectura desde el frontend
 
@@ -56,27 +56,29 @@ La lectura actual separa tres grupos: filas emparejadas, operaciones realmente a
 
 El frontend resume esta situación inmediatamente debajo de las fuentes de PnL. El bloque `Estado de alineación` muestra filas emparejadas, ausencias, entradas y salidas por encima del 0,15% adverso, costes acumulados y neto de BingX. Distingue una hoja al día, una hoja desactualizada y una última jornada provisional con filas abiertas. En los dos últimos casos separa las operaciones VST que todavía quedan fuera de cobertura. Es una lectura informativa y no activa filtros ni cambia la ejecución.
 
-Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio hay **21 ausencias**: 18 tienen evidencia concreta, repartida entre cinco stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada; tres continúan sin explicación demostrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
+El win rate ya no compara universos distintos. En el corte del 22 de julio hay **159 pares cerrados con resultado en ambos lados**: Google Sheet registra 119 ganadoras (**74,8%**) y BingX VST neto registra 98 (**61,6%**). La brecha comparable es de **-13,2 puntos porcentuales**. En 138 pares coincide el signo neto y en 21 cambia; los pares abiertos, las operaciones ausentes y las que todavía no tienen resultado de hoja permanecen visibles en sus contadores, pero no entran en estos porcentajes.
 
-La auditoría distingue ahora el precio publicado del precio real de ejecución. Para la entrada utiliza el `avgPrice` confirmado por BingX, no la instantánea tomada antes de enviar la orden. Para la salida usa prioritariamente el `avgPrice` del histórico firmado de órdenes. En este corte reconstruye **167 aperturas**: 164 tenían evento local y tres fueron recuperadas directamente desde BingX. Los **164 ciclos cerrados** tienen fill exacto y no queda ningún cierre huérfano. De las señales con referencia comparable, 80 entradas y 51 salidas superaron el 0,15% de desviación adversa; las medias fueron del 0,1382% y del 0,1473%, respectivamente.
+Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio hay **18 ausencias**, todas con evidencia concreta: cinco stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
 
-El panel incorpora además un puente contable que reconcilia la réplica teórica con el neto observado. Parte de **453,8039 VST**, resta 511,3919 VST por la diferencia de las 133 operaciones emparejadas, resta 52,5824 VST por 18 operaciones no ejecutadas, suma 39,0905 VST de 25 operaciones posteriores a la cobertura de la hoja, suma 5,9621 VST de seis extras y resta 179,7983 VST de comisiones y funding. Los cierres sin apertura enlazada aportan exactamente **0 VST**. El resultado es **-244,9160 VST**, con residual contable cero. La hoja pública contiene 151 operaciones y termina el 15 de julio; por ello las 25 posteriores se muestran como `Posteriores sin hoja`, no como una contradicción de estrategia.
+La auditoría distingue ahora el precio publicado del precio real de ejecución. Para la entrada utiliza el `avgPrice` confirmado por BingX, no la instantánea tomada antes de enviar la orden. Para la salida usa prioritariamente el `avgPrice` del histórico firmado de órdenes. En este corte reconstruye **170 aperturas**: 167 tenían evento local y tres fueron recuperadas directamente desde BingX. Los **169 ciclos cerrados** tienen fill exacto y no queda ningún cierre huérfano. De las ejecuciones medibles, 82 entradas y 52 salidas superaron el 0,15% de desviación adversa; las medias fueron del 0,1381% y del 0,1481%, respectivamente.
 
-La bolsa de operaciones emparejadas también se descompone de forma exacta. Sus **401,2215 VST** teóricos pasan a **-110,1704 VST** brutos en BingX: la diferencia de entrada aporta **-193,2173 VST**, la diferencia de salida **-317,8238 VST** y cantidad, redondeos y fills residuales **-0,3508 VST**. La contabilidad publicada de la hoja coincide con el cálculo lineal escalado y no deja diferencia material. La atribución de entrada y salida es simétrica, por lo que ninguna de las dos absorbe artificialmente la interacción entre ambos precios. Este desglose usa las 133 operaciones con precios suficientes y reconcilia con residual cero.
+El panel incorpora además un puente contable que reconcilia la réplica teórica con el neto observado. Parte de **540,1042 VST**, resta 558,1973 VST por la diferencia de las 159 operaciones emparejadas y 52,5824 VST por 18 operaciones no ejecutadas. Después suma 14,4951 VST de tres resultados pendientes en la hoja, resta 28,2720 VST de tres operaciones todavía fuera de cobertura, suma 5,5578 VST de cinco extras históricos y resta 179,7983 VST de comisiones y funding. Los cierres sin apertura enlazada aportan exactamente **0 VST**. El resultado es **-258,6929 VST**, con residual contable cero. La última jornada de la hoja sigue provisional porque conserva tres filas abiertas; esas operaciones se muestran como pendientes y no como contradicciones de estrategia.
 
-Por activo, el gap emparejado es **-192,6657 VST en ETH**, **-180,3997 VST en SOL**, **-109,3859 VST en BTC** y **-28,9407 VST en SUI**. Esta medición es anterior a comisiones: demuestra que el principal desalineamiento histórico está en los precios de entrada y, sobre todo, de salida; los costes se añaden después como una pérdida separada.
+La bolsa de operaciones emparejadas también se descompone de forma exacta. Sus **487,5218 VST** teóricos pasan a **-70,6756 VST** brutos en BingX: la diferencia de entrada aporta **-256,1414 VST**, la diferencia de salida **-301,6238 VST** y cantidad, redondeos y fills residuales **-0,4322 VST**. La contabilidad publicada de la hoja coincide con el cálculo lineal escalado y no deja diferencia material. La atribución de entrada y salida es simétrica, por lo que ninguna de las dos absorbe artificialmente la interacción entre ambos precios. Este desglose usa las 159 operaciones con precios suficientes y reconcilia con residual cero.
 
-La nueva clasificación causal separa lo ocurrido antes de cada fill de cierre. De las 133 operaciones emparejadas, **117** siguieron una ruta observada ordinaria: 80 cierres explícitos y 37 stops sin una incidencia de cierre anterior. Su gap conjunto es **-376,3545 VST**, repartido principalmente entre entrada (**-177,9691 VST**) y salida (**-206,0422 VST**). Otras **siete** operaciones están asociadas a incidencias históricas ya corregidas: tres cierres que no generaron evento y cuatro posiciones afectadas por el error del guard de cierre. Su gap observado es **-107,3859 VST**, con **-93,1546 VST** atribuibles a la salida. Siete operaciones adicionales cerraron después de reintentos protegidos y aportan **-26,0973 VST**; dos fills exactos carecen de una señal local enlazada y aportan **-1,5542 VST**. Las cuatro familias suman exactamente **-511,3919 VST**, con residual cero.
+Por activo, el gap emparejado es **-212,3036 VST en SOL**, **-204,0369 VST en ETH**, **-112,9161 VST en BTC** y **-28,9407 VST en SUI**. Esta medición es anterior a comisiones: demuestra que el principal desalineamiento histórico está en los precios de entrada y de salida; los costes se añaden después como una pérdida separada.
+
+La nueva clasificación causal separa lo ocurrido antes de cada fill de cierre. De las 159 operaciones emparejadas, **143** siguieron una ruta observada ordinaria: 102 cierres explícitos y 41 stops sin una incidencia de cierre anterior. Su gap conjunto es **-423,1600 VST**, repartido principalmente entre entrada (**-240,8932 VST**) y salida (**-189,8422 VST**). Otras **siete** operaciones están asociadas a incidencias históricas ya corregidas: tres cierres que no generaron evento y cuatro posiciones afectadas por el error del guard de cierre. Su gap observado es **-107,3859 VST**, con **-93,1546 VST** atribuibles a la salida. Siete operaciones adicionales cerraron después de reintentos protegidos y aportan **-26,0973 VST**; dos fills exactos carecen de una señal local enlazada y aportan **-1,5542 VST**. Las cuatro familias suman exactamente **-558,1973 VST**, con residual cero.
 
 El gap de una familia no debe interpretarse como beneficio recuperable. La clasificación demuestra asociación temporal y técnica, pero no construye un mercado contrafactual. Su utilidad es separar los defectos históricos del comportamiento vigente y evitar que se atribuyan al parser actual. La cohorte posterior a las mejoras sigue siendo la evidencia válida para evaluar si esos defectos han desaparecido y si la ejecución nueva reduce la diferencia.
 
-La cadena de precios abre ahora esas diferencias en puntos observables. En las entradas, la referencia de la hoja frente a la señal aporta **-0,3768 VST**, el movimiento entre la señal y la cotización previa al envío **-83,5216 VST**, y el tramo entre esa cotización y el fill confirmado **-109,3189 VST**. En las salidas, la diferencia entre el cierre de la hoja y el objetivo conocido por la app aporta **-125,3437 VST**, el movimiento hasta la cotización previa **-7,3427 VST**, el tramo entre cotización y fill **-165,5294 VST**, y nueve salidas sin toda la evidencia intermedia aportan **-19,6080 VST**. Los tramos, junto con **-0,3508 VST** de cantidad y fills, reconstruyen exactamente los **-110,1704 VST** brutos observados.
+La cadena de precios abre ahora esas diferencias en puntos observables. En las entradas, la referencia de la hoja frente a la señal aporta **-28,3553 VST**, el movimiento entre la señal y la cotización previa al envío **-96,3582 VST**, y el tramo entre esa cotización y el fill confirmado **-131,4279 VST**. En las salidas, la diferencia entre el cierre de la hoja y el objetivo conocido por la app aporta **-80,2306 VST**, el movimiento hasta la cotización previa **-1,6459 VST**, el tramo entre cotización y fill **-200,1392 VST**, y nueve salidas sin toda la evidencia intermedia aportan **-19,6080 VST**. Los tramos, junto con **-0,4322 VST** de cantidad y fills, reconstruyen exactamente los **-70,6756 VST** brutos observados.
 
 La cotización previa es una instantánea de `lastPrice` o `markPrice`, no necesariamente el mejor bid/ask ejecutable. Por ello, `cotización → fill` incluye spread, diferencia de base y ejecución del exchange; el panel no lo etiqueta como slippage puro. Esta distinción evita atribuir al scraper un coste que puede proceder del mercado o del entorno VST de BingX.
 
-La latencia también se separa entre reacción inicial y espera por reintentos. En el corte del 22 de julio, las 161 aperturas medibles tuvieron una reacción mediana de **1,652 s** y un p95 de **4,129 s**; sin embargo, 39 esperaron un reintento y elevaron el p95 total a **95,610 s**. Los 108 cierres por señal medibles reaccionaron en una mediana de **0,462 s** y tuvieron un p95 total de **3,412 s**. Por tanto, la demora ordinaria del monitor no aparece como el cuello de botella principal; las esperas largas están concentradas y quedan identificadas como reintentos.
+La latencia también se separa entre reacción inicial y espera por reintentos. En el corte del 22 de julio, las 167 aperturas medibles tuvieron una reacción mediana de **1,655 s** y un p95 de **4,072 s**; sin embargo, 40 esperaron un reintento y elevaron el p95 total a **85,344 s**. Los 111 cierres por señal medibles reaccionaron en una mediana de **0,462 s** y tuvieron un p95 total de **3,412 s**. Por tanto, la demora ordinaria del monitor no aparece como el cuello de botella principal; las esperas largas están concentradas y quedan identificadas como reintentos.
 
-Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. Cuando BingX guardó históricamente un cierre como `exchange_position_closed`, se infiere que fue un stop únicamente si no existe señal de cierre, el PnL es negativo y el precio ejecutado está en el SL o más allá. Con la evidencia exacta hay **32 de 43 stops comparables alineados**, tres con deslizamiento y ocho divergentes. Tres divergencias estuvieron precedidas por el fallo histórico de cierre `CLOSE_GUARD_MIN_NET_PNL is not defined` y tres proceden de la publicación de cierre no procesada; cinco filas divergentes pertenecen a posiciones agregadas. Otros cuatro stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
+Los cierres por stop se comparan por signo y precio antes de considerarse una incidencia. Un stop es `alineado` cuando la hoja y BingX terminan con el mismo signo y el cierre difiere como máximo un 0,15%; un cierre con el mismo signo pero mayor diferencia se clasifica como `Stop con deslizamiento`, y solo el signo contrario queda como `Stop antes del cierre`. Cuando BingX guardó históricamente un cierre como `exchange_position_closed`, se infiere que fue un stop únicamente si no existe señal de cierre, el PnL es negativo y el precio ejecutado está en el SL o más allá. Con la evidencia exacta hay **33 de 47 stops comparables alineados**, seis con deslizamiento y ocho divergentes. Tres divergencias estuvieron precedidas por el fallo histórico de cierre `CLOSE_GUARD_MIN_NET_PNL is not defined` y tres proceden de la publicación de cierre no procesada; cinco filas divergentes pertenecen a posiciones agregadas. Otros dos stops observados no tienen todavía una fila comparable en la hoja y quedan fuera del denominador.
 
 El detalle operación por operación se presenta en una tabla con desplazamiento vertical y horizontal. Los botones de navegación desplazan esa tabla sin modificar la operativa ni los datos de ejecución.
 
@@ -84,25 +86,25 @@ El detalle operación por operación se presenta en una tabla con desplazamiento
 
 ### 1. Entradas perseguidas
 
-La línea base original usaba la instantánea de mercado previa al envío y, por tanto, infravaloraba el deslizamiento. Al reprocesar el mes con el precio ejecutado confirmado por BingX, 145 de 161 entradas fueron adversas y 78 superaron el 0,15%. El arrastre neto estimado de entrada asciende a 162,8521 VST.
+La línea base original usaba la instantánea de mercado previa al envío y, por tanto, infravaloraba el deslizamiento. Al reprocesar el mes con el precio ejecutado confirmado por BingX, 151 de 167 entradas fueron adversas y 82 superaron el 0,15%. El arrastre neto estimado de entrada asciende a 173,2092 VST.
 
 La estimación usa exposición y diferencia de precio. Sirve para medir magnitud, pero no sustituye el PnL oficial de BingX.
 
-El desglose reconciliado frente a los precios finales de la hoja asigna **-193,2173 VST** a la diferencia de entrada en las operaciones emparejadas. Esta cifra no sustituye la métrica de slippage frente al mensaje: responde a una pregunta distinta, cuánto del gap final hoja/BingX queda explicado al cambiar el precio de entrada de la hoja por el fill de BingX.
+El desglose reconciliado frente a los precios finales de la hoja asigna **-256,1414 VST** a la diferencia de entrada en las operaciones emparejadas. Esta cifra no sustituye la métrica de slippage frente al mensaje: responde a una pregunta distinta, cuánto del gap final hoja/BingX queda explicado al cambiar el precio de entrada de la hoja por el fill de BingX.
 
 ### 2. Salidas tardías
 
-La línea base también comparaba la señal de cierre con un precio de marca, no con el precio ejecutado. Con el fill exacto del histórico, 51 de 110 salidas comparables superaron el 0,15% de desviación adversa. El arrastre neto estimado asciende a 171,4931 VST.
+La línea base también comparaba la señal de cierre con un precio de marca, no con el precio ejecutado. Con el fill exacto del histórico, 52 de 113 salidas comparables superaron el 0,15% de desviación adversa. El arrastre neto estimado asciende a 177,4807 VST.
 
 Esperar a que el precio volviera a la cifra escrita añadía una apuesta nueva que no formaba parte de la orden de cierre.
 
-El desglose reconciliado asigna **-317,8238 VST** a la diferencia de salida. Incluye tanto el precio ejecutado al recibir un cierre como las posiciones que alcanzaron un stop antes de que la operación equivalente de la hoja registrara otro resultado. Por eso es mayor que la métrica de slippage de cierres explícitos: mide toda la divergencia final de salida en las operaciones emparejadas.
+El desglose reconciliado asigna **-301,6238 VST** a la diferencia de salida. Incluye tanto el precio ejecutado al recibir un cierre como las posiciones que alcanzaron un stop antes de que la operación equivalente de la hoja registrara otro resultado. Por eso es mayor que la métrica de slippage de cierres explícitos: mide toda la divergencia final de salida en las operaciones emparejadas.
 
 ### 3. Costes
 
 Las comisiones superaron en valor absoluto el PnL bruto. El tamaño de la cuenta no corrige este problema de ROI: al aumentar tamaño, crecen tanto el PnL como las fees.
 
-La auditoría separa cinco operaciones cuyo PnL bruto tuvo signo contrario a la hoja de otras seis que sí coincidieron en bruto, pero acabaron negativas después de comisiones y funding. De este modo, una divergencia de mercado ya no se confunde con una ganancia absorbida por costes.
+La auditoría separa 16 operaciones cuyo PnL bruto tuvo signo contrario a la hoja de otras seis que sí coincidieron en bruto, pero acabaron negativas después de comisiones y funding. De este modo, una divergencia de mercado ya no se confunde con una ganancia absorbida por costes.
 
 ### 4. Operaciones ausentes
 

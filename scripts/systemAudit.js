@@ -84,6 +84,7 @@ const report = {
     aggregatedCycles: summary.aggregatedCycles || 0,
     issueCounts: summary.issueCounts || {},
     signAnalysis: summary.signAnalysis || {},
+    pairedOutcomeAnalysis: summary.pairedOutcomeAnalysis || {},
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
@@ -290,6 +291,15 @@ function buildFindings(report) {
       severity: 'high',
       code: 'profit_absorbed_by_costs',
       detail: `${report.replica.signAnalysis.costFlip} operaciones coincidieron con la hoja en bruto, pero comisiones y funding convirtieron la ganancia VST en pérdida neta.`
+    });
+  }
+  if (Number(report.replica?.pairedOutcomeAnalysis?.rows || 0)
+    && Number(report.replica?.pairedOutcomeAnalysis?.winRateGapPoints || 0) < -5) {
+    const outcomes = report.replica.pairedOutcomeAnalysis;
+    findings.push({
+      severity: 'high',
+      code: 'paired_win_rate_gap',
+      detail: `Sobre las mismas ${outcomes.rows} operaciones cerradas, la hoja gana el ${percent(outcomes.sheetWinRate)} y BingX VST neto el ${percent(outcomes.vstWinRate)}; la brecha es de ${money(outcomes.winRateGapPoints)} puntos y ${outcomes.netSignMismatch} resultados cambian de signo.`
     });
   }
   if (report.replica?.gapBridge?.reconciled === false) {
@@ -563,6 +573,11 @@ function renderMarkdown(report) {
     `- Publicaciones históricas de cierre sin evento: ${r.unprocessedClosePosts ?? 0}`,
     `- Posiciones afectadas por cierres no procesados: ${r.unprocessedCloseRows ?? 0}`,
     `- Signos distintos por mercado / por costes: ${r.signAnalysis?.marketMismatch ?? 0} / ${r.signAnalysis?.costFlip ?? 0}`,
+    `- Muestra cerrada emparejada: ${r.pairedOutcomeAnalysis?.rows ?? 0} operaciones`,
+    `- Win rate hoja / BingX VST neto sobre la misma muestra: ${percent(r.pairedOutcomeAnalysis?.sheetWinRate)} / ${percent(r.pairedOutcomeAnalysis?.vstWinRate)}`,
+    `- Brecha de win rate VST - hoja: ${money(r.pairedOutcomeAnalysis?.winRateGapPoints)} puntos`,
+    `- Mismo signo / signo neto distinto: ${r.pairedOutcomeAnalysis?.sameNetSign ?? 0} / ${r.pairedOutcomeAnalysis?.netSignMismatch ?? 0}`,
+    `- Hoja ganadora y VST perdedora / caso inverso: ${r.pairedOutcomeAnalysis?.sheetWinVstLoss ?? 0} / ${r.pairedOutcomeAnalysis?.sheetLossVstWin ?? 0}`,
     `- Ejecuciones de entrada > 0,15%: ${r.fillQuality?.entryAboveTolerance ?? 0} de ${r.fillQuality?.entryMeasured ?? 0}`,
     `- Ejecuciones de salida > 0,15%: ${r.fillQuality?.closeAboveTolerance ?? 0} de ${r.fillQuality?.closeMeasured ?? 0}`,
     `- Fuentes de entrada: ${JSON.stringify(r.fillQuality?.entrySources || {})}`,
@@ -722,6 +737,7 @@ function pickCohortSummary(summary = {}) {
     commissionRebateDetected: Boolean(summary.commissionRebateDetected),
     issueCounts: summary.issueCounts || {},
     signAnalysis: summary.signAnalysis || {},
+    pairedOutcomeAnalysis: summary.pairedOutcomeAnalysis || {},
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
@@ -759,6 +775,10 @@ function renderCohortLines(cohort, signalCoverage) {
     `- Motivos de aperturas ausentes: ${missingReasonSummary(summary.missingReasonCounts)}`,
     `- Cierres históricos sin evento / posiciones afectadas: ${summary.unprocessedClosePosts || 0} / ${summary.unprocessedCloseRows || 0}`,
     `- Signos distintos por mercado / por costes: ${summary.signAnalysis?.marketMismatch || 0} / ${summary.signAnalysis?.costFlip || 0}`,
+    `- Muestra cerrada emparejada: ${summary.pairedOutcomeAnalysis?.rows || 0} operaciones`,
+    `- Win rate hoja / BingX VST neto sobre la misma muestra: ${percent(summary.pairedOutcomeAnalysis?.sheetWinRate)} / ${percent(summary.pairedOutcomeAnalysis?.vstWinRate)}`,
+    `- Brecha de win rate VST - hoja: ${money(summary.pairedOutcomeAnalysis?.winRateGapPoints)} puntos`,
+    `- Mismo signo / signo neto distinto: ${summary.pairedOutcomeAnalysis?.sameNetSign || 0} / ${summary.pairedOutcomeAnalysis?.netSignMismatch || 0}`,
     `- Ejecuciones de entrada / salida > 0,15%: ${summary.fillQuality?.entryAboveTolerance || 0} / ${summary.fillQuality?.closeAboveTolerance || 0}`,
     `- Stops comparables alineados / divergentes: ${summary.stopAnalysis?.aligned || 0} / ${summary.stopAnalysis?.divergent || 0}`,
     `- Divergencias precedidas por cierres fallidos: ${summary.stopAnalysis?.closeFailureDivergent || 0}`,

@@ -2094,6 +2094,7 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
   const coverage = summary.referenceCoverage || {};
   const fill = summary.fillQuality || {};
   const signs = summary.signAnalysis || {};
+  const outcomes = summary.pairedOutcomeAnalysis || {};
   const missingReasons = summary.missingReasonCounts || {};
   const sheetRows = Number(gapCounts.sheet || summary.sheetRows || 0);
   const matchedRows = Number(gapCounts.matched || 0);
@@ -2101,7 +2102,8 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
   const outsideCoverage = Number(gapCounts.outsideCoverage || coverage.outsideCoverageRows || 0);
   const costs = Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0);
   const net = Number(summary.bingxNet || 0);
-  const marketMismatch = Number(signs.marketMismatch || 0);
+  const netMismatch = Number(outcomes.netSignMismatch ?? signs.netMismatch ?? 0);
+  const pairedOutcomeRows = Number(outcomes.rows ?? signs.pairedRows ?? 0);
   const refreshWarning = appState.referenceRefreshWarning;
   const tone = refreshWarning
     ? 'warn'
@@ -2109,7 +2111,7 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
     ? 'warn'
     : coverage.provisionalLatestDay
       ? 'warn'
-    : missingRows || marketMismatch || net < 0
+    : missingRows || netMismatch || net < 0
       ? 'negative'
       : 'positive';
   const status = refreshWarning
@@ -2118,7 +2120,7 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
     ? 'Hoja desactualizada'
     : coverage.provisionalLatestDay
       ? 'Jornada provisional'
-    : missingRows || marketMismatch || net < 0
+    : missingRows || netMismatch || net < 0
       ? 'Desalineación abierta'
       : 'Alineación controlada';
   const latestSheet = coverage.latestSheetAt ? formatShortDateTime(coverage.latestSheetAt) : 'sin fecha';
@@ -2159,7 +2161,7 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
       ${renderReliabilityMetric('Entradas > 0,15%', `${Number(fill.entryAboveTolerance || 0)}/${Number(fill.entryMeasured || 0)}`, `Media adversa ${formatExecutionPercent(fill.entryAverageAdversePercent)}`, Number(fill.entryAboveTolerance || 0) ? 'warn' : 'positive')}
       ${renderReliabilityMetric('Salidas > 0,15%', `${Number(fill.closeAboveTolerance || 0)}/${Number(fill.closeMeasured || 0)}`, `Media adversa ${formatExecutionPercent(fill.closeAverageAdversePercent)}`, Number(fill.closeAboveTolerance || 0) ? 'warn' : 'positive')}
       ${renderReliabilityMetric('Fees + funding', formatMoney(costs, 'VST'), `${formatMoney(summary.bingxFees, 'VST')} en fees`, amountClass(costs))}
-      ${renderReliabilityMetric('Neto BingX', formatMoney(net, 'VST'), `${marketMismatch} signos contrarios a la hoja`, amountClass(net))}
+      ${renderReliabilityMetric('Neto BingX', formatMoney(net, 'VST'), pairedOutcomeRows ? `${netMismatch}/${pairedOutcomeRows} resultados cambian de signo` : 'Sin muestra cerrada comparable', amountClass(net))}
     </div>
   `;
   elements.replicaHealthPanel.classList.remove('hidden');
@@ -4865,6 +4867,18 @@ function formatExecutionPercent(value) {
   })}%`;
 }
 
+function formatPercentagePointGap(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
+  const sign = number > 0 ? '+' : '';
+  return `${sign}${number.toLocaleString('es-ES', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  })} pp`;
+}
+
 function renderOfficialSheetVstAlignment(audit) {
   const summary = audit.summary || {};
   const rows = audit.rows || [];
@@ -4874,24 +4888,37 @@ function renderOfficialSheetVstAlignment(audit) {
     && value !== undefined
     && value !== ''
     && Number.isFinite(Number(value));
-  const sheetRows = rows.filter((row) => hasNumericResult(row.sheet?.pnl));
-  const vstRows = rows.filter((row) => row.cause !== 'Fuera de cobertura de la hoja'
+  const pairedOutcomeRows = rows.filter((row) => hasNumericResult(row.sheet?.pnl)
     && hasNumericResult(row.vst?.netPnl));
-  const sheetWins = sheetRows.filter((row) => Number(row.sheet.pnl) > 0).length;
-  const vstWins = vstRows.filter((row) => Number(row.vst.netPnl) > 0).length;
-  const sheetWinRate = sheetRows.length ? (sheetWins / sheetRows.length) * 100 : null;
-  const vstWinRate = vstRows.length ? (vstWins / vstRows.length) * 100 : null;
+  const outcomeAnalysis = summary.pairedOutcomeAnalysis || {};
+  const outcomeCount = Number.isFinite(Number(outcomeAnalysis.rows))
+    ? Number(outcomeAnalysis.rows)
+    : pairedOutcomeRows.length;
+  const sheetWins = Number.isFinite(Number(outcomeAnalysis.sheetWins))
+    ? Number(outcomeAnalysis.sheetWins)
+    : pairedOutcomeRows.filter((row) => Number(row.sheet.pnl) > 0).length;
+  const vstWins = Number.isFinite(Number(outcomeAnalysis.vstWins))
+    ? Number(outcomeAnalysis.vstWins)
+    : pairedOutcomeRows.filter((row) => Number(row.vst.netPnl) > 0).length;
+  const sheetWinRate = Number.isFinite(Number(outcomeAnalysis.sheetWinRate))
+    ? Number(outcomeAnalysis.sheetWinRate)
+    : outcomeCount ? (sheetWins / outcomeCount) * 100 : null;
+  const vstWinRate = Number.isFinite(Number(outcomeAnalysis.vstWinRate))
+    ? Number(outcomeAnalysis.vstWinRate)
+    : outcomeCount ? (vstWins / outcomeCount) * 100 : null;
+  const winRateGapPoints = Number.isFinite(Number(outcomeAnalysis.winRateGapPoints))
+    ? Number(outcomeAnalysis.winRateGapPoints)
+    : Number.isFinite(sheetWinRate) && Number.isFinite(vstWinRate)
+      ? vstWinRate - sheetWinRate
+      : null;
+  const netSignMismatch = Number(outcomeAnalysis.netSignMismatch || 0);
+  const sameNetSign = Number.isFinite(Number(outcomeAnalysis.sameNetSign))
+    ? Number(outcomeAnalysis.sameNetSign)
+    : Math.max(0, outcomeCount - netSignMismatch);
   const sheetCount = Number(summary.sheetRows || rows.length || 0);
   const pairedCount = rows.filter((row) => row.sheet && row.vst?.openingAt).length;
+  const pendingPairedCount = Math.max(0, pairedCount - outcomeCount);
   const missingCount = Number(summary.issueCounts?.['No ejecutada en VST'] || 0);
-  const alignedCount = Number(summary.issueCounts?.Alineada || 0);
-  const comparableRows = Math.max(0, rows.length - outsideCoverageCount);
-  const reviewCount = Math.max(0, comparableRows - alignedCount);
-  const sheetCoverageDetail = referenceCoverage.latestSheetAt
-    ? referenceCoverage.provisionalLatestDay
-      ? `Jornada provisional: ${formatDateTime(referenceCoverage.latestSheetAt)} · ${Number(referenceCoverage.openReferenceRows || 0)} abiertas`
-      : `Hoja actualizada hasta ${formatDateTime(referenceCoverage.latestSheetAt)}`
-    : `${sheetRows.length} operaciones`;
 
   elements.alignmentStatus.textContent = referenceCoverage.stale
     ? `${formatMonth(audit.month)} - hoja hasta ${formatDateTime(referenceCoverage.latestSheetAt)}`
@@ -4899,15 +4926,15 @@ function renderOfficialSheetVstAlignment(audit) {
       ? `${formatMonth(audit.month)} - última jornada provisional`
     : `${formatMonth(audit.month)} - ${pairedCount}/${sheetCount} emparejadas`;
   elements.alignmentSummary.innerHTML = [
-    renderAlignmentMetric('Google Sheet', formatPercent(sheetWinRate), sheetCoverageDetail, amountClass((sheetWinRate ?? 50) - 50)),
-    renderAlignmentMetric('BingX comparable', formatPercent(vstWinRate), `${vstRows.length} resultados con referencia`, amountClass((vstWinRate ?? 50) - 50)),
-    renderAlignmentMetric('Emparejadas', `${pairedCount}/${sheetCount}`, `${missingCount} no ejecutadas`, missingCount ? 'amount negative' : 'amount positive'),
+    renderAlignmentMetric('Google Sheet comparable', formatPercent(sheetWinRate), `${outcomeCount} pares cerrados · ${sheetWins} ganadoras`, amountClass((sheetWinRate ?? 50) - 50)),
+    renderAlignmentMetric('BingX VST neto', formatPercent(vstWinRate), `${outcomeCount} pares cerrados · ${vstWins} ganadoras · brecha ${formatPercentagePointGap(winRateGapPoints)}`, amountClass((vstWinRate ?? 50) - 50)),
+    renderAlignmentMetric('Emparejadas', `${pairedCount}/${sheetCount}`, `${outcomeCount} cerradas · ${pendingPairedCount} abiertas · ${missingCount} no ejecutadas`, missingCount ? 'amount negative' : 'amount positive'),
     renderAlignmentMetric('Sin referencia', String(outsideCoverageCount), outsideCoverageCount
       ? referenceCoverage.provisionalLatestDay
         ? 'Pendientes de cierre o publicación en la hoja'
         : 'Operaciones VST posteriores a la hoja'
       : 'Cobertura temporal completa', outsideCoverageCount ? 'warn' : 'amount positive'),
-    renderAlignmentMetric('Alineadas', String(alignedCount), `${reviewCount} requieren revisión`, reviewCount ? 'warn' : 'amount positive')
+    renderAlignmentMetric('Mismo signo', outcomeCount ? `${sameNetSign}/${outcomeCount}` : '-', `${netSignMismatch} cambiaron de resultado neto`, netSignMismatch ? 'warn' : 'amount positive')
   ].join('');
   renderReplicaControlPreservingScroll(audit);
   settleAlignmentAnchor();
@@ -5630,6 +5657,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const missingReasonCounts = summary.missingReasonCounts || {};
   const stopAnalysis = summary.stopAnalysis || {};
   const signAnalysis = summary.signAnalysis || {};
+  const pairedOutcomeAnalysis = summary.pairedOutcomeAnalysis || {};
   const fillQuality = summary.fillQuality || {};
   const gapBridge = summary.gapBridge || null;
   const matchedGapAttribution = summary.matchedGapAttribution || null;
@@ -5643,6 +5671,10 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const explainedMissing = Math.max(0, missingTotal - unexplainedMissing);
   const unprocessedCloseRows = Number(summary.unprocessedCloseRows || 0);
   const unprocessedClosePosts = Number(summary.unprocessedClosePosts || 0);
+  const pairedOutcomeRows = Number(pairedOutcomeAnalysis.rows ?? signAnalysis.pairedRows ?? 0);
+  const netSignMismatch = Number(pairedOutcomeAnalysis.netSignMismatch ?? signAnalysis.netMismatch ?? 0);
+  const grossSignMismatch = Number(pairedOutcomeAnalysis.grossSignMismatch ?? signAnalysis.marketMismatch ?? 0);
+  const costFlip = Number(pairedOutcomeAnalysis.costFlip ?? signAnalysis.costFlip ?? 0);
   const coverageDetail = referenceCoverage.latestSheetAt
     ? referenceCoverage.provisionalLatestDay
       ? `Última jornada provisional: ${formatDateTime(referenceCoverage.latestSheetAt)}`
@@ -5682,7 +5714,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         ${renderReplicaMetric('Cobertura de la hoja', coverageLabel, `${coverageDetail} · ${coverageTail}`, coverageClass)}
         ${renderReplicaMetric('Ausencias explicadas', `${explainedMissing}/${missingTotal}`, formatMissingReasonCounts(missingReasonCounts), unexplainedMissing ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Stops alineados', `${Number(stopAnalysis.aligned || 0)}/${Number(stopAnalysis.total || 0)}`, formatStopAnalysis(stopAnalysis), Number(stopAnalysis.divergent || 0) ? 'warn' : 'amount positive')}
-        ${renderReplicaMetric('Signos divergentes', `${Number(signAnalysis.marketMismatch || 0)} mercado`, `${Number(signAnalysis.costFlip || 0)} absorbidos por costes`, Number(signAnalysis.marketMismatch || 0) ? 'amount negative' : 'amount positive')}
+        ${renderReplicaMetric('Signos divergentes', pairedOutcomeRows ? `${netSignMismatch}/${pairedOutcomeRows} netos` : '-', `${grossSignMismatch} por mercado · ${costFlip} por costes`, netSignMismatch ? 'amount negative' : 'amount positive')}
         ${renderReplicaMetric('Ejecución de entrada', `${Number(fillQuality.entryAboveTolerance || 0)}/${Number(fillQuality.entryMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatExecutionPercent(fillQuality.entryAverageAdversePercent)}`, Number(fillQuality.entryAboveTolerance || 0) ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Ejecución de salida', `${Number(fillQuality.closeAboveTolerance || 0)}/${Number(fillQuality.closeMeasured || 0)}`, `Desviación adversa > 0,15% · media ${formatExecutionPercent(fillQuality.closeAverageAdversePercent)}`, Number(fillQuality.closeAboveTolerance || 0) ? 'warn' : 'amount positive')}
       </div>

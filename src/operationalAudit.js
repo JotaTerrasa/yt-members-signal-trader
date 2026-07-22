@@ -100,6 +100,84 @@ export function estimateReplicaEconomics({
   };
 }
 
+export function summarizePairedOutcomes(rows = []) {
+  const hasResult = (value) => value !== null
+    && value !== undefined
+    && value !== ''
+    && Number.isFinite(Number(value));
+  const pairs = (rows || []).filter((row) => (
+    hasResult(row?.sheet?.pnl) && hasResult(row?.vst?.netPnl)
+  ));
+  let sheetWins = 0;
+  let vstWins = 0;
+  let bothWin = 0;
+  let bothLoss = 0;
+  let sameNetSign = 0;
+  let netSignMismatch = 0;
+  let sheetWinVstLoss = 0;
+  let sheetLossVstWin = 0;
+  let grossSignMeasured = 0;
+  let grossSignMismatch = 0;
+  let costFlip = 0;
+
+  for (const row of pairs) {
+    const sheetPnl = Number(row.sheet.pnl);
+    const netPnl = Number(row.vst.netPnl);
+    const grossPnl = Number(row.vst.grossPnl);
+    const sheetWin = sheetPnl > 0;
+    const vstWin = netPnl > 0;
+    const sheetSign = outcomeSign(sheetPnl);
+    const netSign = outcomeSign(netPnl);
+
+    sheetWins += sheetWin ? 1 : 0;
+    vstWins += vstWin ? 1 : 0;
+    bothWin += sheetWin && vstWin ? 1 : 0;
+    bothLoss += !sheetWin && !vstWin ? 1 : 0;
+    sheetWinVstLoss += sheetWin && !vstWin ? 1 : 0;
+    sheetLossVstWin += !sheetWin && vstWin ? 1 : 0;
+    if (sheetSign === netSign) {
+      sameNetSign += 1;
+    } else if (sheetSign !== 0 && netSign !== 0) {
+      netSignMismatch += 1;
+    }
+
+    if (!Number.isFinite(grossPnl)) {
+      continue;
+    }
+    const grossSign = outcomeSign(grossPnl);
+    grossSignMeasured += 1;
+    if (sheetSign !== 0 && grossSign !== 0 && sheetSign !== grossSign) {
+      grossSignMismatch += 1;
+    }
+    if (sheetSign > 0 && grossSign > 0 && netSign < 0) {
+      costFlip += 1;
+    }
+  }
+
+  const sheetWinRate = pairs.length ? roundMoney((sheetWins / pairs.length) * 100) : null;
+  const vstWinRate = pairs.length ? roundMoney((vstWins / pairs.length) * 100) : null;
+
+  return {
+    rows: pairs.length,
+    sheetWins,
+    vstWins,
+    sheetWinRate,
+    vstWinRate,
+    winRateGapPoints: sheetWinRate === null || vstWinRate === null
+      ? null
+      : roundMoney(vstWinRate - sheetWinRate),
+    bothWin,
+    bothLoss,
+    sameNetSign,
+    netSignMismatch,
+    sheetWinVstLoss,
+    sheetLossVstWin,
+    grossSignMeasured,
+    grossSignMismatch,
+    costFlip
+  };
+}
+
 export function cohortWindowBounds({ startedAt, endedAt = null, monthWindow = {} } = {}) {
   const parsedStart = Date.parse(startedAt || '');
   if (!Number.isFinite(parsedStart) || parsedStart <= 0) {
@@ -241,6 +319,14 @@ export function referenceComparisonCoverage(sheetRows = []) {
     provisionalLatestDay,
     openReferenceRows
   };
+}
+
+function outcomeSign(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || Math.abs(number) <= 0.01) {
+    return 0;
+  }
+  return Math.sign(number);
 }
 
 export function buildOpeningFailureAttempts(events = []) {

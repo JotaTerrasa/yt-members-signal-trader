@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomes, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -185,6 +185,36 @@ test('deja la ultima jornada abierta como cobertura provisional sin perder sus e
   assert.equal(result.coverage.stale, false);
   assert.equal(result.coverage.outsideCoverageRows, 1);
   assert.equal(result.coverage.comparableRows, 2);
+});
+
+test('compara win rate y signos sobre la misma muestra emparejada', () => {
+  const result = summarizePairedOutcomes([
+    { sheet: { pnl: 10 }, vst: { grossPnl: 8, netPnl: 7 } },
+    { sheet: { pnl: 10 }, vst: { grossPnl: -2, netPnl: -3 } },
+    { sheet: { pnl: 5 }, vst: { grossPnl: 2, netPnl: -1 } },
+    { sheet: { pnl: -4 }, vst: { grossPnl: 3, netPnl: 2 } },
+    { sheet: { pnl: -4 }, vst: { grossPnl: -3, netPnl: -2 } },
+    { sheet: { pnl: 3 }, vst: { grossPnl: 2, netPnl: null } },
+    { sheet: null, vst: { grossPnl: 2, netPnl: 1 } }
+  ]);
+
+  assert.deepEqual(result, {
+    rows: 5,
+    sheetWins: 3,
+    vstWins: 2,
+    sheetWinRate: 60,
+    vstWinRate: 40,
+    winRateGapPoints: -20,
+    bothWin: 1,
+    bothLoss: 1,
+    sameNetSign: 2,
+    netSignMismatch: 3,
+    sheetWinVstLoss: 2,
+    sheetLossVstWin: 1,
+    grossSignMeasured: 5,
+    grossSignMismatch: 2,
+    costFlip: 1
+  });
 });
 
 test('conserva solo el fallo terminal de una apertura que nunca se ejecuto', () => {
