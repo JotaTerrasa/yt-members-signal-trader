@@ -562,6 +562,117 @@ export function buildMatchedGapAttribution(rows = []) {
   };
 }
 
+export function buildExecutionRouteAnalysis(rows = []) {
+  const matchedRows = (Array.isArray(rows) ? rows : []).filter((row) => (
+    Boolean(row?.sheet)
+    && nullableNumber(row?.replica?.pnl) !== null
+    && nullableNumber(row?.vst?.grossPnl) !== null
+  ));
+  const groups = new Map();
+  let replicaPnlTotal = 0;
+  let bingxGrossTotal = 0;
+
+  for (const row of matchedRows) {
+    const route = executionRouteDescriptor(row);
+    const replicaPnl = Number(row.replica.pnl);
+    const bingxGross = Number(row.vst.grossPnl);
+    const gap = bingxGross - replicaPnl;
+    const attribution = matchedRowAttribution(row);
+    const priceChain = executionPriceChainRowAttribution(row);
+    const group = groups.get(route.key) || createExecutionRouteGroup(route);
+
+    replicaPnlTotal += replicaPnl;
+    bingxGrossTotal += bingxGross;
+    group.rows += 1;
+    group.replicaPnl += replicaPnl;
+    group.bingxGross += bingxGross;
+    group.gap += gap;
+    group.fees += Number(row.vst?.openingFee || 0) + Number(row.vst?.closingFee || 0);
+    group.funding += Number(row.vst?.funding || 0);
+    group.aggregatedRows += Number(row.vst?.aggregatedOpenings || 1) > 1 ? 1 : 0;
+    group.stopRows += row.vst?.closeKind === 'stop' ? 1 : 0;
+    group.closeFailureEvents += Number(row.vst?.closeFailures?.length || 0);
+    group.unprocessedCloseSignals += Number(row.vst?.unprocessedCloses?.length || 0);
+    if (attribution) {
+      group.decomposableRows += 1;
+      group.entryImpact += attribution.entryExecution;
+      group.exitImpact += attribution.exitExecution;
+      group.sizeAndFillsImpact += attribution.sizeAndFills;
+    }
+    if (priceChain) {
+      const values = priceChain.values;
+      group.referenceAndTargetImpact += values.entry_reference + values.exit_target;
+      group.preSendMoveImpact += values.entry_quote_move + values.exit_quote_move;
+      group.quoteToFillImpact += values.entry_fill + values.exit_fill;
+      group.missingTraceImpact += values.entry_missing_evidence + values.exit_missing_evidence;
+      group.fullExitPathRows += priceChain.fullExitPath ? 1 : 0;
+    }
+
+    const latencyEventId = row.trace?.closeSignalEventId || row.trace?.closeEventId || row.id;
+    const detectedAt = Date.parse(row.vst?.closingDetectedAt || '');
+    const completedAt = Date.parse(row.vst?.closeSignalAt || '');
+    if (latencyEventId
+      && !group.latencyEventIds.has(latencyEventId)
+      && Number.isFinite(detectedAt)
+      && Number.isFinite(completedAt)
+      && completedAt >= detectedAt) {
+      group.latencyEventIds.add(latencyEventId);
+      group.closeLatencies.push((completedAt - detectedAt) / 1000);
+    }
+    groups.set(route.key, group);
+  }
+
+  const routeGroups = [...groups.values()]
+    .map(finalizeExecutionRouteGroup)
+    .sort((left, right) => (
+      executionRouteOrder(left.key) - executionRouteOrder(right.key)
+      || Math.abs(Number(right.gap || 0)) - Math.abs(Number(left.gap || 0))
+    ));
+  const families = summarizeExecutionRouteFamilies(routeGroups);
+  const replicaPnl = roundMoney(replicaPnlTotal);
+  const bingxGross = roundMoney(bingxGrossTotal);
+  const gap = roundMoney(bingxGross - replicaPnl);
+  const reconstructedGap = roundMoney(sumFinite(routeGroups.map((group) => group.gap)));
+  const residual = roundMoney(gap - reconstructedGap);
+
+  return {
+    replicaPnl,
+    bingxGross,
+    gap,
+    reconstructedGap,
+    residual,
+    reconciled: Math.abs(residual) <= 0.01,
+    counts: {
+      matched: matchedRows.length,
+      routes: routeGroups.length,
+      historicalIncidentRows: families.find((family) => family.key === 'historical_defect')?.rows || 0,
+      guardRetryRows: families.find((family) => family.key === 'guard_retry')?.rows || 0,
+      evidenceGapRows: families.find((family) => family.key === 'evidence_gap')?.rows || 0
+    },
+    families,
+    groups: routeGroups,
+    topRows: matchedRows
+      .map((row) => {
+        const route = executionRouteDescriptor(row);
+        const replica = Number(row.replica.pnl);
+        const gross = Number(row.vst.grossPnl);
+        return {
+          id: row.id || null,
+          orderNumber: row.orderNumber ?? null,
+          symbol: row.symbol || '',
+          route: route.key,
+          routeLabel: route.label,
+          replicaPnl: roundMoney(replica),
+          bingxGross: roundMoney(gross),
+          gap: roundMoney(gross - replica),
+          closingAt: row.vst?.closingAt || null
+        };
+      })
+      .sort((left, right) => Math.abs(Number(right.gap || 0)) - Math.abs(Number(left.gap || 0)))
+      .slice(0, 8)
+  };
+}
+
 export function buildExecutionPriceChainAttribution(rows = []) {
   const matchedRows = (Array.isArray(rows) ? rows : []).filter((row) => (
     Boolean(row?.sheet)
@@ -925,6 +1036,173 @@ function matchedGapGroups(groups) {
         : [key, value]
     ))))
     .sort((left, right) => Math.abs(Number(right.gap || 0)) - Math.abs(Number(left.gap || 0)));
+}
+
+function executionRouteDescriptor(row = {}) {
+  const closeFailures = Array.isArray(row.vst?.closeFailures) ? row.vst.closeFailures : [];
+  const unprocessedCloses = Array.isArray(row.vst?.unprocessedCloses) ? row.vst.unprocessedCloses : [];
+  const failureCategories = new Set(closeFailures.map((failure) => failure?.category).filter(Boolean));
+  const stopped = row.vst?.closeKind === 'stop';
+  const hasCloseSignal = Boolean(row.vst?.closeSignalAt || row.trace?.closeSignalEventId);
+
+  if (unprocessedCloses.length) {
+    return stopped
+      ? executionRoute('unprocessed_close_then_stop', 'Cierre no procesado; salida posterior por stop', 'historical_defect')
+      : executionRoute('unprocessed_close_then_exit', 'Cierre no procesado; salida posterior', 'historical_defect');
+  }
+  if (failureCategories.has('close_guard_runtime_error')) {
+    return stopped
+      ? executionRoute('runtime_error_then_stop', 'Error histórico del guard; salida posterior por stop', 'historical_defect')
+      : executionRoute('runtime_error_recovered', 'Error histórico del guard; cierre recuperado', 'historical_defect');
+  }
+  if (failureCategories.has('close_slippage_guard')) {
+    return stopped
+      ? executionRoute('guard_retry_then_stop', 'Guard de cierre; salida posterior por stop', 'guard_retry')
+      : executionRoute('guard_retry_then_exit', 'Guard de cierre; ejecución posterior', 'guard_retry');
+  }
+  if (closeFailures.length) {
+    return stopped
+      ? executionRoute('close_failure_then_stop', 'Cierre fallido; salida posterior por stop', 'close_incident')
+      : executionRoute('close_failure_recovered', 'Cierre fallido; ejecución posterior', 'close_incident');
+  }
+  if (stopped) {
+    return executionRoute('stop_before_close', 'Stop antes de otra señal de cierre', 'observed_execution');
+  }
+  if (hasCloseSignal) {
+    return executionRoute('explicit_close', 'Cierre explícito ejecutado', 'observed_execution');
+  }
+  return executionRoute('no_local_close_evidence', 'Salida sin señal local enlazada', 'evidence_gap');
+}
+
+function executionRoute(key, label, family) {
+  return { key, label, family };
+}
+
+function createExecutionRouteGroup(route) {
+  return {
+    ...route,
+    rows: 0,
+    decomposableRows: 0,
+    replicaPnl: 0,
+    bingxGross: 0,
+    gap: 0,
+    entryImpact: 0,
+    exitImpact: 0,
+    sizeAndFillsImpact: 0,
+    referenceAndTargetImpact: 0,
+    preSendMoveImpact: 0,
+    quoteToFillImpact: 0,
+    missingTraceImpact: 0,
+    fees: 0,
+    funding: 0,
+    aggregatedRows: 0,
+    stopRows: 0,
+    closeFailureEvents: 0,
+    unprocessedCloseSignals: 0,
+    fullExitPathRows: 0,
+    latencyEventIds: new Set(),
+    closeLatencies: []
+  };
+}
+
+function finalizeExecutionRouteGroup(group) {
+  return {
+    key: group.key,
+    label: group.label,
+    family: group.family,
+    rows: group.rows,
+    decomposableRows: group.decomposableRows,
+    replicaPnl: roundMoney(group.replicaPnl),
+    bingxGross: roundMoney(group.bingxGross),
+    gap: roundMoney(group.gap),
+    entryImpact: roundMoney(group.entryImpact),
+    exitImpact: roundMoney(group.exitImpact),
+    sizeAndFillsImpact: roundMoney(group.sizeAndFillsImpact),
+    referenceAndTargetImpact: roundMoney(group.referenceAndTargetImpact),
+    preSendMoveImpact: roundMoney(group.preSendMoveImpact),
+    quoteToFillImpact: roundMoney(group.quoteToFillImpact),
+    missingTraceImpact: roundMoney(group.missingTraceImpact),
+    fees: roundMoney(group.fees),
+    funding: roundMoney(group.funding),
+    aggregatedRows: group.aggregatedRows,
+    stopRows: group.stopRows,
+    closeFailureEvents: group.closeFailureEvents,
+    unprocessedCloseSignals: group.unprocessedCloseSignals,
+    fullExitPathRows: group.fullExitPathRows,
+    closeLatency: latencyStats(group.closeLatencies)
+  };
+}
+
+function summarizeExecutionRouteFamilies(groups = []) {
+  const labels = {
+    observed_execution: 'Ejecución observada',
+    historical_defect: 'Incidencia histórica corregida',
+    guard_retry: 'Reintento protegido',
+    close_incident: 'Otra incidencia de cierre',
+    evidence_gap: 'Evidencia local incompleta'
+  };
+  const families = new Map();
+  for (const group of groups) {
+    const family = families.get(group.family) || {
+      key: group.family,
+      label: labels[group.family] || group.family,
+      rows: 0,
+      replicaPnl: 0,
+      bingxGross: 0,
+      gap: 0,
+      entryImpact: 0,
+      exitImpact: 0,
+      fees: 0,
+      funding: 0
+    };
+    family.rows += group.rows;
+    family.replicaPnl += group.replicaPnl;
+    family.bingxGross += group.bingxGross;
+    family.gap += group.gap;
+    family.entryImpact += group.entryImpact;
+    family.exitImpact += group.exitImpact;
+    family.fees += group.fees;
+    family.funding += group.funding;
+    families.set(group.family, family);
+  }
+  return [...families.values()]
+    .map((family) => ({
+      ...family,
+      replicaPnl: roundMoney(family.replicaPnl),
+      bingxGross: roundMoney(family.bingxGross),
+      gap: roundMoney(family.gap),
+      entryImpact: roundMoney(family.entryImpact),
+      exitImpact: roundMoney(family.exitImpact),
+      fees: roundMoney(family.fees),
+      funding: roundMoney(family.funding)
+    }))
+    .sort((left, right) => executionRouteFamilyOrder(left.key) - executionRouteFamilyOrder(right.key));
+}
+
+function executionRouteOrder(key) {
+  return {
+    explicit_close: 10,
+    stop_before_close: 20,
+    unprocessed_close_then_stop: 30,
+    unprocessed_close_then_exit: 31,
+    runtime_error_then_stop: 40,
+    runtime_error_recovered: 41,
+    guard_retry_then_stop: 50,
+    guard_retry_then_exit: 51,
+    close_failure_then_stop: 60,
+    close_failure_recovered: 61,
+    no_local_close_evidence: 70
+  }[key] ?? 99;
+}
+
+function executionRouteFamilyOrder(key) {
+  return {
+    observed_execution: 10,
+    historical_defect: 20,
+    guard_retry: 30,
+    close_incident: 40,
+    evidence_gap: 50
+  }[key] ?? 99;
 }
 
 function positiveNumber(value) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildExecutionPriceChainAttribution, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
+import { annotateReplicaReferenceCoverage, auditRowBelongsToWindow, buildCloseFailureAttempts, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, monitorHealthFinding, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizeReplicaStops } from '../src/operationalAudit.js';
 import { buildSignalCoverage } from '../src/signalCoverage.js';
 
 test('clasifica solo errores temporales de cierre como reintentables', () => {
@@ -328,6 +328,67 @@ test('descompone el gap emparejado entre entrada, salida, cantidad y evidencia i
   assert.equal(attribution.bySymbol[0].key, 'SOL-USDT');
   assert.equal(attribution.byCloseKind.find((group) => group.key === 'stop').gap, -0.9);
   assert.equal(attribution.topRows[0].id, 'BTC|1');
+});
+
+test('separa las rutas de salida sin confundir incidencias históricas con ejecución observada', () => {
+  const row = (id, vst) => ({
+    id,
+    symbol: 'BTC-USDT',
+    direction: 'LONG',
+    sheet: { entry: 100, exit: 110 },
+    replica: { pnl: 2, notional: 10, leverage: 2 },
+    vst: { entry: 100, exit: 110, openingFee: -0.1, closingFee: -0.1, ...vst },
+    trace: vst.trace || {}
+  });
+  const analysis = buildExecutionRouteAnalysis([
+    row('explicit', {
+      grossPnl: 2,
+      closeKind: 'other',
+      closingDetectedAt: '2026-07-20T10:00:00.000Z',
+      closeSignalAt: '2026-07-20T10:00:01.000Z',
+      trace: { closeSignalEventId: 'close-explicit' }
+    }),
+    row('stop', { exit: 95, grossPnl: -1, closeKind: 'stop' }),
+    row('unprocessed', {
+      exit: 95,
+      grossPnl: -1,
+      closeKind: 'stop',
+      unprocessedCloses: [{ category: 'historical_close_typo' }]
+    }),
+    row('runtime-stop', {
+      exit: 95,
+      grossPnl: -1,
+      closeKind: 'stop',
+      closeFailures: [{ category: 'close_guard_runtime_error' }]
+    }),
+    row('runtime-recovered', {
+      exit: 105,
+      grossPnl: 1,
+      closeKind: 'other',
+      closeFailures: [{ category: 'close_guard_runtime_error' }]
+    }),
+    row('guard-recovered', {
+      exit: 105,
+      grossPnl: 1,
+      closeKind: 'other',
+      closeFailures: [{ category: 'close_slippage_guard' }]
+    }),
+    row('evidence-gap', { grossPnl: 2, closeKind: 'other' })
+  ]);
+
+  assert.equal(analysis.counts.matched, 7);
+  assert.equal(analysis.counts.routes, 7);
+  assert.equal(analysis.counts.historicalIncidentRows, 3);
+  assert.equal(analysis.counts.guardRetryRows, 1);
+  assert.equal(analysis.counts.evidenceGapRows, 1);
+  assert.equal(analysis.gap, -11);
+  assert.equal(analysis.residual, 0);
+  assert.equal(analysis.reconciled, true);
+  assert.equal(analysis.families.find((family) => family.key === 'observed_execution').rows, 2);
+  assert.equal(analysis.families.find((family) => family.key === 'historical_defect').rows, 3);
+  assert.equal(analysis.groups.find((group) => group.key === 'explicit_close').closeLatency.medianSeconds, 1);
+  assert.equal(analysis.groups.find((group) => group.key === 'runtime_error_then_stop').closeFailureEvents, 1);
+  assert.equal(analysis.groups.find((group) => group.key === 'unprocessed_close_then_stop').unprocessedCloseSignals, 1);
 });
 
 test('reconcilia el gap por tramos entre señal, cotización y fill', () => {

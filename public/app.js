@@ -4505,6 +4505,72 @@ function renderMatchedGapAttribution(attribution) {
   `;
 }
 
+function renderExecutionRouteAnalysis(analysis) {
+  if (!analysis || !Array.isArray(analysis.groups)) {
+    return '';
+  }
+  const families = Object.fromEntries((analysis.families || []).map((family) => [family.key, family]));
+  const familyFact = (key, label, detail) => {
+    const family = families[key] || {};
+    return `
+      <div>
+        <span>${escapeHtml(label)}</span>
+        <strong class="${amountClass(family.gap)}">${escapeHtml(formatMoney(family.gap || 0, 'VST'))}</strong>
+        <small>${escapeHtml(`${family.rows || 0} ops. · ${detail}`)}</small>
+      </div>
+    `;
+  };
+  const routeRows = analysis.groups.map((group) => {
+    const evidence = [
+      group.stopRows ? `${group.stopRows} stop${group.stopRows === 1 ? '' : 's'}` : '',
+      group.closeFailureEvents ? `${group.closeFailureEvents} intentos fallidos` : '',
+      group.unprocessedCloseSignals ? `${group.unprocessedCloseSignals} cierres sin evento` : '',
+      group.aggregatedRows ? `${group.aggregatedRows} agregadas` : '',
+      `${group.fullExitPathRows || 0}/${group.decomposableRows || 0} trazas completas`
+    ].filter(Boolean).join(' · ');
+    const latency = Number(group.closeLatency?.count || 0)
+      ? `Cierre mediano ${formatLatencySeconds(group.closeLatency.medianSeconds)}`
+      : 'Sin latencia local medible';
+    return `
+      <div class="execution-route-row ${escapeAttribute(group.family || '')}" role="row">
+        <div class="execution-route-name" role="cell">
+          <strong>${escapeHtml(group.label || group.key)}</strong>
+          <span>${escapeHtml(evidence)}</span>
+        </div>
+        <div role="cell"><span>Operaciones</span><strong>${escapeHtml(String(group.rows || 0))}</strong><small>${escapeHtml(latency)}</small></div>
+        <div role="cell"><span>Réplica</span><strong class="${amountClass(group.replicaPnl)}">${escapeHtml(formatMoney(group.replicaPnl || 0, 'VST'))}</strong><small>Referencia escalada</small></div>
+        <div role="cell"><span>BingX bruto</span><strong class="${amountClass(group.bingxGross)}">${escapeHtml(formatMoney(group.bingxGross || 0, 'VST'))}</strong><small>Antes de costes</small></div>
+        <div role="cell"><span>Diferencia</span><strong class="${amountClass(group.gap)}">${escapeHtml(formatMoney(group.gap || 0, 'VST'))}</strong><small>${escapeHtml(`Entrada ${formatMoney(group.entryImpact || 0, 'VST')} · salida ${formatMoney(group.exitImpact || 0, 'VST')}`)}</small></div>
+      </div>
+    `;
+  }).join('');
+  const status = analysis.reconciled
+    ? 'Rutas reconciliadas'
+    : `Residual ${formatMoney(analysis.residual, 'VST')}`;
+
+  return `
+    <section class="replica-gap-panel execution-route-panel" aria-labelledby="execution-route-title">
+      <div class="replica-gap-heading">
+        <div>
+          <span>Ruta causal de salida</span>
+          <strong id="execution-route-title">Qué ocurrió antes del cierre confirmado</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(analysis.reconciled ? 'positive' : 'negative')}">${escapeHtml(status)}</span>
+      </div>
+      <div class="replica-gap-facts">
+        ${familyFact('observed_execution', 'Ejecución observada', 'cierre explícito o stop sin incidencia previa')}
+        ${familyFact('historical_defect', 'Incidencia histórica', 'parser o error del guard ya corregidos')}
+        ${familyFact('guard_retry', 'Reintento protegido', 'cierre completado tras esperar')}
+        ${familyFact('evidence_gap', 'Evidencia incompleta', 'fill exacto sin señal local enlazada')}
+      </div>
+      <div class="execution-route-list" role="table" aria-label="Desglose por ruta causal de salida">
+        ${routeRows || '<div class="replica-empty">Sin rutas de salida comparables.</div>'}
+      </div>
+      <p class="replica-gap-note">La diferencia de cada ruta es una asociación observada, no una estimación de dinero recuperable. Las incidencias históricas se separan para que no contaminen la lectura de la cohorte posterior a las mejoras.</p>
+    </section>
+  `;
+}
+
 function renderOrderHistoryEvidence(evidence = {}, source = {}) {
   const sourceAvailable = Boolean(source?.available);
   const auditBacked = Boolean(evidence?.available);
@@ -4763,6 +4829,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
   const fillQuality = summary.fillQuality || {};
   const gapBridge = summary.gapBridge || null;
   const matchedGapAttribution = summary.matchedGapAttribution || null;
+  const executionRouteAnalysis = summary.executionRouteAnalysis || null;
   const executionPriceChain = summary.executionPriceChain || null;
   const executionLatency = summary.executionLatency || null;
   const orderHistoryEvidence = summary.orderHistoryEvidence || {};
@@ -4804,6 +4871,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
       </div>
       ${renderReplicaGapBridge(gapBridge, referenceCoverage)}
       ${renderMatchedGapAttribution(matchedGapAttribution)}
+      ${renderExecutionRouteAnalysis(executionRouteAnalysis)}
       ${renderExecutionPriceChain(executionPriceChain, executionLatency, orderHistoryEvidence, orderHistorySource)}
       ${unprocessedCloseRows ? `
         <p class="notice replica-audit-notice">

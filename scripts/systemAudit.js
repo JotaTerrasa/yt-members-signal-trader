@@ -86,6 +86,7 @@ const report = {
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
+    executionRouteAnalysis: summary.executionRouteAnalysis || null,
     executionPriceChain: summary.executionPriceChain || null,
     executionLatency: summary.executionLatency || null,
     orderHistoryEvidence: summary.orderHistoryEvidence || null,
@@ -302,6 +303,22 @@ function buildFindings(report) {
       detail: `El desglose de operaciones emparejadas deja un residual de ${money(report.replica.matchedGapAttribution.residual)} VST.`
     });
   }
+  if (report.replica?.executionRouteAnalysis?.reconciled === false) {
+    findings.push({
+      severity: 'critical',
+      code: 'execution_routes_unreconciled',
+      detail: `Las rutas causales de salida dejan un residual de ${money(report.replica.executionRouteAnalysis.residual)} VST.`
+    });
+  }
+  if (Number(report.replica?.executionRouteAnalysis?.counts?.historicalIncidentRows || 0) > 0) {
+    const historical = report.replica.executionRouteAnalysis.families
+      ?.find((family) => family.key === 'historical_defect');
+    findings.push({
+      severity: 'info',
+      code: 'historical_close_incidents_isolated',
+      detail: `${historical?.rows || 0} operaciones están asociadas a incidencias históricas ya corregidas, con un gap observado de ${money(historical?.gap)} VST; no se interpreta como contrafactual recuperable.`
+    });
+  }
   if (report.replica?.executionPriceChain?.reconciled === false) {
     findings.push({
       severity: 'critical',
@@ -506,6 +523,10 @@ function renderMarkdown(report) {
     '',
     ...renderMatchedGapAttributionLines(r.matchedGapAttribution),
     '',
+    '## Rutas causales de salida',
+    '',
+    ...renderExecutionRouteLines(r.executionRouteAnalysis),
+    '',
     '## Cadena señal, cotización y fill',
     '',
     ...renderExecutionPriceChainLines(r.executionPriceChain, r.executionLatency),
@@ -577,6 +598,30 @@ function renderMatchedGapAttributionLines(attribution) {
   ];
 }
 
+function renderExecutionRouteLines(analysis) {
+  if (!analysis || !Array.isArray(analysis.groups)) {
+    return ['- Sin rutas causales disponibles.'];
+  }
+  const familyLines = (analysis.families || []).map((family) => (
+    `- ${family.label}: ${family.rows} operaciones; gap ${money(family.gap)} VST; entrada ${money(family.entryImpact)} VST; salida ${money(family.exitImpact)} VST.`
+  ));
+  const routeLines = analysis.groups.map((group) => (
+    `- ${group.label}: ${group.rows} operaciones; réplica ${money(group.replicaPnl)} VST; BingX bruto ${money(group.bingxGross)} VST; gap ${money(group.gap)} VST; ${group.closeFailureEvents} intentos fallidos; ${group.unprocessedCloseSignals} cierres sin evento.`
+  ));
+  return [
+    `- Operaciones emparejadas: ${analysis.counts?.matched ?? 0}`,
+    `- Incidencias históricas ya corregidas: ${analysis.counts?.historicalIncidentRows ?? 0}`,
+    `- Reintentos protegidos: ${analysis.counts?.guardRetryRows ?? 0}`,
+    `- Salidas sin señal local enlazada: ${analysis.counts?.evidenceGapRows ?? 0}`,
+    `- Residual: ${money(analysis.residual)} VST (${analysis.reconciled ? 'reconciliado' : 'revisar'})`,
+    '- Familias:',
+    ...familyLines,
+    '- Rutas:',
+    ...routeLines,
+    '- Nota: el gap asociado a una ruta describe lo observado y no equivale a dinero contrafactualmente recuperable.'
+  ];
+}
+
 function renderExecutionPriceChainLines(chain, latency) {
   if (!chain || !Array.isArray(chain.steps)) {
     return ['- Sin cadena de precios disponible.'];
@@ -615,6 +660,7 @@ function pickCohortSummary(summary = {}) {
     fillQuality: summary.fillQuality || {},
     gapBridge: summary.gapBridge || null,
     matchedGapAttribution: summary.matchedGapAttribution || null,
+    executionRouteAnalysis: summary.executionRouteAnalysis || null,
     executionPriceChain: summary.executionPriceChain || null,
     executionLatency: summary.executionLatency || null,
     orderHistoryEvidence: summary.orderHistoryEvidence || null,
