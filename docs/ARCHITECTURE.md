@@ -456,6 +456,8 @@ El servidor envía `heartbeat` cada 15 segundos y declara `retry: 3000`, `Cache-
 
 Cada proceso genera además una identidad efímera `runtime.id`, visible en `/api/state`, `/api/health` y el estado inicial SSE. El navegador conserva la última identidad únicamente durante la sesión de esa pestaña. Si tras una reconexión recibe otra distinta, actualiza la identidad y recarga el documento una sola vez; así un despliegue no deja HTML o JavaScript antiguos conectados a un backend nuevo. La recarga no cambia configuraciones, monitor, parser ni estado de órdenes.
 
+El arranque del frontend no usa una barrera `Promise.all`: conecta SSE primero y resuelve estado, Telegram, Telegram Web, estudio, guardia, BingX y publicaciones de forma independiente. Un fallo deja un aviso de carga parcial, pero no cancela las demás fuentes ni el canal en tiempo real. Solo las cargas fallidas entran en un reintento con backoff de 2, 5, 15 y 30 segundos; el aviso desaparece cuando se recuperan. `scripts/frontendBootstrapCheck.js` inyecta un único `503` a `/api/telegram` dentro de Chromium y prueba este ciclo en la puerta Docker.
+
 ## Ciclo de un item nuevo
 
 1. Scraper extrae posts de YouTube y mensajes de Telegram Web.

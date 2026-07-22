@@ -31,6 +31,7 @@ async function main() {
 
     const firstHealth = await startAndWait({ container, volumes, image, port, timeoutMs });
     await verifyRealtimeStream(port);
+    verifyFrontendBootstrap(container);
     writeProbes(container);
     removeContainer(container);
 
@@ -50,6 +51,7 @@ async function main() {
       firstHealth: firstHealth.health?.level || 'ok',
       secondHealth: secondHealth.health?.level || 'ok',
       runtimeRenewed: true,
+      frontendRecovery: true,
       persistedVolumes: probes.length,
       uid
     }, null, 2));
@@ -72,6 +74,7 @@ async function startAndWait({ container, volumes, image, port, timeoutMs }) {
     'run',
     '--detach',
     '--name', container,
+    '--shm-size', '1gb',
     '--publish', `127.0.0.1:${port}:5178`,
     '--env', 'NODE_ENV=production',
     '--env', 'HOST=0.0.0.0',
@@ -86,6 +89,21 @@ async function startAndWait({ container, volumes, image, port, timeoutMs }) {
   const health = await waitForHealth(port, timeoutMs);
   await verifyStaticAssets(port);
   return health;
+}
+
+function verifyFrontendBootstrap(container) {
+  const output = runDocker([
+    'exec',
+    container,
+    'node',
+    'scripts/frontendBootstrapCheck.js',
+    '--base-url',
+    'http://127.0.0.1:5178'
+  ], { capture: true });
+  const result = JSON.parse(output);
+  if (!result.ok || result.injectedFailures !== 1 || !result.recovered) {
+    throw new Error(`El frontend no recupero su carga parcial: ${output}`);
+  }
 }
 
 async function waitForHealth(port, timeoutMs) {

@@ -270,6 +270,7 @@ const REALTIME_WATCHDOG_INTERVAL_MS = 5 * 1000;
 const REALTIME_RECONNECT_BASE_MS = 1000;
 const REALTIME_RECONNECT_MAX_MS = 15 * 1000;
 const RUNTIME_STORAGE_KEY = 'futures-magician-runtime-id';
+const BOOTSTRAP_RETRY_DELAYS_MS = [2000, 5000, 15_000, 30_000];
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
@@ -283,6 +284,7 @@ let realtimeWatchdogTimer = null;
 let realtimeReconnectTimer = null;
 let realtimeReconnectAttempts = 0;
 let realtimeLastActivityAt = 0;
+let bootstrapRetryTimer = null;
 document.documentElement.dataset.uiLoadedAt = new Date().toISOString();
 
 const appState = {
@@ -339,25 +341,71 @@ const appState = {
 
 const COST_GUARD_TAKER_FEE_RATE = 0.0005;
 
-init();
+init().catch((error) => showClientError(`No se pudo iniciar el panel: ${error.message}`, 'bootstrap'));
 
 async function init() {
   bindEvents();
   initializeResponsiveControls();
-  const initialLoads = [loadState(), loadTelegram(), loadTelegramSource(), loadStrategyStudy(), loadOperationalStatus(), loadBingx()];
-  if (pnlHashTarget()) {
-    appState.postsDirty = true;
-  } else {
-    initialLoads.push(loadPosts());
-  }
-  await Promise.all(initialLoads);
   connectEvents();
   window.addEventListener('hashchange', () => {
     applyHashNavigation();
   });
-  applyHashNavigation();
   startReferenceRefreshLoop();
   window.lucide?.createIcons();
+
+  const failedLoads = await runBootstrapLoads(bootstrapLoadTasks());
+  applyHashNavigation();
+  scheduleBootstrapRetry(failedLoads);
+}
+
+function bootstrapLoadTasks() {
+  const tasks = [
+    { key: 'state', label: 'estado general', run: loadState },
+    { key: 'telegram', label: 'alertas Telegram', run: loadTelegram },
+    { key: 'telegram-source', label: 'fuente Telegram Web', run: loadTelegramSource },
+    { key: 'strategy-study', label: 'estudio estratégico', run: loadStrategyStudy },
+    { key: 'operational-status', label: 'estado operativo', run: loadOperationalStatus },
+    { key: 'bingx', label: 'estado BingX', run: loadBingx }
+  ];
+  if (pnlHashTarget()) {
+    appState.postsDirty = true;
+  } else {
+    tasks.push({ key: 'posts', label: 'publicaciones', run: loadPosts });
+  }
+  return tasks;
+}
+
+async function runBootstrapLoads(tasks) {
+  if (!tasks.length) {
+    clearClientError('bootstrap');
+    return [];
+  }
+
+  const results = await Promise.allSettled(tasks.map((task) => task.run()));
+  const failed = results.flatMap((result, index) => (
+    result.status === 'rejected'
+      ? [{ ...tasks[index], error: result.reason?.message || 'Error temporal' }]
+      : []
+  ));
+  if (failed.length) {
+    const detail = failed.map((task) => `${task.label}: ${task.error}`).join(' · ');
+    showClientError(`Panel cargado parcialmente. Reintentando ${detail}`, 'bootstrap');
+  } else {
+    clearClientError('bootstrap');
+  }
+  return failed;
+}
+
+function scheduleBootstrapRetry(tasks, attempt = 0) {
+  if (!tasks.length || bootstrapRetryTimer !== null) {
+    return;
+  }
+  const delay = BOOTSTRAP_RETRY_DELAYS_MS[Math.min(attempt, BOOTSTRAP_RETRY_DELAYS_MS.length - 1)];
+  bootstrapRetryTimer = window.setTimeout(async () => {
+    bootstrapRetryTimer = null;
+    const failed = await runBootstrapLoads(tasks);
+    scheduleBootstrapRetry(failed, attempt + 1);
+  }, delay);
 }
 
 function bindEvents() {
@@ -854,6 +902,8 @@ async function loadOperationalStatus() {
     appState.operationalStatus = {
       error: error.message
     };
+    renderGuardDashboard();
+    throw error;
   }
   renderGuardDashboard();
 }
@@ -9436,13 +9486,23 @@ function escapeAttribute(value) {
   return escapeHtml(value).replaceAll('`', '&#096;');
 }
 
-function showClientError(message) {
+function showClientError(message, source = 'action') {
+  if (source === 'bootstrap'
+    && elements.clientError.dataset.source === 'action'
+    && !elements.clientError.classList.contains('hidden')) {
+    return;
+  }
   elements.clientError.textContent = message;
+  elements.clientError.dataset.source = source;
   elements.clientError.classList.remove('hidden');
 }
 
-function clearClientError() {
+function clearClientError(source = '') {
+  if (source && elements.clientError.dataset.source !== source) {
+    return;
+  }
   elements.clientError.textContent = '';
+  delete elements.clientError.dataset.source;
   elements.clientError.classList.add('hidden');
 }
 
