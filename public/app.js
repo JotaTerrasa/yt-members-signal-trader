@@ -4389,6 +4389,7 @@ function renderGuardDashboard() {
     ['Backup cifrado', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
     ['Perfil Chromium', secureProfileBackupStatusText(secureBackup.profile), secureBackup.profile?.stale ? 'warn' : secureBackup.profile?.available ? 'positive' : 'warn'],
     ['Réplica externa', secureMirrorStatusText(secureBackup.mirror), secureMirrorTone(secureBackup.mirror)],
+    ['Clave recuperación', secureKeyRecoveryStatusText(secureBackup.keyRecovery), secureKeyRecoveryTone(secureBackup.keyRecovery)],
     ['Ultimo evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
@@ -4534,6 +4535,32 @@ function secureMirrorTone(mirror = {}) {
   }
   if (mirror.lastError || mirror.stale || !mirror.ok || !mirror.resilient) {
     return 'negative';
+  }
+  return 'positive';
+}
+
+function secureKeyRecoveryStatusText(keyRecovery = {}) {
+  if (keyRecovery.lastError) {
+    return 'error';
+  }
+  if (!keyRecovery.verified || !keyRecovery.checkedAt) {
+    return 'no verificada';
+  }
+  if (keyRecovery.sameVolume) {
+    return 'mismo disco';
+  }
+  return `${keyRecovery.stale ? 'caducada' : 'verificada'} ${humanLogAge(keyRecovery.checkedAt)}`;
+}
+
+function secureKeyRecoveryTone(keyRecovery = {}) {
+  if (!keyRecovery.verified) {
+    return 'warn';
+  }
+  if (keyRecovery.lastError || keyRecovery.stale) {
+    return 'negative';
+  }
+  if (keyRecovery.sameVolume || !keyRecovery.resilient) {
+    return 'warn';
   }
   return 'positive';
 }

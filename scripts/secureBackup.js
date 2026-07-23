@@ -1,5 +1,5 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { chmod, copyFile, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -28,6 +28,10 @@ async function main(values) {
   const args = parseArgs(values.slice(1));
   if (command === 'init-key') {
     await initializeKey(args.keyFile);
+  } else if (command === 'export-key') {
+    await exportBackupKey(args);
+  } else if (command === 'verify-key') {
+    await verifyBackupKey(args);
   } else if (command === 'configure-mirror') {
     await configureBackupMirror(args);
   } else if (command === 'disable-mirror') {
@@ -43,7 +47,7 @@ async function main(values) {
   } else if (command === 'restore') {
     await restoreBackup(args);
   } else {
-    fail('Uso: secureBackup.js init-key|configure-mirror|disable-mirror|mirror-status|create|verify|drill|restore [opciones]');
+    fail('Uso: secureBackup.js init-key|export-key|verify-key|configure-mirror|disable-mirror|mirror-status|create|verify|drill|restore [opciones]');
   }
 }
 
@@ -159,6 +163,203 @@ async function initializeKey(keyFileInput) {
   await writeFile(keyFile, `${randomBytes(48).toString('base64url')}\n`, { mode: 0o600, flag: 'wx' });
   await hardenPrivateFilePermissions(keyFile);
   console.log(JSON.stringify({ ok: true, created: true, keyFile }, null, 2));
+}
+
+export async function exportBackupKey(options = {}, {
+  root = projectRoot,
+  configFile,
+  silent = false
+} = {}) {
+  const targetInput = String(options.target || '').trim();
+  if (!targetInput) {
+    fail('Indica el archivo de destino con --target.');
+  }
+  const target = resolve(targetInput);
+  if (await stat(target).catch(() => null)) {
+    fail('El destino de la clave de recuperación ya existe. No se sobrescribe; usa verify-key para comprobarlo.');
+  }
+
+  const context = await inspectKeyRecoveryTarget(target, {
+    root,
+    keyFile: options.keyFile,
+    configFile: options.configFile || configFile,
+    allowSameVolume: Boolean(options.allowSameVolume)
+  });
+  const passphrase = await readPassphrase(context.keyFile);
+  const partialPath = `${context.targetFile}.${process.pid}-${Date.now()}.partial`;
+  let destinationCreated = false;
+  try {
+    await writeFile(partialPath, `${passphrase}\n`, { mode: 0o600, flag: 'wx' });
+    await hardenPrivateFilePermissions(partialPath);
+    const partialPassphrase = await readBackupKeyCandidate(partialPath);
+    if (!backupKeysEqual(passphrase, partialPassphrase)) {
+      fail('La copia temporal de la clave no coincide con la clave activa.');
+    }
+    await copyFile(partialPath, context.targetFile, constants.COPYFILE_EXCL);
+    destinationCreated = true;
+    await hardenPrivateFilePermissions(context.targetFile);
+    const exportedPassphrase = await readBackupKeyCandidate(context.targetFile);
+    if (!backupKeysEqual(passphrase, exportedPassphrase)) {
+      fail('La clave exportada no coincide con la clave activa.');
+    }
+
+    const result = keyRecoveryResult(context, passphrase);
+    await updateSecureBackupStatus({
+      keyRecovery: statusKeyRecoveryResult(result)
+    }, { root });
+    if (!silent) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    return result;
+  } catch (error) {
+    if (destinationCreated) {
+      await rm(context.targetFile, { force: true }).catch(() => {});
+    }
+    throw error;
+  } finally {
+    await rm(partialPath, { force: true }).catch(() => {});
+  }
+}
+
+export async function verifyBackupKey(options = {}, {
+  root = projectRoot,
+  configFile,
+  silent = false
+} = {}) {
+  const inputValue = String(options.input || options._?.[0] || '').trim();
+  if (!inputValue) {
+    fail('Indica la copia de la clave con --input.');
+  }
+  let context = null;
+  try {
+    context = await inspectKeyRecoveryTarget(resolve(inputValue), {
+      root,
+      keyFile: options.keyFile,
+      configFile: options.configFile || configFile,
+      allowSameVolume: true
+    });
+    const [passphrase, candidate] = await Promise.all([
+      readPassphrase(context.keyFile),
+      readBackupKeyCandidate(context.targetFile)
+    ]);
+    if (!backupKeysEqual(passphrase, candidate)) {
+      fail('La copia indicada no coincide con la clave activa de backup.');
+    }
+
+    const result = keyRecoveryResult(context, passphrase);
+    await updateSecureBackupStatus({
+      keyRecovery: statusKeyRecoveryResult(result)
+    }, { root });
+    if (!silent) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    return result;
+  } catch (error) {
+    const current = await readSecureBackupStatusRecord({ root });
+    await updateSecureBackupStatus({
+      keyRecovery: {
+        ...(current.keyRecovery || {}),
+        lastAttemptAt: new Date().toISOString(),
+        lastFailureAt: new Date().toISOString(),
+        lastError: safeStatusError(error)
+      }
+    }, { root }).catch(() => {});
+    throw error;
+  }
+}
+
+async function inspectKeyRecoveryTarget(targetFile, {
+  root,
+  keyFile,
+  configFile,
+  allowSameVolume
+}) {
+  const projectDir = resolve(root);
+  const activeKeyFile = resolveKeyFile(keyFile);
+  const targetParent = dirname(targetFile);
+  if (isPathWithin(projectDir, targetFile) || isPathWithin(dirname(activeKeyFile), targetFile)) {
+    fail('La clave de recuperación debe guardarse fuera del proyecto y del directorio de la clave activa.');
+  }
+
+  const mirror = await readBackupMirrorConfigRecord({ configFile });
+  if (mirror?.targetDir && isPathWithin(mirror.targetDir, targetFile)) {
+    fail('La clave de recuperación no puede guardarse junto a los backups cifrados de la réplica.');
+  }
+
+  await mkdir(targetParent, { recursive: true });
+  const [projectReal, targetParentReal, privateDirReal] = await Promise.all([
+    realpath(projectDir),
+    realpath(targetParent),
+    realpath(dirname(activeKeyFile)).catch(() => resolve(dirname(activeKeyFile)))
+  ]);
+  const canonicalTarget = join(targetParentReal, basename(targetFile));
+  if (isPathWithin(projectReal, canonicalTarget) || isPathWithin(privateDirReal, canonicalTarget)) {
+    fail('La clave de recuperación debe guardarse fuera del proyecto y del directorio de la clave activa.');
+  }
+  let mirrorReal = null;
+  if (mirror?.targetDir) {
+    mirrorReal = await realpath(mirror.targetDir).catch(() => resolve(mirror.targetDir));
+    if (isPathWithin(mirrorReal, canonicalTarget)) {
+      fail('La clave de recuperación no puede guardarse junto a los backups cifrados de la réplica.');
+    }
+  }
+
+  const [projectInfo, targetInfo, mirrorInfo] = await Promise.all([
+    stat(projectReal),
+    stat(targetParentReal),
+    mirrorReal ? stat(mirrorReal).catch(() => null) : null
+  ]);
+  if (mirrorInfo && mirrorInfo.dev === targetInfo.dev) {
+    fail('La clave de recuperación no puede guardarse en el mismo sistema de archivos que la réplica cifrada.');
+  }
+  const sameVolume = projectInfo.dev === targetInfo.dev;
+  if (sameVolume && !allowSameVolume) {
+    fail('El destino está en el mismo sistema de archivos. Usa otro soporte o confirma --allow-same-volume sin considerarlo resiliente.');
+  }
+  return {
+    keyFile: activeKeyFile,
+    targetFile: canonicalTarget,
+    targetLabel: keyRecoveryTargetLabel(canonicalTarget),
+    sameVolume,
+    resilient: !sameVolume
+  };
+}
+
+async function readBackupKeyCandidate(input) {
+  const value = String(await readFile(input, 'utf8').catch(() => '')).trim();
+  if (value.length < 24) {
+    fail('La copia indicada no contiene una clave de backup válida.');
+  }
+  return value;
+}
+
+function backupKeyDigest(value) {
+  return createHash('sha256').update(String(value), 'utf8').digest();
+}
+
+function backupKeysEqual(left, right) {
+  return timingSafeEqual(backupKeyDigest(left), backupKeyDigest(right));
+}
+
+function backupKeyFingerprint(value) {
+  return backupKeyDigest(value).toString('hex').slice(0, 16);
+}
+
+function keyRecoveryTargetLabel(targetFile) {
+  return basename(dirname(targetFile)) || 'soporte externo';
+}
+
+function keyRecoveryResult(context, passphrase) {
+  return {
+    ok: true,
+    verified: true,
+    checkedAt: new Date().toISOString(),
+    output: context.targetFile,
+    targetLabel: context.targetLabel,
+    fingerprint: backupKeyFingerprint(passphrase),
+    sameVolume: context.sameVolume,
+    resilient: context.resilient
+  };
 }
 
 async function hardenPrivateFilePermissions(keyFile) {
@@ -859,6 +1060,22 @@ function statusMirrorResult(result = {}) {
     resilient: Boolean(result.resilient),
     cloudSyncUnverified: Boolean(result.cloudSyncUnverified),
     lastError: safeStatusError(result.lastError || '') || null
+  };
+}
+
+function statusKeyRecoveryResult(result = {}) {
+  return {
+    verified: Boolean(result.verified),
+    checkedAt: validBackupTimestamp(result.checkedAt),
+    targetLabel: String(result.targetLabel || '').trim().slice(0, 120) || null,
+    fingerprint: /^[a-f0-9]{16}$/i.test(String(result.fingerprint || ''))
+      ? String(result.fingerprint).toLowerCase()
+      : null,
+    sameVolume: typeof result.sameVolume === 'boolean' ? result.sameVolume : null,
+    resilient: Boolean(result.resilient && result.sameVolume === false),
+    lastAttemptAt: validBackupTimestamp(result.checkedAt),
+    lastFailureAt: null,
+    lastError: null
   };
 }
 

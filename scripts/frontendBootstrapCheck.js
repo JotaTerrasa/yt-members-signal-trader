@@ -191,6 +191,14 @@ try {
           sameVolume: false,
           resilient: true,
           lastError: null
+        },
+        keyRecovery: {
+          verified: true,
+          stale: false,
+          checkedAt: new Date().toISOString(),
+          sameVolume: false,
+          resilient: true,
+          lastError: null
         }
       }
     };
@@ -206,6 +214,7 @@ try {
     || !backupContinuityPanel.includes('Perfil Chromium')
     || !backupContinuityPanel.includes('guardado')
     || !backupContinuityPanel.includes('Réplica externa')
+    || !backupContinuityPanel.includes('Clave recuperación')
     || !backupContinuityPanel.includes('verificada')) {
     throw new Error(`El panel no distingue las copias restaurables: ${backupContinuityPanel}.`);
   }

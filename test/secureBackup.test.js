@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
-import { configureBackupMirror, createBackup, createBackupCommand, disableBackupMirror, drillBackup, loadBackupMirrorConfig, mirrorBackupIfConfigured, validateBackupEntries, verifyBackup } from '../scripts/secureBackup.js';
+import { configureBackupMirror, createBackup, createBackupCommand, disableBackupMirror, drillBackup, exportBackupKey, loadBackupMirrorConfig, mirrorBackupIfConfigured, validateBackupEntries, verifyBackup, verifyBackupKey } from '../scripts/secureBackup.js';
 
 async function backupFixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'futures-magician-backup-test-'));
@@ -16,6 +16,12 @@ async function backupFixture(t) {
   await writeFile(keyFile, `${'test-backup-key-'.repeat(3)}\n`);
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, backupDir, keyFile };
+}
+
+async function recoveryFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'futures-magician-key-recovery-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  return root;
 }
 
 test('publica una copia cifrada solo después de verificarla', async (t) => {
@@ -88,6 +94,162 @@ test('demuestra una restauración real en un directorio temporal', async (t) => 
   assert.equal(drilled.cleaned, true);
   assert.deepEqual(drilled.roots, ['.data']);
   assert.ok(drilled.entries >= 3);
+});
+
+test('exporta y verifica la clave efectiva sin sobrescribir la copia de recuperación', async (t) => {
+  const fixture = await backupFixture(t);
+  const recoveryRoot = await recoveryFixture(t);
+  const target = join(recoveryRoot, 'custodia', 'backup.key');
+  const configFile = join(fixture.root, 'missing-mirror.json');
+
+  await assert.rejects(
+    exportBackupKey({ target, keyFile: fixture.keyFile }, {
+      root: fixture.root,
+      configFile,
+      silent: true
+    }),
+    /mismo sistema de archivos/
+  );
+  const exported = await exportBackupKey({
+    target,
+    keyFile: fixture.keyFile,
+    allowSameVolume: true
+  }, {
+    root: fixture.root,
+    configFile,
+    silent: true
+  });
+  const verified = await verifyBackupKey({ input: target, keyFile: fixture.keyFile }, {
+    root: fixture.root,
+    configFile,
+    silent: true
+  });
+  const status = JSON.parse(await readFile(join(fixture.backupDir, 'status.json'), 'utf8'));
+  const original = await readFile(target, 'utf8');
+
+  assert.equal(exported.ok, true);
+  assert.equal(exported.verified, true);
+  assert.match(exported.fingerprint, /^[a-f0-9]{16}$/);
+  assert.equal(verified.fingerprint, exported.fingerprint);
+  assert.equal(status.keyRecovery.verified, true);
+  assert.equal(status.keyRecovery.fingerprint, exported.fingerprint);
+  assert.equal(status.keyRecovery.targetLabel, 'custodia');
+  assert.equal((await readdir(dirname(target))).some((name) => name.endsWith('.partial')), false);
+  await assert.rejects(
+    exportBackupKey({
+      target,
+      keyFile: fixture.keyFile,
+      allowSameVolume: true
+    }, {
+      root: fixture.root,
+      configFile,
+      silent: true
+    }),
+    /ya existe/
+  );
+  assert.equal(await readFile(target, 'utf8'), original);
+});
+
+test('exporta la contraseña efectiva cuando procede del entorno', async (t) => {
+  const fixture = await backupFixture(t);
+  const recoveryRoot = await recoveryFixture(t);
+  const target = join(recoveryRoot, 'environment-backup.key');
+  const previous = process.env.FUTURES_BACKUP_PASSPHRASE;
+  const environmentPassphrase = 'clave-efectiva-desde-entorno-para-recuperacion';
+  process.env.FUTURES_BACKUP_PASSPHRASE = environmentPassphrase;
+  t.after(() => {
+    if (previous === undefined) {
+      delete process.env.FUTURES_BACKUP_PASSPHRASE;
+    } else {
+      process.env.FUTURES_BACKUP_PASSPHRASE = previous;
+    }
+  });
+
+  const exported = await exportBackupKey({
+    target,
+    keyFile: fixture.keyFile,
+    allowSameVolume: true
+  }, {
+    root: fixture.root,
+    configFile: join(fixture.root, 'missing-mirror.json'),
+    silent: true
+  });
+
+  assert.equal((await readFile(target, 'utf8')).trim(), environmentPassphrase);
+  assert.equal(exported.verified, true);
+});
+
+test('rechaza una copia de clave distinta y conserva el diagnóstico saneado', async (t) => {
+  const fixture = await backupFixture(t);
+  const recoveryRoot = await recoveryFixture(t);
+  const candidate = join(recoveryRoot, 'wrong-backup.key');
+  await writeFile(candidate, `${'otra-clave-segura-'.repeat(3)}\n`);
+
+  await assert.rejects(
+    verifyBackupKey({ input: candidate, keyFile: fixture.keyFile }, {
+      root: fixture.root,
+      configFile: join(fixture.root, 'missing-mirror.json'),
+      silent: true
+    }),
+    /no coincide/
+  );
+  const status = JSON.parse(await readFile(join(fixture.backupDir, 'status.json'), 'utf8'));
+  assert.ok(status.keyRecovery.lastFailureAt);
+  assert.match(status.keyRecovery.lastError, /no coincide/);
+  assert.equal(Object.hasOwn(status.keyRecovery, 'output'), false);
+});
+
+test('impide custodiar la clave dentro del proyecto o junto a la réplica cifrada', async (t) => {
+  const fixture = await backupFixture(t);
+  const recoveryRoot = await recoveryFixture(t);
+  const mirrorDir = join(recoveryRoot, 'mirror');
+  const configFile = join(fixture.root, 'private', 'backup-mirror.json');
+  await configureBackupMirror({ target: mirrorDir, allowSameVolume: true }, {
+    configFile,
+    localBackupDir: fixture.backupDir,
+    root: fixture.root,
+    silent: true
+  });
+
+  await assert.rejects(
+    exportBackupKey({
+      target: join(fixture.root, 'unsafe.key'),
+      keyFile: fixture.keyFile,
+      allowSameVolume: true
+    }, {
+      root: fixture.root,
+      configFile,
+      silent: true
+    }),
+    /fuera del proyecto/
+  );
+  await assert.rejects(
+    exportBackupKey({
+      target: join(mirrorDir, 'unsafe.key'),
+      keyFile: fixture.keyFile,
+      allowSameVolume: true
+    }, {
+      root: fixture.root,
+      configFile,
+      silent: true
+    }),
+    /junto a los backups cifrados/
+  );
+  await assert.rejects(
+    exportBackupKey({
+      target: join(recoveryRoot, 'sibling-key-dir', 'unsafe.key'),
+      keyFile: fixture.keyFile,
+      allowSameVolume: true
+    }, {
+      root: fixture.root,
+      configFile,
+      silent: true
+    }),
+    /mismo sistema de archivos que la réplica cifrada/
+  );
+  assert.equal(await stat(join(fixture.root, 'unsafe.key')).catch(() => null), null);
+  assert.equal(await stat(join(mirrorDir, 'unsafe.key')).catch(() => null), null);
+  assert.equal(await stat(join(recoveryRoot, 'sibling-key-dir', 'unsafe.key')).catch(() => null), null);
 });
 
 test('rechaza rutas que podrían salir del destino de restauración', () => {

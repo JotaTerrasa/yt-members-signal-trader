@@ -167,6 +167,8 @@ El registro crea tres tareas: restauración de PM2 al iniciar sesión, backup ci
 
 Si existe `~/.futures-magician/backup-mirror.json` y está habilitado, las mismas tareas publican además una copia verificada en el destino configurado. La aplicación no crea esa configuración por sí sola: usa `npm run backup:secure:mirror:configure -- --target "RUTA"` después de decidir dónde almacenar el contenedor cifrado. `npm run backup:secure:mirror:disable` detiene futuras réplicas sin borrar la configuración ni las copias existentes.
 
+La clave debe sobrevivir a la pérdida del equipo, pero no debe viajar junto a esos contenedores. Expórtala una sola vez a otro soporte con `npm run backup:secure:key:export -- --target "RUTA_ARCHIVO"` y revísala con `npm run backup:secure:key:verify -- --input "RUTA_ARCHIVO"`. Ambos comandos son manuales; las tareas programadas nunca copian la clave.
+
 ## 7. Verificación
 
 Health:

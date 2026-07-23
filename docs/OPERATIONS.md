@@ -380,6 +380,15 @@ Backup diario de datos:
 npm run backup:secure
 ```
 
+Custodia y comprobación de la clave en un soporte distinto:
+
+```powershell
+npm run backup:secure:key:export -- --target "E:\FuturesMagicianRecovery\backup.key"
+npm run backup:secure:key:verify -- --input "E:\FuturesMagicianRecovery\backup.key"
+```
+
+La exportación exige una ruta explícita, no sobrescribe, verifica la copia y rechaza el proyecto y todo el sistema de archivos que contenga la réplica cifrada. Guarda la clave y los `.fmbak` en soportes separados. La guardia muestra `Clave recuperación` en verde solo cuando la última comprobación corresponde a otro volumen; una copia en el mismo disco permanece como advertencia.
+
 Backup de datos y perfil Chromium, deteniendo PM2 durante la captura:
 
 ```powershell

@@ -468,6 +468,15 @@ Inicializa una clave fuera del repositorio una sola vez:
 npm run backup:secure:init
 ```
 
+Custodia una copia de esa clave en otro soporte y compruébala periódicamente:
+
+```powershell
+npm run backup:secure:key:export -- --target "E:\FuturesMagicianRecovery\backup.key"
+npm run backup:secure:key:verify -- --input "E:\FuturesMagicianRecovery\backup.key"
+```
+
+`key:export` copia la clave efectiva, incluida la definida mediante `FUTURES_BACKUP_PASSPHRASE`, aplica permisos privados, verifica la huella y nunca sobrescribe un destino existente. Rechaza rutas dentro del proyecto, del directorio de la clave activa, de la réplica cifrada o de su mismo sistema de archivos. Por defecto también rechaza el mismo volumen que el proyecto; `--allow-same-volume` permite una copia deliberada cuando no comparte soporte con la réplica, pero la interfaz la marca como no resiliente. La clave no es otro backup: debe guardarse separada de los `.fmbak` y tratarse como un secreto.
+
 Crea, verifica y somete a un simulacro de restauración un backup de `.data/`:
 
 ```bash
@@ -478,7 +487,7 @@ node scripts/secureBackup.js drill --input ".data/backups/secure/ARCHIVO.fmbak"
 
 `npm run backup:secure` cifra primero en un archivo parcial, lo descifra, valida el contenedor y sus rutas, lo publica con extensión `.fmbak` y realiza una extracción completa en un directorio temporal que elimina al terminar. Si falla el archivado, el cifrado, la validación o el simulacro, la tarea queda marcada como fallida. El comando `verify` vuelve a comprobar una copia sin extraerla; `drill` demuestra que una copia antigua o transportada se puede restaurar.
 
-El resultado se guarda sin secretos en `.data/backups/secure/status.json`. La guardia nocturna distingue en pantalla el backup redactado, el backup cifrado restaurado y la antigüedad de la última copia del perfil Chromium. La tarea diaria de las 03:15 y la semanal del perfil ejecutan el simulacro automáticamente. No se elimina ninguna copia histórica.
+El resultado se guarda sin secretos en `.data/backups/secure/status.json`. La guardia nocturna distingue en pantalla el backup redactado, el backup cifrado restaurado, la antigüedad de la última copia del perfil Chromium y si existe una clave de recuperación verificada en otro volumen. Solo publica una huella corta y una etiqueta saneada, nunca la clave ni su ruta completa. La tarea diaria de las 03:15 y la semanal del perfil ejecutan el simulacro automáticamente. No se elimina ninguna copia histórica.
 
 Para añadir una segunda copia en otra unidad o recurso montado, configura el destino de forma explícita:
 

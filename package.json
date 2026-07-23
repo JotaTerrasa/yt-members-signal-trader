@@ -22,6 +22,8 @@
     "study:strategy": "node scripts/strategyStudy.js",
     "audit:system": "node scripts/systemAudit.js",
     "backup:secure:init": "node scripts/secureBackup.js init-key",
+    "backup:secure:key:export": "node scripts/secureBackup.js export-key",
+    "backup:secure:key:verify": "node scripts/secureBackup.js verify-key",
     "backup:secure": "node scripts/secureBackup.js create --drill",
     "backup:secure:profile": "node scripts/secureBackup.js create --include-profile --drill",
     "backup:secure:profile:maintenance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profileBackup.ps1",

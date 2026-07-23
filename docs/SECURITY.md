@@ -131,7 +131,9 @@ Reglas:
 
 - no subas la clave ni archivos `.fmbak` a Git;
 - al inicializarla, el script limita sus permisos al usuario actual en Windows y a modo `0600` en Linux/macOS;
-- guarda una copia de la clave separada del backup;
+- guarda una copia de la clave separada del backup mediante `backup:secure:key:export` y vuelve a comprobarla con `backup:secure:key:verify`;
+- no guardes la clave de recuperación dentro del proyecto ni en el mismo sistema de archivos que los `.fmbak` de la réplica: el comando rechaza ambas ubicaciones y no sobrescribe archivos existentes;
+- una clave copiada al mismo volumen no protege frente a la pérdida del equipo; `--allow-same-volume` solo confirma conscientemente esa limitación;
 - la creación descifra y valida automáticamente cada archivo parcial antes de publicarlo como `.fmbak`;
 - las tareas programadas extraen después el backup en un directorio temporal, comprueban sus raíces y lo eliminan al terminar;
 - cualquier ruta absoluta, transversal o ajena a `.data` y `.yt-profile` se rechaza antes de extraer;
@@ -145,7 +147,7 @@ Reglas:
 - para respaldar `.yt-profile/`, detén Chromium/PM2 mediante `scripts/profileBackup.ps1` para que Cookies no quede bloqueado;
 - no excluyas Cookies del backup del perfil: contiene la sesión que permite recuperar el acceso web.
 
-La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro, raíces permitidas y salud de la réplica. No publica la clave, la ruta completa del destino, la contraseña derivada ni el contenido del backup. La configuración privada vive en `~/.futures-magician/backup-mirror.json` con permisos restringidos al usuario.
+La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro, raíces permitidas, salud de la réplica y verificación de la clave de recuperación. De esta última solo expone una huella SHA-256 truncada, una etiqueta saneada y si está en otro volumen. No publica la clave, la ruta completa del destino, la contraseña derivada ni el contenido del backup. La configuración privada vive en `~/.futures-magician/backup-mirror.json` con permisos restringidos al usuario.
 
 ## UI expuesta
 

@@ -1,5 +1,6 @@
 const DATA_BACKUP_STALE_SECONDS = 36 * 60 * 60;
 const PROFILE_BACKUP_STALE_SECONDS = 8 * 24 * 60 * 60;
+const KEY_RECOVERY_STALE_SECONDS = 180 * 24 * 60 * 60;
 
 export function buildSecureBackupStatus(record = {}, now = Date.now()) {
   const lastSuccessAt = validIso(record.lastSuccessAt);
@@ -9,11 +10,13 @@ export function buildSecureBackupStatus(record = {}, now = Date.now()) {
   const profileSuccessAt = validIso(record.lastProfileSuccessAt);
   const profileDrillCheckedAt = validIso(record.profileRestoreDrill?.checkedAt);
   const mirrorCheckedAt = validIso(record.mirror?.checkedAt);
+  const keyRecoveryCheckedAt = validIso(record.keyRecovery?.checkedAt);
   const ageSeconds = secondsSince(lastSuccessAt, now);
   const drillAgeSeconds = secondsSince(drillCheckedAt, now);
   const profileAgeSeconds = secondsSince(profileSuccessAt, now);
   const profileDrillAgeSeconds = secondsSince(profileDrillCheckedAt, now);
   const mirrorAgeSeconds = secondsSince(mirrorCheckedAt, now);
+  const keyRecoveryAgeSeconds = secondsSince(keyRecoveryCheckedAt, now);
   const drillOk = Boolean(record.restoreDrill?.ok && record.restoreDrill?.extracted);
 
   return {
@@ -68,6 +71,22 @@ export function buildSecureBackupStatus(record = {}, now = Date.now()) {
       resilient: Boolean(record.mirror?.resilient && record.mirror?.sameVolume === false),
       cloudSyncUnverified: Boolean(record.mirror?.cloudSyncUnverified),
       lastError: safeText(record.mirror?.lastError)
+    },
+    keyRecovery: {
+      verified: Boolean(record.keyRecovery?.verified),
+      checkedAt: keyRecoveryCheckedAt,
+      ageSeconds: keyRecoveryAgeSeconds,
+      stale: !record.keyRecovery?.verified
+        || keyRecoveryAgeSeconds === null
+        || keyRecoveryAgeSeconds > KEY_RECOVERY_STALE_SECONDS,
+      targetLabel: safeLabel(record.keyRecovery?.targetLabel),
+      fingerprint: safeFingerprint(record.keyRecovery?.fingerprint),
+      sameVolume: typeof record.keyRecovery?.sameVolume === 'boolean'
+        ? record.keyRecovery.sameVolume
+        : null,
+      resilient: Boolean(record.keyRecovery?.resilient && record.keyRecovery?.sameVolume === false),
+      lastFailureAt: validIso(record.keyRecovery?.lastFailureAt),
+      lastError: safeText(record.keyRecovery?.lastError)
     }
   };
 }
@@ -95,6 +114,11 @@ function safeText(value) {
 
 function safeLabel(value) {
   return String(value || '').replace(/[\r\n\\/]+/g, ' ').trim().slice(0, 120) || null;
+}
+
+function safeFingerprint(value) {
+  const fingerprint = String(value || '').trim().toLowerCase();
+  return /^[a-f0-9]{16}$/.test(fingerprint) ? fingerprint : null;
 }
 
 function positiveNumber(value) {

@@ -36,6 +36,14 @@ test('publica una copia reciente y restaurada sin exponer campos desconocidos', 
       sameVolume: false,
       resilient: true
     },
+    keyRecovery: {
+      verified: true,
+      checkedAt: '2026-07-22T11:03:00.000Z',
+      targetLabel: 'USB recuperación',
+      fingerprint: '0123456789abcdef',
+      sameVolume: false,
+      resilient: true
+    },
     secretField: 'no-publicar'
   }, now);
 
@@ -49,6 +57,10 @@ test('publica una copia reciente y restaurada sin exponer campos desconocidos', 
   assert.equal(status.mirror.ok, true);
   assert.equal(status.mirror.stale, false);
   assert.equal(status.mirror.resilient, true);
+  assert.equal(status.keyRecovery.verified, true);
+  assert.equal(status.keyRecovery.stale, false);
+  assert.equal(status.keyRecovery.resilient, true);
+  assert.equal(status.keyRecovery.fingerprint, '0123456789abcdef');
   assert.equal(Object.hasOwn(status, 'secretField'), false);
 });
 
@@ -84,7 +96,14 @@ test('sanea nombres, errores y fechas antes de enviarlos al navegador', () => {
     lastSuccessAt: 'fecha-invalida',
     lastFile: '../backup.fmbak',
     lastError: 'fallo\ncon detalle',
-    bytes: -1
+    bytes: -1,
+    keyRecovery: {
+      verified: true,
+      checkedAt: 'fecha-invalida',
+      targetLabel: '../USB\\privado',
+      fingerprint: 'no-es-una-huella',
+      lastError: 'fallo\nclave'
+    }
   }, now);
 
   assert.equal(status.available, false);
@@ -92,4 +111,9 @@ test('sanea nombres, errores y fechas antes de enviarlos al navegador', () => {
   assert.equal(status.lastError, 'fallo con detalle');
   assert.equal(status.bytes, null);
   assert.equal(status.stale, true);
+  assert.equal(status.keyRecovery.checkedAt, null);
+  assert.equal(status.keyRecovery.targetLabel, '.. USB privado');
+  assert.equal(status.keyRecovery.fingerprint, null);
+  assert.equal(status.keyRecovery.lastError, 'fallo clave');
+  assert.equal(status.keyRecovery.stale, true);
 });
