@@ -189,7 +189,7 @@ Comprobación portable:
 npm run package:check
 ```
 
-Cada push a `main` y cada pull request ejecutan además la validación automática de GitHub Actions:
+Cada push a `main` y cada pull request ejecutan además la validación automática de GitHub Actions. El mismo workflow admite una ejecución manual desde Actions cuando sea necesario recuperar o repetir una validación:
 
 - instalación reproducible con `npm ci`;
 - comprobación de sintaxis y suite completa en Node.js 20 y 24;
