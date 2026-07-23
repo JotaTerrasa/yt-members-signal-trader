@@ -45,16 +45,21 @@ async function main(values) {
   }
 }
 
-async function createBackupCommand(options) {
+export async function createBackupCommand(options, { root = projectRoot, silent = false } = {}) {
   const attemptedAt = new Date().toISOString();
   let created = null;
+  let restoreDrill = null;
   let mirror = null;
   try {
-    created = await createBackup(options, { silent: true });
-    const restoreDrill = options.drill
+    created = await createBackup(options, { root, silent: true });
+    restoreDrill = options.drill
       ? await drillBackup({ input: created.output, keyFile: options.keyFile }, { silent: true })
       : null;
-    mirror = await mirrorBackupIfConfigured(created.output, { keyFile: options.keyFile });
+    mirror = await mirrorBackupIfConfigured(created.output, {
+      keyFile: options.keyFile,
+      configFile: options.configFile,
+      localBackupDir: dirname(created.output)
+    });
     const successAt = validBackupTimestamp(restoreDrill?.metadata?.createdAt) || new Date().toISOString();
     await updateSecureBackupStatus({
       lastAttemptAt: attemptedAt,
@@ -73,11 +78,7 @@ async function createBackupCommand(options) {
         profileBytes: created.bytes,
         profileRestoreDrill: statusDrillResult(restoreDrill)
       } : {})
-    });
-    if (mirror.configured && !mirror.ok) {
-      fail(`El backup local es correcto, pero la réplica externa falló: ${mirror.lastError}`);
-    }
-    console.log(JSON.stringify({ ...created, restoreDrill, mirror }, null, 2));
+    }, { root });
   } catch (error) {
     await updateSecureBackupStatus({
       lastAttemptAt: attemptedAt,
@@ -90,9 +91,18 @@ async function createBackupCommand(options) {
         verified: created.verified,
         ...(mirror ? { mirror: statusMirrorResult(mirror) } : {})
       } : {})
-    }).catch(() => {});
+    }, { root }).catch(() => {});
     throw error;
   }
+
+  if (mirror.configured && !mirror.ok) {
+    fail(`El backup local es correcto, pero la réplica externa falló: ${mirror.lastError}`);
+  }
+  const result = { ...created, restoreDrill, mirror };
+  if (!silent) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+  return result;
 }
 
 async function drillBackupCommand(options) {

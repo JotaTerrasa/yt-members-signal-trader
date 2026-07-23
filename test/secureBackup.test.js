@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
-import { configureBackupMirror, createBackup, drillBackup, mirrorBackupIfConfigured, validateBackupEntries, verifyBackup } from '../scripts/secureBackup.js';
+import { configureBackupMirror, createBackup, createBackupCommand, drillBackup, mirrorBackupIfConfigured, validateBackupEntries, verifyBackup } from '../scripts/secureBackup.js';
 
 async function backupFixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'futures-magician-backup-test-'));
@@ -199,6 +199,47 @@ test('conserva el backup local y denuncia una réplica existente dañada', async
   assert.deepEqual(await readFile(output), original);
   assert.deepEqual(await readFile(mirrorOutput), damaged);
   assert.equal((await readdir(mirrorDir)).some((name) => name.endsWith('.partial')), false);
+});
+
+test('un fallo exclusivo de réplica no marca como fallido el backup local restaurado', async (t) => {
+  const fixture = await backupFixture(t);
+  const output = join(fixture.backupDir, 'local-success-mirror-failure.fmbak');
+  const invalidTarget = join(fixture.root, 'mirror-target-is-a-file');
+  const configFile = join(fixture.root, 'private', 'failing-backup-mirror.json');
+  await mkdir(join(fixture.root, 'private'), { recursive: true });
+  await writeFile(invalidTarget, 'no es un directorio');
+  await writeFile(configFile, JSON.stringify({
+    version: 1,
+    enabled: true,
+    targetDir: invalidTarget,
+    allowSameVolume: true,
+    configuredAt: new Date().toISOString()
+  }));
+
+  await assert.rejects(
+    createBackupCommand({
+      output,
+      keyFile: fixture.keyFile,
+      configFile,
+      drill: true
+    }, {
+      root: fixture.root,
+      silent: true
+    }),
+    /backup local es correcto, pero la réplica externa falló/
+  );
+
+  const status = JSON.parse(await readFile(join(fixture.backupDir, 'status.json'), 'utf8'));
+  assert.ok(status.lastSuccessAt);
+  assert.equal(status.lastFailureAt, null);
+  assert.equal(status.lastError, null);
+  assert.equal(status.verified, true);
+  assert.equal(status.restoreDrill.ok, true);
+  assert.equal(status.restoreDrill.extracted, true);
+  assert.equal(status.mirror.configured, true);
+  assert.equal(status.mirror.ok, false);
+  assert.ok(status.mirror.lastError);
+  assert.equal((await verifyBackup({ input: output, keyFile: fixture.keyFile }, { silent: true })).ok, true);
 });
 
 test('no sustituye una copia que ya existe', async (t) => {
