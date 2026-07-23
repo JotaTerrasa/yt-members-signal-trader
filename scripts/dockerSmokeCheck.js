@@ -55,6 +55,7 @@ async function main() {
       realtimePayloadRecovery: frontendCheck.realtimeRecovered,
       bootstrapTimeoutRecovery: frontendCheck.timeoutRecovered,
       frontendVersionUpdate: frontendCheck.frontendVersionUpdatePassed,
+      frontendAutoReload: frontendCheck.frontendAutoReloadPassed,
       viewTabsKeyboard: frontendCheck.viewTabsKeyboardPassed,
       logGrouping: frontendCheck.logGroupingPassed,
       incidentLifecycle: frontendCheck.incidentLifecyclePassed,
@@ -128,6 +129,7 @@ function verifyFrontendBootstrap(container) {
     || result.timeoutInjectedFailures !== 1
     || !result.timeoutRecovered
     || !result.frontendVersionUpdatePassed
+    || !result.frontendAutoReloadPassed
     || !result.viewTabsKeyboardPassed
     || !result.logGroupingPassed
     || !result.incidentLifecyclePassed

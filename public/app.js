@@ -255,6 +255,7 @@ const elements = {
   bingxParserText: document.querySelector('#bingx-parser-text'),
   bingxStatus: document.querySelector('#bingx-status'),
   frontendUpdate: document.querySelector('#frontend-update'),
+  frontendUpdateMessage: document.querySelector('#frontend-update-message'),
   frontendUpdateAction: document.querySelector('#frontend-update-action'),
   clientError: document.querySelector('#client-error')
 };
@@ -279,6 +280,8 @@ const REALTIME_RECONNECT_MAX_MS = 15 * 1000;
 const RUNTIME_STORAGE_KEY = 'futures-magician-runtime-id';
 const FRONTEND_VERSION_ASSETS = ['/index.html', '/app.js', '/styles.css', '/polish.css'];
 const FRONTEND_VERSION_CHECK_MS = 60 * 1000;
+const FRONTEND_UPDATE_AUTO_RELOAD_MS = 5000;
+const FRONTEND_UPDATE_EDITING_RETRY_MS = 5000;
 const BOOTSTRAP_RETRY_DELAYS_MS = [2000, 5000, 15_000, 30_000];
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8000;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -299,6 +302,7 @@ let realtimeLastActivityAt = 0;
 let realtimePayloadFailures = 0;
 let bootstrapRetryTimer = null;
 let frontendVersionTimer = null;
+let frontendUpdateReloadTimer = null;
 let frontendVersionFingerprint = '';
 let frontendVersionChecking = false;
 document.documentElement.dataset.uiLoadedAt = new Date().toISOString();
@@ -437,13 +441,7 @@ function scheduleBootstrapRetry(tasks, attempt = 0) {
 
 function bindEvents() {
   elements.frontendUpdateAction?.addEventListener('click', () => {
-    elements.frontendUpdateAction.disabled = true;
-    elements.frontendUpdateAction.setAttribute('aria-busy', 'true');
-    const label = elements.frontendUpdateAction.querySelector('span');
-    if (label) {
-      label.textContent = 'Actualizando...';
-    }
-    window.location.reload();
+    reloadFrontendDocument();
   });
 
   elements.toggleControls?.addEventListener('click', () => {
@@ -1538,10 +1536,58 @@ async function checkFrontendVersion() {
 
     document.documentElement.dataset.uiVersionStatus = 'outdated';
     elements.frontendUpdate?.classList.remove('hidden');
+    if (elements.frontendUpdateMessage) {
+      elements.frontendUpdateMessage.textContent = 'La interfaz se actualizará automáticamente en unos segundos. El monitor seguirá funcionando.';
+    }
     window.lucide?.createIcons();
+    scheduleFrontendUpdateReload();
   } finally {
     frontendVersionChecking = false;
   }
+}
+
+function scheduleFrontendUpdateReload(delay = FRONTEND_UPDATE_AUTO_RELOAD_MS) {
+  if (frontendUpdateReloadTimer !== null) {
+    return;
+  }
+
+  frontendUpdateReloadTimer = window.setTimeout(() => {
+    frontendUpdateReloadTimer = null;
+    if (document.documentElement.dataset.uiVersionStatus !== 'outdated') {
+      return;
+    }
+    if (frontendHasActiveEditor()) {
+      if (elements.frontendUpdateMessage) {
+        elements.frontendUpdateMessage.textContent = 'La actualización está lista y se aplicará cuando termines de editar. El monitor sigue funcionando.';
+      }
+      scheduleFrontendUpdateReload(FRONTEND_UPDATE_EDITING_RETRY_MS);
+      return;
+    }
+    reloadFrontendDocument();
+  }, Math.max(0, Number(delay) || 0));
+}
+
+function frontendHasActiveEditor() {
+  const active = document.activeElement;
+  return Boolean(active && active.matches?.('input, textarea, select, [contenteditable="true"]'));
+}
+
+function reloadFrontendDocument() {
+  if (frontendUpdateReloadTimer !== null) {
+    window.clearTimeout(frontendUpdateReloadTimer);
+    frontendUpdateReloadTimer = null;
+  }
+  if (elements.frontendUpdateAction) {
+    elements.frontendUpdateAction.disabled = true;
+    elements.frontendUpdateAction.setAttribute('aria-busy', 'true');
+    const label = elements.frontendUpdateAction.querySelector('span');
+    if (label) {
+      label.textContent = 'Actualizando...';
+    }
+  }
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set('ui-version', String(Date.now()));
+  window.location.replace(nextUrl.toString());
 }
 
 async function readFrontendVersionFingerprint() {

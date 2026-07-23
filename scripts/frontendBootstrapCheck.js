@@ -283,7 +283,7 @@ try {
   await versionPage.waitForFunction(() => (
     document.documentElement.dataset.uiVersionStatus === 'outdated'
       && !document.querySelector('#frontend-update')?.classList.contains('hidden')
-      && document.querySelector('#frontend-update-action')?.textContent.includes('Actualizar interfaz')
+      && document.querySelector('#frontend-update-action')?.textContent.includes('Actualizar ahora')
   ), null, { timeout: 10_000 });
   await versionPage.setViewportSize({ width: 390, height: 844 });
   const updateBannerGeometry = await versionPage.evaluate(() => {
@@ -317,6 +317,67 @@ try {
   ), null, { timeout: 15_000 });
   if (versionDocumentRequests < 2 || versionPageErrors.length) {
     throw new Error(`La actualización del frontend no completó su recarga: ${versionDocumentRequests} documentos · ${versionPageErrors.join(' | ')}`);
+  }
+
+  const autoVersionPage = await browser.newPage();
+  const autoVersionPageErrors = [];
+  let autoFrontendVersionTag = 'v1';
+  let autoVersionDocumentRequests = 0;
+  autoVersionPage.on('pageerror', (error) => autoVersionPageErrors.push(error.message));
+  autoVersionPage.on('request', (request) => {
+    if (request.resourceType() === 'document') {
+      autoVersionDocumentRequests += 1;
+    }
+  });
+  await autoVersionPage.route('**/*?ui-version-check=1', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        etag: `"${autoFrontendVersionTag}"`,
+        'last-modified': 'Thu, 23 Jul 2026 00:00:00 GMT',
+        'content-length': '0'
+      },
+      body: ''
+    });
+  });
+  await autoVersionPage.goto(`${baseUrl}/?frontend-auto-update-check=${Date.now()}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await autoVersionPage.waitForFunction(() => (
+    document.documentElement.dataset.uiVersionStatus === 'current'
+  ), null, { timeout: 10_000 });
+  await autoVersionPage.locator('#channel-url').focus();
+  autoFrontendVersionTag = 'v2';
+  await autoVersionPage.evaluate(() => checkFrontendVersion());
+  await autoVersionPage.evaluate(() => {
+    window.clearTimeout(frontendUpdateReloadTimer);
+    frontendUpdateReloadTimer = null;
+    scheduleFrontendUpdateReload(50);
+  });
+  await autoVersionPage.waitForTimeout(150);
+  const editingDeferral = await autoVersionPage.evaluate(() => ({
+    documentRequests: performance.getEntriesByType('navigation').length,
+    status: document.documentElement.dataset.uiVersionStatus,
+    message: document.querySelector('#frontend-update-message')?.textContent || ''
+  }));
+  if (autoVersionDocumentRequests !== 1
+    || editingDeferral.status !== 'outdated'
+    || !editingDeferral.message.includes('cuando termines de editar')) {
+    throw new Error(`La actualización automática interrumpió una edición activa: ${JSON.stringify({ autoVersionDocumentRequests, editingDeferral })}.`);
+  }
+  await autoVersionPage.evaluate(() => {
+    document.activeElement?.blur();
+    window.clearTimeout(frontendUpdateReloadTimer);
+    frontendUpdateReloadTimer = null;
+    scheduleFrontendUpdateReload(50);
+  });
+  await autoVersionPage.waitForFunction(() => (
+    document.documentElement.dataset.uiVersionStatus === 'current'
+      && document.querySelector('#frontend-update')?.classList.contains('hidden')
+  ), null, { timeout: 15_000 });
+  if (autoVersionDocumentRequests < 2 || autoVersionPageErrors.length) {
+    throw new Error(`La actualización automática del frontend no terminó: ${autoVersionDocumentRequests} documentos · ${autoVersionPageErrors.join(' | ')}`);
   }
 
   const realtimePage = await browser.newPage();
@@ -1031,6 +1092,7 @@ try {
     timeoutInjectedFailures,
     timeoutRecovered: true,
     frontendVersionUpdatePassed: true,
+    frontendAutoReloadPassed: true,
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     incidentLifecyclePassed: true,
