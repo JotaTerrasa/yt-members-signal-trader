@@ -39,7 +39,7 @@ npm run study:strategy -- --days 30
 npm run lint
 ```
 
-Solo puede publicar `docs/strategy-reports/latest.md`, el informe fechado del día y documentación estrictamente relacionada. `.data/strategy-study/strategy-study.json` permanece local. Si BingX no responde, el informe únicamente se acepta cuando declara la degradación de calidad y el fallback local.
+Solo puede publicar `docs/strategy-reports/latest.md`, el informe fechado del día y documentación estrictamente relacionada. `.data/strategy-study/strategy-study.json` permanece local. Si BingX no responde, el informe únicamente se acepta cuando declara la degradación de calidad y el respaldo local.
 
 ## Documentación y Docker
 

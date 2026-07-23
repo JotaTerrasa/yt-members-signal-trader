@@ -40,7 +40,7 @@ Regla de tipo de orden:
 
 ## Correcciones de una publicación
 
-En Demo VST, si YouTube edita una publicación reciente y corrige la entrada, el stop o el apalancamiento, la app vuelve a evaluar solo esa apertura. Se mantienen la edad máxima, todas las validaciones y el antiduplicados. Una edición de texto explicativo o de take profits no dispara una apertura nueva. Esta recuperación no se aplica en Live real.
+En Demo VST, si YouTube edita una publicación reciente y corrige la entrada, el stop o el apalancamiento, la aplicación vuelve a evaluar solo esa apertura. Se mantienen la edad máxima, todas las validaciones y el antiduplicados. Una edición de texto explicativo o de take profits no dispara una apertura nueva. Esta recuperación no se aplica en el modo real.
 
 ## Direcciones
 
@@ -171,7 +171,7 @@ X25
 Regla:
 
 - Si la señal trae apalancamiento, se usa ese valor.
-- Si no trae, se usa el fallback configurado.
+- Si no lo incluye, se usa el respaldo configurado.
 - Si supera el máximo local o del contrato, se bloquea.
 
 ## Notional
@@ -244,7 +244,7 @@ BREAK EVEN SOL
 
 Estado:
 
-- En paper local mueve el stop al precio de entrada.
+- En la simulación local mueve el stop al precio de entrada.
 - En Demo VST y live se registra como evento detectado.
 
 ## Telegram Web

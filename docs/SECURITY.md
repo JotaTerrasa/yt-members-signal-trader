@@ -61,9 +61,9 @@ Reglas:
 - No compartas `.data/config.json`.
 - No publiques capturas donde se vean tokens, chat IDs, API keys o URLs privadas.
 
-## Live real
+## Modo real
 
-Live real requiere confirmación manual en la UI. Aun así:
+El modo real requiere confirmación manual en la interfaz. Aun así:
 
 - valida primero en `test`;
 - valida después en `demo`;
@@ -119,7 +119,7 @@ No incluyas:
 - capturas con información sensible;
 - logs con claves.
 
-## Backups cifrados
+## Copias cifradas
 
 Los backups restaurables usan AES-256-GCM y una clave derivada con scrypt. La clave predeterminada vive fuera del proyecto:
 

@@ -727,9 +727,9 @@ function bindEvents() {
       const readiness = liveReadiness();
       if (!readiness.ready) {
         renderLiveReadiness(readiness);
-        throw new Error('Live aún no está preparado. Revisa la lista de comprobación.');
+        throw new Error('El modo real aún no está preparado. Revisa la lista de comprobación.');
       }
-      const confirmed = confirm('Vas a armar LIVE REAL. Las próximas señales válidas podrán enviar órdenes reales a BingX. ¿Continuar?');
+      const confirmed = confirm('Vas a activar el modo REAL. Las próximas señales válidas podrán enviar órdenes reales a BingX. ¿Continuar?');
       if (!confirmed) {
         return;
       }
@@ -737,7 +737,7 @@ function bindEvents() {
       elements.bingxMode.value = 'live';
       elements.bingxLiveConfirm.checked = true;
       const bingx = await saveBingxConfig();
-      renderBingx(bingx, 'Live armado');
+      renderBingx(bingx, 'Modo real armado');
       renderPnl();
     });
   });
@@ -746,7 +746,7 @@ function bindEvents() {
       elements.bingxMode.value = 'test';
       elements.bingxLiveConfirm.checked = false;
       const bingx = await saveBingxConfig();
-      renderBingx(bingx, 'Modo test armado');
+      renderBingx(bingx, 'Modo de prueba armado');
       renderPnl();
     });
   });
@@ -908,7 +908,7 @@ function bindEvents() {
       const bingx = await saveBingxConfig();
       let confirmToken = '';
       if (bingx.mode === 'live') {
-        const confirmed = confirm('Esto envia una orden real minima a BingX con SL/TP. Continuar?');
+        const confirmed = confirm('Esto envía una orden real mínima a BingX con SL/TP. ¿Continuar?');
         if (!confirmed) {
           return;
         }
@@ -1806,7 +1806,7 @@ function renderPost(post) {
   const images = (post.images || []).slice(0, 4).map((src) => (
     `<img src="${escapeAttribute(src)}" alt="">`
   )).join('');
-  const postUrl = post.url ? `<a href="${escapeAttribute(post.url)}" target="_blank" rel="noreferrer">Abrir post</a>` : '';
+  const postUrl = post.url ? `<a href="${escapeAttribute(post.url)}" target="_blank" rel="noreferrer">Abrir publicación</a>` : '';
   const memberBadge = post.isMembersOnly ? '<span class="member-badge">Miembros</span>' : '';
   const sourceBadge = post.source === 'telegram_web' ? '<span class="source-badge telegram-web">Telegram</span>' : '';
   const poll = post.pollOptions?.length ? `<span>Encuesta: ${escapeHtml(post.pollOptions.join(' / '))}</span>` : '';
@@ -1822,7 +1822,7 @@ function renderPost(post) {
         ${memberBadge}
         ${sourceBadge}
       </div>
-      <p class="post-text">${escapeHtml(post.text || '(post sin texto)')}</p>
+      <p class="post-text">${escapeHtml(post.text || '(publicación sin texto)')}</p>
       ${images ? `<div class="post-assets">${images}</div>` : ''}
       <div class="post-footer">
         ${post.likeText ? `<span>${escapeHtml(post.likeText)} likes</span>` : ''}
@@ -1984,13 +1984,13 @@ function renderPnl() {
   } else if (appState.pnlError) {
     const friendlyError = friendlyBingxError(appState.pnlError);
     elements.pnlStatus.textContent = hasLocalPaper
-      ? `BingX: ${friendlyError}. Paper local disponible.`
+      ? `BingX: ${friendlyError}. Simulación local disponible.`
       : hasHistorical ? `BingX: ${friendlyError}. Histórico de YouTube disponible.` : friendlyError;
     elements.pnlEmpty.textContent = friendlyError;
     elements.pnlEmpty.classList.toggle('hidden', hasHistorical || hasLocalPaper);
   } else if (!rows.length) {
     elements.pnlStatus.textContent = 'Sin PnL todavía.';
-    elements.pnlEmpty.textContent = 'Sin PnL todavía. Las órdenes de prueba aparecerán aquí como paper trading.';
+    elements.pnlEmpty.textContent = 'Sin PnL todavía. Las órdenes de prueba aparecerán aquí como simulación local.';
     elements.pnlEmpty.classList.remove('hidden');
   } else {
     elements.pnlStatus.textContent = hasActivity
@@ -2132,7 +2132,7 @@ function pnlSourceCards(reference = currentReferenceLedger()) {
   const live = exchangeSourceWithPositions(appState.pnlSources?.sources?.live, livePositions, {
     key: 'live',
     label: 'Futuros reales',
-    modeLabel: 'Live real',
+    modeLabel: 'Real USDT',
     asset: 'USDT'
   });
   const vstPositions = positionsForPnlSource('vst', reference);
@@ -2441,7 +2441,7 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
       ${renderReliabilityMetric('No ejecutadas', String(missingRows), formatMissingReasonCounts(missingReasons), missingRows ? 'negative' : 'positive')}
       ${renderReliabilityMetric('Entradas > 0,15%', `${Number(fill.entryAboveTolerance || 0)}/${Number(fill.entryMeasured || 0)}`, `Media adversa ${formatExecutionPercent(fill.entryAverageAdversePercent)}`, Number(fill.entryAboveTolerance || 0) ? 'warn' : 'positive')}
       ${renderReliabilityMetric('Salidas > 0,15%', `${Number(fill.closeAboveTolerance || 0)}/${Number(fill.closeMeasured || 0)}`, `Media adversa ${formatExecutionPercent(fill.closeAverageAdversePercent)}`, Number(fill.closeAboveTolerance || 0) ? 'warn' : 'positive')}
-      ${renderReliabilityMetric('Fees + funding', formatMoney(costs, 'VST'), `${formatMoney(summary.bingxFees, 'VST')} en fees`, amountClass(costs))}
+      ${renderReliabilityMetric('Comisiones + financiación', formatMoney(costs, 'VST'), `${formatMoney(summary.bingxFees, 'VST')} en comisiones`, amountClass(costs))}
       ${renderReliabilityMetric('Neto BingX', formatMoney(net, 'VST'), pairedOutcomeRows ? `${netMismatch}/${pairedOutcomeRows} resultados cambian de signo` : 'Sin muestra cerrada comparable', amountClass(net))}
     </div>
   `;
@@ -2472,7 +2472,7 @@ function renderNetEntryFilterAudit(audit = {}) {
     ? `${netEntryReasonLabel(audit.topReason.reason)} · ${audit.topReason.count}`
     : 'Sin motivo dominante';
   const thresholdWarning = audit.nonDiscriminatingBreakEven
-    ? `Con x${audit.observedLeverage || '-'}, el break-even base es ${formatPercent(audit.inherentBreakEvenMarginPercent)} y supera el umbral ${formatPercent(audit.configuredMaxBreakEven)}: así marca todas esas entradas.`
+    ? `Con x${audit.observedLeverage || '-'}, el punto de equilibrio base es ${formatPercent(audit.inherentBreakEvenMarginPercent)} y supera el umbral ${formatPercent(audit.configuredMaxBreakEven)}: así marca todas esas entradas.`
     : 'El filtro sigue en observación y no modifica ninguna orden.';
 
   elements.netEntryFilterAudit.dataset.tone = tone;
@@ -2495,7 +2495,7 @@ function renderNetEntryFilterAudit(audit = {}) {
 
 function netEntryReasonLabel(reason = '') {
   return {
-    break_even_margin: 'Break-even de margen',
+    break_even_margin: 'Punto de equilibrio del margen',
     cost_to_stop_risk: 'Coste frente al riesgo',
     reward_risk: 'Relación riesgo/recompensa',
     target_net: 'Objetivo neto'
@@ -2576,12 +2576,12 @@ function renderCostControl(source = selectedPnlSource(), reference = currentRefe
   }
 
   elements.costControlSummary.innerHTML = [
-    renderCostMetric('Bruto realizado', formatMoney(analysis.grossRealized, analysis.asset), 'Antes de comisiones y funding', amountClass(analysis.grossRealized)),
-    renderCostMetric('Comisiones + funding', formatMoney(analysis.totalCost, analysis.asset), `${formatMoney(analysis.fees, analysis.asset)} en comisiones`, amountClass(analysis.totalCost)),
+    renderCostMetric('Bruto realizado', formatMoney(analysis.grossRealized, analysis.asset), 'Antes de comisiones y financiación', amountClass(analysis.grossRealized)),
+    renderCostMetric('Comisiones + financiación', formatMoney(analysis.totalCost, analysis.asset), `${formatMoney(analysis.fees, analysis.asset)} en comisiones`, amountClass(analysis.totalCost)),
     renderCostMetric('Neto realizado', formatMoney(analysis.realized, analysis.asset), 'Después de costes', amountClass(analysis.realized)),
     renderCostMetric('Comisión por ejecución', formatMoney(analysis.feePerExecution, analysis.asset), `${analysis.estimatedExecutions} ejecuciones aprox.`, amountClass(-analysis.feePerExecution)),
     renderCostMetric('Coste round-trip', formatMoney(analysis.roundTripCost, analysis.asset), 'Abrir + cerrar estimado', amountClass(-analysis.roundTripCost)),
-    renderCostMetric('Break-even precio', formatPercent(analysis.breakEvenMovePercent), `${formatPercent(analysis.marginRoiBreakEven)} sobre margen`, analysis.breakEvenMovePercent > 0.18 ? 'amount negative' : analysis.breakEvenMovePercent > 0.1 ? 'warn' : 'amount positive')
+    renderCostMetric('Punto de equilibrio del precio', formatPercent(analysis.breakEvenMovePercent), `${formatPercent(analysis.marginRoiBreakEven)} sobre margen`, analysis.breakEvenMovePercent > 0.18 ? 'amount negative' : analysis.breakEvenMovePercent > 0.1 ? 'warn' : 'amount positive')
   ].join('');
 
   elements.costControlSymbols.innerHTML = analysis.symbolRows.length
@@ -2620,13 +2620,13 @@ function protectedCloseQueueItems() {
 
 function renderProtectedCloseItem(item = {}) {
   const parsed = parseCloseGuardReason(item.lastReason);
-  const modeLabel = item.executionMode === 'demo' ? 'Demo VST' : 'Live real';
+  const modeLabel = item.executionMode === 'demo' ? 'Demo VST' : 'Real USDT';
   const limit = parsed.limitPercent ?? parsed.limit;
   const slippage = parsed.slippagePercent ?? parsed.slippage;
   const nextRunText = timeUntilLabel(item.nextRunAt, 'próximo intento');
   const expiresText = timeUntilLabel(item.expiresAt, 'caduca');
   const postLink = item.postUrl
-    ? `<a href="${escapeAttribute(item.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    ? `<a href="${escapeAttribute(item.postUrl)}" target="_blank" rel="noreferrer">Publicación</a>`
     : '';
   const reasonText = protectedCloseReasonText(parsed, item.lastReason);
   const reasonClass = protectedCloseReasonClass(parsed);
@@ -3016,7 +3016,7 @@ function renderCostSymbolRow(row) {
         <strong class="${amountClass(row.pnl)}">${escapeHtml(formatMoney(row.pnl, row.asset))}</strong>
       </div>
       <div>
-        <span>Break-even</span>
+        <span>Punto de equilibrio</span>
         <strong class="${escapeAttribute(pressureClass)}">${escapeHtml(formatPercent(row.breakEvenMove))}</strong>
       </div>
       <div>
@@ -3176,7 +3176,7 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       label: 'Costes',
       value: formatOptionalMoney(costs, asset),
       className: optionalAmountClass(costs),
-      detail: `Comisiones ${formatOptionalMoney(fees, asset)} / funding ${formatOptionalMoney(funding, asset)}`
+      detail: `Comisiones ${formatOptionalMoney(fees, asset)} / financiación ${formatOptionalMoney(funding, asset)}`
     },
     {
       label: source.key === 'vst' ? 'Equity estrategia' : 'Equity cuenta',
@@ -3659,10 +3659,10 @@ function pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference }) {
   }
   const range = appState.pnl?.range?.months || 3;
   if (hasPaperActivity && hasBingxActivity) {
-    return `BingX real + paper local · últimos ${range} meses`;
+    return `BingX real + simulación local · últimos ${range} meses`;
   }
   if (hasPaperActivity) {
-    return `Paper trading local · ${formatMonth(currentMonthKey())} con precios de BingX`;
+    return `Simulación local · ${formatMonth(currentMonthKey())} con precios de BingX`;
   }
   return `PnL real de BingX · últimos ${range} meses`;
 }
@@ -3672,7 +3672,7 @@ function sourceNoteText(source) {
     return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
   }
   if (source.key === 'live') {
-    return 'Futuros reales muestra solo USDT: cuenta real, posiciones reales, comisiones, funding y señales ejecutadas en real.';
+    return 'Futuros reales muestra solo USDT: cuenta real, posiciones reales, comisiones, financiación y señales ejecutadas en real.';
   }
   if (source.key === 'vst') {
     return 'Futuros VST muestra BingX Demo por separado: cuenta demo, posiciones demo y resultado mensual en VST.';
@@ -3685,12 +3685,12 @@ function pnlNoteText({ hasPaperActivity, hasBingxActivity, hasReference }) {
     return 'Vista alineada con el Excel de referencia. La operativa en vivo local queda separada en posiciones y eventos.';
   }
   if (hasPaperActivity && hasBingxActivity) {
-    return 'El neto combina PnL real de BingX y paper trading local. Revisa Paper total para separar la parte simulada.';
+    return 'El neto combina el PnL real de BingX y la simulación local. Revisa el total simulado para separar esa parte.';
   }
   if (hasPaperActivity) {
-    return 'Modo de prueba: el neto superior suma el paper local. Las posiciones abiertas se actualizan con el último precio de BingX Futuros Perpetuo USDⓈ.';
+    return 'Modo de prueba: el neto superior suma la simulación local. Las posiciones abiertas se actualizan con el último precio de BingX Futuros Perpetuo USDⓈ.';
   }
-  return 'El PnL mostrado viene de BingX. En modo de prueba, las órdenes nuevas se registran como paper trading local.';
+  return 'El PnL mostrado viene de BingX. En modo de prueba, las órdenes nuevas se registran como simulación local.';
 }
 
 function friendlyBingxError(message) {
@@ -4062,7 +4062,7 @@ function renderAccountWaterfall(source) {
     },
     ...(hasGross ? [
       { key: 'fees', label: 'Comisiones', value: fees },
-      { key: 'funding', label: 'Funding', value: funding }
+      { key: 'funding', label: 'Financiación', value: funding }
     ] : []),
     { key: 'floating', label: 'Flotante vivo', value: floating }
   ];
@@ -4117,7 +4117,7 @@ function renderAccountWaterfall(source) {
           <strong class="${amountClass(fees)}">${escapeHtml(formatMoney(fees, asset))}</strong>
         </div>
         <div>
-          <span>Funding</span>
+          <span>Financiación</span>
           <strong class="${amountClass(funding)}">${escapeHtml(formatMoney(funding, asset))}</strong>
         </div>
       </div>
@@ -4309,7 +4309,7 @@ function liveReadiness() {
   const items = [
     {
       key: 'monitor',
-      label: 'Monitor live activo',
+      label: 'Monitor en tiempo real activo',
       ok: Boolean(appState.state?.running && appState.state?.phase === 'live' && !health.stale && !health.lastError)
     },
     {
@@ -4334,7 +4334,7 @@ function liveReadiness() {
     },
     {
       key: 'dry-run',
-      label: 'Dry-run/test ya ejecutado',
+      label: 'Simulación previa ejecutada',
       ok: dryRunOk
     },
     {
@@ -4364,7 +4364,7 @@ function liveReadiness() {
 function renderLiveReadiness(readiness = liveReadiness()) {
   const missing = readiness.items.filter((item) => !item.ok).length;
   elements.liveReadinessStatus.textContent = readiness.live
-    ? 'Live armado'
+    ? 'Modo real armado'
     : readiness.ready ? 'Listo' : `${missing} pendientes`;
   elements.liveReadinessStatus.className = amountClass(readiness.live || readiness.ready ? 1 : -1);
   elements.armLive.disabled = !readiness.ready || readiness.live;
@@ -4389,7 +4389,7 @@ function renderHealthPanel() {
     : feed.enabled ? 'reconectando' : 'sin abiertas';
   elements.healthMetrics.innerHTML = [
     ['Última lectura', health.ageSeconds === null || health.ageSeconds === undefined ? '-' : `${health.ageSeconds}s`, health.stale ? 'negative' : ''],
-    ['Posts visibles', String(health.visiblePosts ?? appState.state?.visiblePosts ?? 0), health.noVisiblePosts ? 'negative' : ''],
+    ['Publicaciones visibles', String(health.visiblePosts ?? appState.state?.visiblePosts ?? 0), health.noVisiblePosts ? 'negative' : ''],
     ['Lecturas vacías', String(scraper.consecutiveEmptyReads || 0), scraper.consecutiveEmptyReads ? 'warn' : 'positive'],
     ['Autorecuperaciones', String(scraper.recoveryCount || 0), scraper.recoveryCount ? 'warn' : ''],
     ['WS precios', feedLabel, feed.connected ? 'positive' : feed.enabled ? 'negative' : ''],
@@ -4430,14 +4430,14 @@ function renderGuardDashboard() {
     : critical ? `${critical} críticas` : 'Revisar avisos';
   elements.guardStatus.className = guardOk ? 'amount positive' : critical ? 'amount negative' : 'amount warn';
   elements.guardMetrics.innerHTML = [
-    ['Live', liveReady ? 'activo' : 'revisar', liveReady ? 'positive' : 'negative'],
+    ['Tiempo real', liveReady ? 'activo' : 'revisar', liveReady ? 'positive' : 'negative'],
     ['Telegram Web', telegramReady ? 'gestión ok' : 'revisar', telegramReady ? 'positive' : 'warn'],
     ['BingX sync', safety.ageSeconds == null ? '-' : `${safety.ageSeconds}s`, exchangeReady ? 'positive' : 'negative'],
     ['Abiertas real', `${real.openPositions || 0}`, real.missingStopLoss ? 'negative' : 'positive'],
     ['Flotante', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)],
-    ['PnL histórico', cooldown ? cooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : 'ok', cooldown ? 'warn' : 'positive'],
-    ['Backup redactado', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
-    ['Backup cifrado', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
+    ['PnL histórico', cooldown ? cooldown.replace('BingX PnL en espera hasta ', 'espera ') : 'ok', cooldown ? 'warn' : 'positive'],
+    ['Copia redactada', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
+    ['Copia cifrada', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
     ['Almacén local', backupStorageCopiesText(secureBackup.storage), backupStorageTone(secureBackup.storage)],
     ['Disco libre', backupStorageFreeText(secureBackup.storage), backupStorageTone(secureBackup.storage)],
     ['Perfil Chromium', secureProfileBackupStatusText(secureBackup.profile), secureBackup.profile?.stale ? 'warn' : secureBackup.profile?.available ? 'positive' : 'warn'],
@@ -4509,8 +4509,8 @@ function buildClientIncidents() {
         [/BingX PnL no disponible|Rate-limit PnL|frequency limit|100410/i, 'bingx_pnl_rate_limit', 'BingX PnL en rate-limit'],
         [/BingX sync|BingX safety|BingX posiciones/i, 'bingx_sync', 'Reconciliación BingX'],
         [/Health:|Telegram health|Alerta scraper/i, 'monitor_health', 'Salud del monitor'],
-        [/Espacio de backups|Almacenamiento backups|Espacio crítico para backups/i, 'backup_storage', 'Almacenamiento de backups'],
-        [/Backup redacted/i, 'backup', 'Backup automático']
+        [/Espacio de backups|Almacenamiento backups|Espacio crítico para backups/i, 'backup_storage', 'Almacenamiento de copias'],
+        [/Backup redacted/i, 'backup', 'Copia automática']
       ];
       const matched = rules.find(([pattern]) => pattern.test(message));
       if (!matched && log.level !== 'error') {
@@ -4706,7 +4706,7 @@ function renderTelegramWatchPanel() {
     ['Recarga', refreshSeconds ? `${refreshSeconds}s` : '-', refreshStale ? 'negative' : active ? 'positive' : ''],
     ['Última actualización', lastRefresh ? humanLogAge(lastRefresh.at) : '-', refreshStale ? 'negative' : lastRefresh ? 'positive' : ''],
     ['Sin mensajes 1h', String(missingLastHour), missingLastHour ? 'warn' : 'positive'],
-    ['PnL BingX', pnlCooldown ? pnlCooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600 ? `limit ${humanLogAge(pnlLimit.at)}` : 'ok', pnlCooldown || (pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600) ? 'warn' : 'positive']
+    ['PnL BingX', pnlCooldown ? pnlCooldown.replace('BingX PnL en espera hasta ', 'espera ') : pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600 ? `límite ${humanLogAge(pnlLimit.at)}` : 'ok', pnlCooldown || (pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600) ? 'warn' : 'positive']
   ].map(renderOpsMetric).join('');
 
   const checks = [
@@ -4718,10 +4718,10 @@ function renderTelegramWatchPanel() {
     {
       label: 'Cierres/TP/SL',
       ok: Boolean(source.executeSignals),
-      detail: source.executeSignals ? 'activos' : 'off'
+      detail: source.executeSignals ? 'activos' : 'inactivos'
     },
     {
-      label: 'Confirmación live',
+      label: 'Confirmación real',
       ok: !needsLiveConfirm || Boolean(source.liveConfirmed),
       detail: needsLiveConfirm ? source.liveConfirmed ? 'ok' : 'pendiente' : 'no aplica'
     },
@@ -4785,7 +4785,7 @@ function renderRealModeBanner() {
     </div>
     <div>
       <span>YouTube / Telegram</span>
-      <strong>${escapeHtml(`${health.level === 'ok' ? 'YT ok' : 'YT revisar'} - ${telegram.enabled ? 'TG ok' : 'TG off'}`)}</strong>
+      <strong>${escapeHtml(`${health.level === 'ok' ? 'YT ok' : 'YT revisar'} - ${telegram.enabled ? 'TG ok' : 'TG inactivo'}`)}</strong>
     </div>
     <div>
       <span>Datos PnL</span>
@@ -4993,7 +4993,7 @@ function renderTickerPnl() {
     }))
     .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
-  elements.tickerPnlStatus.textContent = `${rows.length} tickers · ${label}`;
+  elements.tickerPnlStatus.textContent = `${rows.length} activos · ${label}`;
   elements.tickerPnlChart.innerHTML = renderAmountBars(rows, (row) => `${row.count} ops.`);
 }
 
@@ -5096,7 +5096,7 @@ function pnlCooldownText() {
     hour: '2-digit',
     minute: '2-digit'
   });
-  return `BingX PnL en cooldown hasta ${time}`;
+  return `BingX PnL en espera hasta ${time}`;
 }
 
 function topObjectEntries(value = {}, limit = 4) {
@@ -5685,7 +5685,7 @@ function renderReplicaControl(reference, alignment) {
         analysis.officialAvailable ? amountClass(analysis.officialGap) : ''
       )}
       ${renderReplicaMetric(
-        'Fees + funding',
+        'Comisiones + financiación',
         analysis.officialAvailable ? formatMoney(analysis.feesFunding, 'VST') : '-',
         'Coste real que no aparece igual en la hoja',
         analysis.officialAvailable ? amountClass(analysis.feesFunding) : ''
@@ -5789,7 +5789,7 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
           ? fact('pending_reference', 'Pendientes en hoja')
           : fact('unlinked_close', 'Cierres no enlazados')}
         <div>
-          <span>Comisiones + funding</span>
+          <span>Comisiones + financiación</span>
           <strong class="${amountClass(costs)}">${escapeHtml(formatMoney(costs, 'VST'))}</strong>
           <small>Coste observado</small>
         </div>
@@ -5842,7 +5842,7 @@ function renderMatchedGapAttribution(attribution) {
       <div class="replica-gap-facts">
         ${fact('entry_execution', 'Diferencia de entrada', `${attribution.counts?.decomposable || 0} ops. medibles`)}
         ${fact('exit_execution', 'Diferencia de salida', `${attribution.counts?.decomposable || 0} ops. medibles`)}
-        ${fact('size_and_fills', 'Cantidad y fills', 'Residual tras comparar precios')}
+        ${fact('size_and_fills', 'Cantidad y ejecuciones', 'Residual tras comparar precios')}
         <div>
           <span>Gap en operaciones con stop</span>
           <strong class="${amountClass(stopGroup?.gap)}">${escapeHtml(formatMoney(stopGroup?.gap || 0, 'VST'))}</strong>
@@ -5850,7 +5850,7 @@ function renderMatchedGapAttribution(attribution) {
         </div>
       </div>
       <div class="replica-attribution-symbols">${symbols}</div>
-      <p class="replica-gap-note">La atribución compara precios de la hoja con fills confirmados por BingX antes de comisiones. Entrada y salida se reparten simétricamente para que el resultado no dependa del orden del cálculo.</p>
+      <p class="replica-gap-note">La atribución compara los precios de la hoja con las ejecuciones confirmadas por BingX antes de comisiones. La entrada y la salida se reparten simétricamente para que el resultado no dependa del orden del cálculo.</p>
     </section>
   `;
 }
@@ -5911,7 +5911,7 @@ function renderExecutionRouteAnalysis(analysis) {
         ${familyFact('observed_execution', 'Ejecución observada', 'cierre explícito o stop sin incidencia previa')}
         ${familyFact('historical_defect', 'Incidencia histórica', 'parser o error del guard ya corregidos')}
         ${familyFact('guard_retry', 'Reintento protegido', 'cierre completado tras esperar')}
-        ${familyFact('evidence_gap', 'Evidencia incompleta', 'fill exacto sin señal local enlazada')}
+        ${familyFact('evidence_gap', 'Evidencia incompleta', 'ejecución exacta sin señal local enlazada')}
       </div>
       <div class="execution-route-list" role="table" aria-label="Desglose por ruta causal de salida">
         ${routeRows || '<div class="replica-empty">Sin rutas de salida comparables.</div>'}
@@ -5927,12 +5927,12 @@ function renderOrderHistoryEvidence(evidence = {}, source = {}) {
   const stale = Boolean(source?.stale);
   const exactCoverage = Number(evidence?.exactCloseCoveragePercent);
   const status = !sourceAvailable
-    ? { label: 'Fallback activo', className: 'warn' }
+    ? { label: 'Respaldo activo', className: 'warn' }
     : stale
       ? { label: 'Histórico en caché', className: 'warn' }
       : auditBacked
         ? { label: 'Histórico exacto', className: 'positive' }
-        : { label: 'Fallback de eventos', className: 'negative' };
+        : { label: 'Respaldo mediante eventos', className: 'negative' };
   const coverageLabel = Number.isFinite(exactCoverage)
     ? formatPercent(exactCoverage)
     : '-';
@@ -5941,19 +5941,19 @@ function renderOrderHistoryEvidence(evidence = {}, source = {}) {
     : `BingX no ha entregado el histórico de órdenes${source.error ? `: ${source.error}` : '.'}`;
   const auditNote = auditBacked
     ? 'Las entradas, cierres parciales y precios medios se reconstruyen con orderId y positionID exactos. Los eventos locales solo completan el contexto de la señal.'
-    : 'La auditoría conserva el cálculo anterior con eventos e ingresos. Se identifica como fallback para no presentarlo como fill exacto.';
+    : 'La auditoría conserva el cálculo anterior mediante eventos e ingresos. Se identifica como respaldo para no presentarlo como una ejecución exacta.';
 
   return `
     <div class="execution-evidence" aria-label="Calidad de la evidencia de BingX">
       <div class="execution-evidence-heading">
         <div>
           <span>Evidencia de exchange</span>
-          <strong>Órdenes y fills de BingX</strong>
+          <strong>Órdenes y ejecuciones de BingX</strong>
         </div>
         <span class="ledger-status ${escapeAttribute(status.className)}">${escapeHtml(status.label)}</span>
       </div>
       <div class="execution-evidence-facts">
-        <div><span>Cierres con fill exacto</span><strong>${escapeHtml(`${Number(evidence.exactCloseRows || 0)}/${Number(evidence.closedRows || 0)}`)}</strong><small>${escapeHtml(`${coverageLabel} de cobertura`)}</small></div>
+        <div><span>Cierres con ejecución exacta</span><strong>${escapeHtml(`${Number(evidence.exactCloseRows || 0)}/${Number(evidence.closedRows || 0)}`)}</strong><small>${escapeHtml(`${coverageLabel} de cobertura`)}</small></div>
         <div><span>Órdenes de cierre</span><strong>${escapeHtml(String(Number(evidence.closeOrders || 0)))}</strong><small>${escapeHtml(`${Number(evidence.positions || 0)} posiciones`)}</small></div>
         <div><span>Aperturas recuperadas</span><strong class="${escapeAttribute(Number(evidence.recoveredOpenings || 0) ? 'warn' : 'amount positive')}">${escapeHtml(String(Number(evidence.recoveredOpenings || 0)))}</strong><small>${escapeHtml(`${formatOptionalPercent(evidence.localEventCoveragePercent)} con evento local`)}</small></div>
         <div><span>Cierres sin enlazar</span><strong class="${escapeAttribute(Number(evidence.unlinkedCloseRows || 0) ? 'amount negative' : 'amount positive')}">${escapeHtml(String(Number(evidence.unlinkedCloseRows || 0)))}</strong><small>${escapeHtml(`${Number(evidence.partialCloseRows || 0)} aperturas con varios cierres`)}</small></div>
@@ -6016,7 +6016,7 @@ function renderExecutionPriceChain(chain, latency, orderHistoryEvidence, orderHi
       <div id="execution-price-chain-waterfall" class="replica-gap-chart" role="img" aria-label="Desglose entre señal, cotización previa y fill de BingX"></div>
       <div class="replica-gap-facts">
         ${fact('Movimiento antes de enviar', beforeSend, 'Señal/objetivo a cotización previa')}
-        ${fact('Cotización a fill', quoteToFill, 'Diferencia posterior al snapshot')}
+        ${fact('Cotización a ejecución', quoteToFill, 'Diferencia posterior a la captura')}
         ${fact('Referencia y objetivo', targetDifference, 'Hoja frente a señal o stop de la app')}
         ${fact('Evidencia intermedia ausente', missingEvidence, `${chain.counts?.fullExitPath || 0}/${chain.counts?.decomposable || 0} salidas completas`)}
       </div>
@@ -6024,7 +6024,7 @@ function renderExecutionPriceChain(chain, latency, orderHistoryEvidence, orderHi
         ${latencyPhase('Aperturas', latency?.opening)}
         ${latencyPhase('Cierres por señal', latency?.closing)}
       </div>
-      <p class="replica-gap-note">La cotización previa es el snapshot disponible justo antes de enviar. La diferencia hasta el fill incluye spread, base de precio y ejecución del exchange; no se presenta como slippage puro. Los reintentos se miden aparte.</p>
+      <p class="replica-gap-note">La cotización previa es la captura disponible justo antes de enviar. La diferencia hasta la ejecución incluye el diferencial, la base de precio y la ejecución del mercado; no se presenta como un deslizamiento puro. Los reintentos se miden aparte.</p>
     </section>
   `;
 }
@@ -6055,6 +6055,19 @@ function renderMatchedGapWaterfall(chartId, attribution) {
   });
 }
 
+function localizedAuditLabel(value = '') {
+  return String(value || '')
+    .replace(/\bFees\b/g, 'Comisiones')
+    .replace(/\bfees\b/g, 'comisiones')
+    .replace(/\bFunding\b/g, 'Financiación')
+    .replace(/\bfunding\b/g, 'financiación')
+    .replace(/\bFallback\b/g, 'Respaldo')
+    .replace(/\bfallback\b/g, 'respaldo')
+    .replace(/\bfills\b/gi, 'ejecuciones')
+    .replace(/\bfill\b/gi, 'ejecución')
+    .replace(/\bsnapshot\b/gi, 'captura');
+}
+
 function renderReplicaGapWaterfall(chartId, bridge, labels = {}) {
   const chart = document.getElementById(chartId);
   if (!chart || !bridge || !Array.isArray(bridge.steps)) {
@@ -6078,7 +6091,7 @@ function renderReplicaGapWaterfall(chartId, bridge, labels = {}) {
   const steps = bridge.steps.filter((step) => (
     Math.abs(Number(step.value || 0)) > 0.0000001 || Number(step.count || 0) > 0
   ));
-  const axisLabels = [labels.start || 'Réplica teórica', ...steps.map((step) => step.label), labels.end || 'BingX neto'];
+  const axisLabels = [labels.start || 'Réplica teórica', ...steps.map((step) => localizedAuditLabel(step.label)), labels.end || 'BingX neto'];
   const values = [Number(bridge.replicaPnl || 0), ...steps.map((step) => Number(step.value || 0)), Number(bridge.bingxNet || 0)];
   const measure = ['absolute', ...steps.map(() => 'relative'), 'total'];
   const compact = chart.clientWidth < 640;
@@ -6344,7 +6357,7 @@ function renderEconomicDiagnosis(audit = {}) {
     },
     {
       key: 'costs',
-      label: 'Comisiones y funding',
+      label: 'Comisiones y financiación',
       value: costsGap,
       detail: 'Costes acreditados por BingX',
       target: 'cost-control-panel',
@@ -6388,7 +6401,7 @@ function renderEconomicDiagnosis(audit = {}) {
   const reconciled = Boolean(bridge.reconciled && attribution.reconciled);
   const executionDiagnosis = executionDrag > 0
     ? `La ${phaseLabel} concentra ${formatPercent(phaseShare)} del deterioro neto entre entrada y salida.`
-    : 'El arrastre no se concentra en entrada o salida; revisa cantidad y fills.';
+    : 'El arrastre no se concentra en la entrada o la salida; revisa la cantidad y las ejecuciones.';
   const diagnosis = !dominantCause
     ? 'No hay contribuciones negativas que explicar en esta muestra.'
     : dominantCause.key === 'execution'
@@ -6398,7 +6411,7 @@ function renderEconomicDiagnosis(audit = {}) {
         : `Las operaciones no comparables o ausentes son el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas.`;
   const evidence = [
     `${comparableRows} operaciones emparejadas`,
-    Number.isFinite(exactCoverage) ? `${formatPercent(exactCoverage)} de cierres con fill exacto` : '',
+    Number.isFinite(exactCoverage) ? `${formatPercent(exactCoverage)} de cierres con ejecución exacta` : '',
     historicalDefectRows
       ? `${historicalDefectRows} incidencia${historicalDefectRows === 1 ? '' : 's'} histórica${historicalDefectRows === 1 ? '' : 's'} separada${historicalDefectRows === 1 ? '' : 's'}`
       : 'Sin incidencias históricas en la muestra'
@@ -6484,7 +6497,7 @@ function renderEconomicDiagnosis(audit = {}) {
       <div class="economic-diagnosis-conclusion${dominantCause ? ' negative' : ''}">
         <strong>${escapeHtml(diagnosis)}</strong>
         <span>${escapeHtml(mainDrag
-          ? `Mayor tramo individual: ${mainDrag.label}, ${formatMoney(mainDrag.value, 'VST')}.`
+          ? `Mayor tramo individual: ${localizedAuditLabel(mainDrag.label)}, ${formatMoney(mainDrag.value, 'VST')}.`
           : 'Todavía no hay un tramo individual atribuible.')}</span>
       </div>
       <p class="economic-diagnosis-evidence">${escapeHtml(`${evidence}. ${scopeNote}`)}</p>
@@ -6537,7 +6550,7 @@ function renderImprovementCohort(cohort, cohortHistory = [], comparison = null) 
         ${renderReplicaMetric('Cierres', String(summary.vstCloses || 0), sample.detail || 'Esperando operaciones', '')}
         ${renderReplicaMetric('Bruto', formatMoney(summary.bingxGross, 'VST'), 'Antes de costes', amountClass(summary.bingxGross))}
         ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), 'Referencia tras comisiones taker estimadas', amountClass(summary.replicaEstimatedMarketNet))}
-        ${renderReplicaMetric('Comisiones + funding', formatMoney(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0), 'VST'), 'Coste observado', amountClass(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0)))}
+        ${renderReplicaMetric('Comisiones + financiación', formatMoney(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0), 'VST'), 'Coste observado', amountClass(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0)))}
         ${renderReplicaMetric('Neto', formatMoney(summary.bingxNet, 'VST'), 'Resultado observado', amountClass(summary.bingxNet))}
         ${renderReplicaMetric('Cobertura hoja', `${referenceCoverage.comparableRows || 0} comparables`, cohortCoverageDetail, referenceCoverage.stale || referenceCoverage.provisionalLatestDay ? 'warn' : 'amount positive')}
         ${renderReplicaMetric('Paquetes completos', String(coverageSummary.completePackages || 0), `${coverageSummary.incompletePackages || 0} incompletos`, coverageSummary.incompletePackages ? 'amount negative' : 'amount positive')}
@@ -6686,14 +6699,14 @@ function renderEntryDiagnosis(diagnosis) {
   const timing = diagnosis.timing || {};
   const timingCards = [
     ['Reacción hasta el intento', timing.reactionAverageSeconds],
-    ['Inicio del intento a fill', timing.attemptToFillAverageSeconds],
+    ['Inicio del intento a ejecución', timing.attemptToFillAverageSeconds],
     ['Latencia total p95', timing.totalP95Seconds]
   ].map(([label, values]) => `
     <div class="entry-diagnosis-stage">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(formatLatencySeconds(values?.current))}</strong>
       <small>${escapeHtml(`Antes ${formatLatencySeconds(values?.previous)} · cambio ${formatSignedSeconds(values?.delta)}`)}</small>
-      <b>${escapeHtml(`${timing.currentExchangeBacked || 0} fills con hora BingX`)}</b>
+      <b>${escapeHtml(`${timing.currentExchangeBacked || 0} ejecuciones con hora de BingX`)}</b>
     </div>
   `).join('');
   const mix = diagnosis.mixAnalysis?.byPackageSlot;
@@ -6764,7 +6777,7 @@ function renderEntryDiagnosis(diagnosis) {
       </div>
       ${exchangeClockStrip}
       <p>${escapeHtml(microstructureMeasured
-        ? 'Esta muestra separa la espera secuencial del paquete, el spread y el movimiento posterior hasta el fill.'
+        ? 'Esta muestra separa la espera secuencial del paquete, el diferencial y el movimiento posterior hasta la ejecución.'
         : 'La captura ya está preparada. Los históricos anteriores no contienen bid/ask ni fotografía inicial del paquete; la lectura empezará con la próxima apertura.')}</p>
     </div>
   `;
@@ -6878,7 +6891,7 @@ function renderCloseExecutionMicrostructure(analysis) {
         </div>
         ${exchangeClockStrip}
         <p>${escapeHtml(measured
-          ? 'La salida queda separada entre spread, movimiento hasta el lado ejecutable del libro y movimiento posterior hasta el fill.'
+          ? 'La salida queda separada entre el diferencial, el movimiento hasta el lado ejecutable del libro y el movimiento posterior hasta la ejecución.'
           : 'Los cierres históricos no contienen bid/ask. La lectura comenzará con el próximo cierre explícito y no alterará su ejecución.')}</p>
       </div>
       ${symbolRows ? `
@@ -7268,7 +7281,7 @@ function renderReplicaOutcomeFilters(analysis = {}, totalRows = 0, activeFilter 
     { key: 'all', label: 'Todas', count: totalRows, title: 'Mostrar toda la auditoría' },
     { key: 'net_mismatch', label: 'Cambian signo', count: Number(analysis.netSignMismatch || 0), title: 'La hoja y el neto VST terminan con signo diferente' },
     { key: 'market_mismatch', label: 'Antes de costes', count: Number(analysis.marketDrivenNetMismatch || 0), title: 'El cambio de signo ya existe antes de aplicar costes' },
-    { key: 'cost_mismatch', label: 'Por costes', count: Number(analysis.costDrivenNetMismatch || 0), title: 'El bruto gana, pero fees y funding convierten el neto en pérdida' },
+    { key: 'cost_mismatch', label: 'Por costes', count: Number(analysis.costDrivenNetMismatch || 0), title: 'El bruto gana, pero las comisiones y la financiación convierten el neto en pérdida' },
     { key: 'same_sign', label: 'Mismo signo', count: Number(analysis.sameNetSign || 0), title: 'La hoja y el neto VST terminan con el mismo signo' },
     { key: 'not_comparable', label: 'Sin comparar', count: Math.max(0, totalRows - comparableRows), title: 'Filas abiertas, ausentes o sin resultado en ambos lados' }
   ];
@@ -7358,7 +7371,7 @@ function renderReplicaAuditRow(row = {}) {
   const vst = row.vst || {};
   const diff = row.diff || {};
   const postLink = vst.postUrl
-    ? `<a href="${escapeAttribute(vst.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    ? `<a href="${escapeAttribute(vst.postUrl)}" target="_blank" rel="noreferrer">Publicación</a>`
     : '';
   const closePostLink = vst.closePostUrl
     ? `<a href="${escapeAttribute(vst.closePostUrl)}" target="_blank" rel="noreferrer">Cierre</a>`
@@ -8089,7 +8102,7 @@ function renderOpenPositions() {
       }),
       renderPositionColumn({
         key: 'live',
-        title: 'Live real',
+        title: 'Real USDT',
         subtitle: `${realPositions.length} abiertas`,
         positions: realPositions
       })
@@ -8119,7 +8132,7 @@ function renderOpenPositionCard(position) {
   const sideClass = escapeAttribute(String(position.direction || '').toLowerCase());
   const sourceLabel = position.source === 'demo'
     ? 'Demo VST'
-    : position.source === 'live' ? 'Live real' : 'Paper';
+    : position.source === 'live' ? 'Real USDT' : 'Simulada';
   const pnl = Number(position.unrealizedPnl ?? position.paperPnl ?? 0);
   const liveClass = position.liveTickAt ? ' live-price' : '';
   const quantity = positionQuantity(position);
@@ -8950,7 +8963,7 @@ function myLedgerEventRepresentedByPosition(event = {}, positionRows = []) {
 
 function renderMyLedgerRow(row) {
   const postLink = row.postUrl
-    ? `<a class="ledger-post-link" href="${escapeAttribute(row.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    ? `<a class="ledger-post-link" href="${escapeAttribute(row.postUrl)}" target="_blank" rel="noreferrer">Publicación</a>`
     : '-';
   const statusText = [row.action, row.status].filter(Boolean).join(' - ');
   return `
@@ -9393,7 +9406,7 @@ function renderStrategyStudy() {
 function renderRealLifecycleGroup(group) {
   const totals = signalGroupTotals(group);
   const postLink = group.postUrl
-    ? `<a href="${escapeAttribute(group.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    ? `<a href="${escapeAttribute(group.postUrl)}" target="_blank" rel="noreferrer">Publicación</a>`
     : '';
   return `
     <article class="real-lifecycle-card">
@@ -9557,7 +9570,7 @@ function groupedSignalEvents() {
 function renderSignalGroup(group) {
   const totals = signalGroupTotals(group);
   const postLink = group.postUrl
-    ? `<a href="${escapeAttribute(group.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    ? `<a href="${escapeAttribute(group.postUrl)}" target="_blank" rel="noreferrer">Publicación</a>`
     : '';
 
   return `
@@ -9718,7 +9731,7 @@ function newerIso(a, b) {
 
 function renderTradeHistoryItem(item) {
   const postLink = item.postUrl
-    ? `<a href="${escapeAttribute(item.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
+    ? `<a href="${escapeAttribute(item.postUrl)}" target="_blank" rel="noreferrer">Publicación</a>`
     : '';
   const closeText = item.closeReason ? `Cierre: ${closeReasonLabel(item.closeReason)}` : item.reason || '';
 
@@ -10089,7 +10102,7 @@ function tradeHistoryItems() {
     asset: positionAsset(position),
     symbol: position.symbol,
     direction: position.direction,
-    statusLabel: position.source === 'demo' ? 'Demo VST abierta' : 'Live abierta',
+    statusLabel: position.source === 'demo' ? 'Demo VST abierta' : 'Real abierta',
     entryPrice: position.entryPrice,
     stopLoss: position.stopLoss,
     pnl: position.unrealizedPnl,
@@ -10105,7 +10118,7 @@ function tradeHistoryItems() {
     asset: 'USDT',
     symbol: position.symbol,
     direction: position.direction,
-    statusLabel: position.status === 'open' ? 'paper abierta' : `paper ${closeReasonLabel(position.closeReason)}`,
+    statusLabel: position.status === 'open' ? 'simulada abierta' : `simulada ${closeReasonLabel(position.closeReason)}`,
     entryPrice: position.entryPrice,
     stopLoss: position.stopLoss,
     pnl: position.paperPnl,
@@ -10443,31 +10456,31 @@ function tradeStatusLabel(value) {
     demo_sl_no_position: 'SL demo sin posición',
     demo_sl_blocked: 'SL demo bloqueado',
     demo_sl_be_detected: 'SL BE demo detectado',
-    test_order_sent: 'test enviada',
-    live_order_sent: 'live enviada',
-    live_close_sent: 'cierre live enviado',
-    live_close_all_sent: 'cierre total live',
-    live_close_all_no_position: 'live sin posición',
-    live_close_no_position: 'live sin posición',
-    live_tp_sent: 'TP live enviado',
-    live_tp_no_position: 'TP live sin posición',
-    live_tp_blocked: 'TP live bloqueado',
-    live_sl_sent: 'SL live enviado',
-    live_sl_no_position: 'SL live sin posición',
-    live_sl_blocked: 'SL live bloqueado',
-    live_sl_be_detected: 'SL BE live detectado',
+    test_order_sent: 'orden de prueba enviada',
+    live_order_sent: 'orden real enviada',
+    live_close_sent: 'cierre real enviado',
+    live_close_all_sent: 'cierre total real',
+    live_close_all_no_position: 'real sin posición',
+    live_close_no_position: 'real sin posición',
+    live_tp_sent: 'TP real enviado',
+    live_tp_no_position: 'TP real sin posición',
+    live_tp_blocked: 'TP real bloqueado',
+    live_sl_sent: 'SL real enviado',
+    live_sl_no_position: 'SL real sin posición',
+    live_sl_blocked: 'SL real bloqueado',
+    live_sl_be_detected: 'SL a equilibrio real detectado',
     exchange_stop_closed: 'stop BingX cerrado',
     exchange_signal_closed: 'cierre BingX ejecutado',
     exchange_position_closed: 'posición BingX cerrada',
-    paper_close_sent: 'cierre paper',
-    paper_close_all_sent: 'cierre total paper',
-    paper_close_all_no_position: 'paper sin posición',
-    paper_tp_sent: 'TP paper',
-    paper_tp_no_position: 'TP paper sin posición',
-    paper_sl_sent: 'SL paper',
-    paper_sl_no_position: 'SL paper sin posición',
+    paper_close_sent: 'cierre simulado',
+    paper_close_all_sent: 'cierre total simulado',
+    paper_close_all_no_position: 'simulación sin posición',
+    paper_tp_sent: 'TP simulado',
+    paper_tp_no_position: 'TP simulado sin posición',
+    paper_sl_sent: 'SL simulado',
+    paper_sl_no_position: 'SL simulado sin posición',
     paper_price_close: 'cierre por precio',
-    paper_sl_be_sent: 'SL a BE paper',
+    paper_sl_be_sent: 'SL a equilibrio simulado',
     close_signal_detected: 'cierre detectado',
     move_sl_be_detected: 'SL BE detectado',
     blocked: 'bloqueada',
@@ -10477,15 +10490,15 @@ function tradeStatusLabel(value) {
 
 function bingxModeLabel(value) {
   return {
-    test: 'Test order',
+    test: 'Orden de prueba',
     demo: 'Demo VST',
-    live: 'Live real',
-    dual: 'VST + Live real'
-  }[value] || 'Test order';
+    live: 'Real USDT',
+    dual: 'Demo VST + Real USDT'
+  }[value] || 'Orden de prueba';
 }
 
 function realTabModeLabel(value) {
-  return usesLiveMode(value) ? 'Live real USDT' : bingxModeLabel(value);
+  return usesLiveMode(value) ? 'Real USDT' : bingxModeLabel(value);
 }
 
 function usesLiveMode(value) {

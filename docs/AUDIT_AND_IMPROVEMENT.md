@@ -17,10 +17,10 @@ Ventana auditada: desde el reset mensual del 1 de julio hasta el 10 de julio.
 | PnL teórico escalado de la hoja | +272,4109 VST |
 | PnL bruto de BingX | -10,5657 VST |
 | Comisiones | -92,9171 VST |
-| Funding | -2,0737 VST |
+| Financiación | -2,0737 VST |
 | Neto observado | -105,5564 VST |
-| Devolución de fees acreditada por BingX | 0,0000 VST |
-| Devolución de fees estimada al 22% | +20,4418 VST |
+| Reembolso de comisiones acreditado por BingX | 0,0000 VST |
+| Reembolso de comisiones estimado al 22 % | +20,4418 VST |
 | Neto con devolución estimada | -85,1146 VST |
 
 La devolución del 22% es un escenario. No se suma a la equity real hasta que BingX la registre como ingreso. En la línea base no aparece ningún ingreso de devolución en el histórico de la cuenta; la tarifa observada es 0,05% taker y 0,02% maker.
@@ -40,7 +40,7 @@ La línea base anterior se conserva como referencia histórica. Tras incorporar 
 | PnL teórico escalado de la hoja | +540,1042 VST |
 | PnL bruto de BingX | -78,8946 VST |
 | Comisiones | -174,9805 VST |
-| Funding | -4,8178 VST |
+| Financiación | -4,8178 VST |
 | Neto observado | -258,6929 VST |
 | Devolución acreditada por BingX | 0,0000 VST |
 | Devolución estimada al 22% | +38,4957 VST |
@@ -58,9 +58,9 @@ El frontend resume esta situación inmediatamente debajo de las fuentes de PnL. 
 
 El bloque `Diagnóstico económico` usa las mismas identidades reconciliadas y permite alternar entre la cohorte vigente y el mes completo. La cohorte es el ámbito inicial cuando existe porque representa el comportamiento posterior a las mejoras; el mes completo permanece disponible para estudiar el histórico acumulado. En ambos casos se recalculan réplica, neto, brecha, ejecución, costes, cobertura y la fase neta dominante. El selector solo cambia la presentación: no modifica señales, tamaños, filtros, órdenes ni protecciones.
 
-El win rate ya no compara universos distintos. En el corte del 22 de julio hay **159 pares cerrados con resultado en ambos lados**: Google Sheet registra 119 ganadoras (**74,8%**) y BingX VST neto registra 98 (**61,6%**). La brecha comparable es de **-13,2 puntos porcentuales**. En 138 pares coincide el signo neto y en 21 cambia: 15 diferencias ya existían antes de costes y seis ganancias brutas fueron absorbidas por fees y funding. Los pares abiertos, las operaciones ausentes y las que todavía no tienen resultado de hoja permanecen visibles en sus contadores, pero no entran en estos porcentajes.
+El porcentaje de acierto ya no compara universos distintos. En el corte del 22 de julio hay **159 pares cerrados con resultado en ambos lados**: Google Sheet registra 119 ganadoras (**74,8 %**) y BingX VST neto registra 98 (**61,6 %**). La brecha comparable es de **-13,2 puntos porcentuales**. En 138 pares coincide el signo neto y en 21 cambia: 15 diferencias ya existían antes de costes y seis ganancias brutas fueron absorbidas por comisiones y financiación. Los pares abiertos, las operaciones ausentes y las que todavía no tienen resultado de hoja permanecen visibles en sus contadores, pero no entran en estos porcentajes.
 
-La misma muestra queda ahora reconciliada económicamente. La réplica escalada suma **+487,5218 VST**, mientras que BingX produjo **-70,6756 VST brutos**, pagó **-170,8566 VST en comisiones** y **-4,8178 VST en funding**, para terminar en **-246,3499 VST netos**. La brecha neta frente a la réplica es **-733,8717 VST** y el residual contable es exactamente cero. De esa diferencia, **-558,1973 VST** ya existen antes de costes y **-175,6744 VST** proceden de comisiones y funding: los costes explican el **23,9%** de la brecha negativa comparable. Los 15 cambios de signo anteriores a costes aportan **-216,4457 VST** de esa brecha y los seis cambios provocados por costes aportan **-39,9812 VST**.
+La misma muestra queda ahora reconciliada económicamente. La réplica escalada suma **+487,5218 VST**, mientras que BingX produjo **-70,6756 VST brutos**, pagó **-170,8566 VST en comisiones** y **-4,8178 VST en financiación**, para terminar en **-246,3499 VST netos**. La brecha neta frente a la réplica es **-733,8717 VST** y el residual contable es exactamente cero. De esa diferencia, **-558,1973 VST** ya existen antes de costes y **-175,6744 VST** proceden de comisiones y financiación: los costes explican el **23,9 %** de la brecha negativa comparable. Los 15 cambios de signo anteriores a costes aportan **-216,4457 VST** de esa brecha y los seis cambios provocados por costes aportan **-39,9812 VST**.
 
 La conclusión más importante aparece en los **138 pares cuyo signo sí coincide**: la réplica gana **+367,8335 VST**, pero BingX termina en **-109,6113 VST netos**, una diferencia de **-477,4448 VST**. De esa brecha, **-326,4774 VST** aparecen antes de costes y **-150,9674 VST** proceden de costes; estos representan el **31,6%**. Acertar ganadora o perdedora no garantiza replicar su magnitud; entradas, salidas, exposición efectiva y costes siguen alterando el resultado. Por activo, la brecha neta es **-268,2152 VST en SOL**, **-259,2778 VST en ETH**, **-170,5865 VST en BTC** y **-35,7922 VST en SUI**. El peso de costes sobre esas brechas es, respectivamente, **20,8%**, **21,3%**, **33,8%** y **19,1%**. Las tablas del panel exponen este desglose y permiten abrir cada categoría o activo sobre el detalle de operaciones.
 
@@ -68,15 +68,15 @@ La etiqueta `Ganancia absorbida por costes` describe el cambio de signo, no atri
 
 Cada operación ausente se cruza de forma conservadora con los intentos fallidos del mismo día, activo, dirección y precio. En el corte del 22 de julio hay **18 ausencias**, todas con evidencia concreta: cinco stops inválidos, nueve bloqueos del filtro de costes anterior, tres rechazos por margen VST insuficiente y un reintento expirado por desviación de entrada. El panel conserva el estado, el motivo técnico y el enlace de la publicación; una coincidencia aproximada o de otro día no se acepta como explicación.
 
-La auditoría distingue ahora el precio publicado del precio real de ejecución. Para la entrada utiliza el `avgPrice` confirmado por BingX, no la instantánea tomada antes de enviar la orden. Para la salida usa prioritariamente el `avgPrice` del histórico firmado de órdenes. En este corte reconstruye **170 aperturas**: 167 tenían evento local y tres fueron recuperadas directamente desde BingX. Los **169 ciclos cerrados** tienen fill exacto y no queda ningún cierre huérfano. De las ejecuciones medibles, 82 entradas y 52 salidas superaron el 0,15% de desviación adversa; las medias fueron del 0,1381% y del 0,1481%, respectivamente.
+La auditoría distingue ahora el precio publicado del precio real de ejecución. Para la entrada utiliza el `avgPrice` confirmado por BingX, no la instantánea tomada antes de enviar la orden. Para la salida usa prioritariamente el `avgPrice` del histórico firmado de órdenes. En este corte reconstruye **170 aperturas**: 167 tenían evento local y tres fueron recuperadas directamente desde BingX. Los **169 ciclos cerrados** tienen una ejecución exacta y no queda ningún cierre huérfano. De las ejecuciones medibles, 82 entradas y 52 salidas superaron el 0,15 % de desviación adversa; las medias fueron del 0,1381 % y del 0,1481 %, respectivamente.
 
-El panel incorpora además un puente contable que reconcilia la réplica teórica con el neto observado. Parte de **540,1042 VST**, resta 558,1973 VST por la diferencia de las 159 operaciones emparejadas y 52,5824 VST por 18 operaciones no ejecutadas. Después suma 14,4951 VST de tres resultados pendientes en la hoja, resta 28,2720 VST de tres operaciones todavía fuera de cobertura, suma 5,5578 VST de cinco extras históricos y resta 179,7983 VST de comisiones y funding. Los cierres sin apertura enlazada aportan exactamente **0 VST**. El resultado es **-258,6929 VST**, con residual contable cero. La última jornada de la hoja sigue provisional porque conserva tres filas abiertas; esas operaciones se muestran como pendientes y no como contradicciones de estrategia.
+El panel incorpora además un puente contable que reconcilia la réplica teórica con el neto observado. Parte de **540,1042 VST**, resta 558,1973 VST por la diferencia de las 159 operaciones emparejadas y 52,5824 VST por 18 operaciones no ejecutadas. Después suma 14,4951 VST de tres resultados pendientes en la hoja, resta 28,2720 VST de tres operaciones todavía fuera de cobertura, suma 5,5578 VST de cinco extras históricos y resta 179,7983 VST de comisiones y financiación. Los cierres sin apertura enlazada aportan exactamente **0 VST**. El resultado es **-258,6929 VST**, con residual contable cero. La última jornada de la hoja sigue provisional porque conserva tres filas abiertas; esas operaciones se muestran como pendientes y no como contradicciones de estrategia.
 
 La bolsa de operaciones emparejadas también se descompone de forma exacta. Sus **487,5218 VST** teóricos pasan a **-70,6756 VST** brutos en BingX: la diferencia de entrada aporta **-256,1414 VST**, la diferencia de salida **-301,6238 VST** y cantidad, redondeos y fills residuales **-0,4322 VST**. La contabilidad publicada de la hoja coincide con el cálculo lineal escalado y no deja diferencia material. La atribución de entrada y salida es simétrica, por lo que ninguna de las dos absorbe artificialmente la interacción entre ambos precios. Este desglose usa las 159 operaciones con precios suficientes y reconcilia con residual cero.
 
 Por activo, el gap emparejado es **-212,3036 VST en SOL**, **-204,0369 VST en ETH**, **-112,9161 VST en BTC** y **-28,9407 VST en SUI**. Esta medición es anterior a comisiones: demuestra que el principal desalineamiento histórico está en los precios de entrada y de salida; los costes se añaden después como una pérdida separada.
 
-La nueva clasificación causal separa lo ocurrido antes de cada fill de cierre. De las 159 operaciones emparejadas, **143** siguieron una ruta observada ordinaria: 102 cierres explícitos y 41 stops sin una incidencia de cierre anterior. Su gap conjunto es **-423,1600 VST**, repartido principalmente entre entrada (**-240,8932 VST**) y salida (**-189,8422 VST**). Otras **siete** operaciones están asociadas a incidencias históricas ya corregidas: tres cierres que no generaron evento y cuatro posiciones afectadas por el error del guard de cierre. Su gap observado es **-107,3859 VST**, con **-93,1546 VST** atribuibles a la salida. Siete operaciones adicionales cerraron después de reintentos protegidos y aportan **-26,0973 VST**; dos fills exactos carecen de una señal local enlazada y aportan **-1,5542 VST**. Las cuatro familias suman exactamente **-558,1973 VST**, con residual cero.
+La nueva clasificación causal separa lo ocurrido antes de cada ejecución de cierre. De las 159 operaciones emparejadas, **143** siguieron una ruta observada ordinaria: 102 cierres explícitos y 41 stops sin una incidencia de cierre anterior. Su brecha conjunta es **-423,1600 VST**, repartida principalmente entre entrada (**-240,8932 VST**) y salida (**-189,8422 VST**). Otras **siete** operaciones están asociadas a incidencias históricas ya corregidas: tres cierres que no generaron evento y cuatro posiciones afectadas por el error de la protección de cierre. Su brecha observada es **-107,3859 VST**, con **-93,1546 VST** atribuibles a la salida. Siete operaciones adicionales cerraron después de reintentos protegidos y aportan **-26,0973 VST**; dos ejecuciones exactas carecen de una señal local enlazada y aportan **-1,5542 VST**. Las cuatro familias suman exactamente **-558,1973 VST**, con residual cero.
 
 El gap de una familia no debe interpretarse como beneficio recuperable. La clasificación demuestra asociación temporal y técnica, pero no construye un mercado contrafactual. Su utilidad es separar los defectos históricos del comportamiento vigente y evitar que se atribuyan al parser actual. La cohorte posterior a las mejoras sigue siendo la evidencia válida para evaluar si esos defectos han desaparecido y si la ejecución nueva reduce la diferencia.
 
@@ -102,7 +102,7 @@ El desglose reconciliado frente a los precios finales de la hoja asigna **-256,1
 
 ### 2. Salidas tardías
 
-La línea base también comparaba la señal de cierre con un precio de marca, no con el precio ejecutado. Con el fill exacto del histórico, 52 de 113 salidas comparables superaron el 0,15% de desviación adversa. El arrastre neto estimado asciende a 177,4807 VST.
+La línea base también comparaba la señal de cierre con un precio de marca, no con el precio ejecutado. Con la ejecución exacta del histórico, 52 de 113 salidas comparables superaron el 0,15 % de desviación adversa. El arrastre neto estimado asciende a 177,4807 VST.
 
 Esperar a que el precio volviera a la cifra escrita añadía una apuesta nueva que no formaba parte de la orden de cierre.
 
@@ -110,9 +110,9 @@ El desglose reconciliado asigna **-301,6238 VST** a la diferencia de salida. Inc
 
 ### 3. Costes
 
-Las comisiones superaron en valor absoluto el PnL bruto. El tamaño de la cuenta no corrige este problema de ROI: al aumentar tamaño, crecen tanto el PnL como las fees.
+Las comisiones superaron en valor absoluto el PnL bruto. El tamaño de la cuenta no corrige este problema de ROI: al aumentar el tamaño, crecen tanto el PnL como las comisiones.
 
-La auditoría identifica 21 cambios de signo neto: en 15 el PnL ya era contrario a la hoja antes de costes y en seis el bruto coincidía, pero comisiones y funding lo convirtieron en pérdida. Existen 16 brutos de signo contrario en total porque un caso adicional volvió a coincidir con la hoja después de costes; ese caso no se cuenta entre los 21 cambios netos. De este modo, una divergencia previa a costes ya no se confunde con una ganancia absorbida por costes.
+La auditoría identifica 21 cambios de signo neto: en 15 el PnL ya era contrario a la hoja antes de costes y en seis el bruto coincidía, pero las comisiones y la financiación lo convirtieron en pérdida. Existen 16 brutos de signo contrario en total porque un caso adicional volvió a coincidir con la hoja después de costes; ese caso no se cuenta entre los 21 cambios netos. De este modo, una divergencia previa a costes ya no se confunde con una ganancia absorbida por costes.
 
 ### 4. Operaciones ausentes
 
@@ -154,7 +154,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 
 ### Costes
 
-- El break-even por fees sigue visible.
+- El punto de equilibrio por comisiones sigue visible.
 - Una señal sin TP no se bloquea solo por usar x25.
 - En modo bloqueo, el filtro solo rechaza una operación si hay un TP explícito y ese objetivo no cubre el coste estimado.
 - La auditoría presenta el bruto teórico, el neto estimado con entrada y salida taker, el escenario con entrada maker y la devolución que BingX haya acreditado realmente.
@@ -184,7 +184,7 @@ Existen cierres posteriores al reset cuya apertura quedó fuera de la ventana. S
 - Antes de reintentar una apertura, la app reconcilia posiciones para resolver respuestas ambiguas sin duplicar exposición.
 - La auditoría consulta el histórico firmado de órdenes en ventanas de siete días, conserva los identificadores largos sin redondearlos y refresca de forma incremental con solapamiento para no perder órdenes de borde.
 - El frontend refresca de forma pasiva la referencia y la auditoría cada cinco minutos solo cuando PnL está visible. Si una fuente falla, muestra el aviso, conserva la última muestra válida y aumenta temporalmente el intervalo sin tocar la ejecución.
-- Si la lectura exacta falla, conserva la última copia válida como obsoleta; si no existe o no cubre al menos el 80% de los eventos, activa un fallback explícito basado en eventos e ingresos.
+- Si la lectura exacta falla, conserva la última copia válida como obsoleta; si no existe o no cubre al menos el 80 % de los eventos, activa un respaldo explícito basado en eventos e ingresos.
 - Si la cobertura detecta en Demo una apertura reciente sin evento de ejecución, vuelve a validarla por la misma ruta idempotente. Las ejecuciones procedentes de otra fuente se enlazan y no se cuentan como huecos.
 - Si el contenido actual de una señal difiere del valor conservado en su evento, la auditoría identifica la corrección posterior campo por campo. El fallo histórico permanece en la muestra, pero deja de aparecer como una apertura ausente sin explicación.
 - La puerta de promoción exige muestra, cobertura, seguridad y PnL neto positivo; nunca arma live automáticamente.
@@ -220,7 +220,7 @@ La cohorte posterior a estas mejoras debe evaluarse por separado. Los indicadore
 1. Cobertura de aperturas: ejecutadas, bloqueadas y errores con causa.
 2. Desviación adversa de entrada: objetivo, cero operaciones por encima del 0,15%.
 3. Latencia y desviación de cierre.
-4. PnL bruto, fees, funding y neto, siempre separados.
+4. PnL bruto, comisiones, financiación y neto, siempre separados.
 5. Resultado bruto y neto estimado bajo costes taker/maker, sin mezclar escenarios con la equity real.
 6. Stops antes de cierre frente a la hoja.
 7. Operaciones agregadas y reparto del PnL.
@@ -285,7 +285,7 @@ El sistema puede reducir latencia, errores, duplicados, slippage evitable y medi
 
 No debe construirse una estrategia autónoma a partir de la hoja hasta separar claramente:
 
-- resultado antes y después de fees;
+- resultado antes y después de comisiones;
 - precio publicado y precio ejecutable;
 - stop real y cierre posterior de la hoja;
 - posiciones individuales y posiciones agregadas;

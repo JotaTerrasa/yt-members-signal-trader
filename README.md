@@ -40,10 +40,10 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Ejecuta los cierres explícitos inmediatamente a mercado; el slippage se registra como advertencia y nunca retiene la salida.
 - Reintenta durante tres minutos los cierres que fallen por un error transitorio de red o de BingX, conservando el modo demo/live y la protección anti-duplicados.
 - Reintenta aperturas bloqueadas por una zona temporalmente inválida o por fallos transitorios, sin perseguir precios desfavorables.
-- En Demo VST recupera correcciones recientes de una publicación editada cuando cambian la entrada, el stop o el apalancamiento. La antigüedad máxima y el antiduplicados siguen siendo obligatorios; una edición de prosa o TP no reabre posiciones y Live real queda fuera.
+- En Demo VST recupera correcciones recientes de una publicación editada cuando cambian la entrada, el stop o el apalancamiento. La antigüedad máxima y el antiduplicados siguen siendo obligatorios; una edición de prosa o TP no reabre posiciones y el modo real queda fuera.
 - Asigna a cada apertura un identificador determinista: un timeout o un reinicio no puede convertir un reintento en una segunda posición.
 - Conserva en `.data/execution-retries.json` las aperturas y los cierres pendientes para recuperarlos después de reiniciar el proceso.
-- Conserva en `.data/pnl-snapshots.json` la última lectura histórica válida de BingX. Un reinicio, rate limit o `system busy` ya no sustituye temporalmente fees, cierres y PnL por ceros.
+- Conserva en `.data/pnl-snapshots.json` la última lectura histórica válida de BingX. Un reinicio, un límite de peticiones o `system busy` ya no sustituye temporalmente comisiones, cierres y PnL por ceros.
 - Mantiene en Demo VST una reserva técnica de margen antes de cada paquete y descuenta esas aportaciones de la equity estratégica y del ROI.
 - Evalúa en Demo VST un filtro neto de entrada que marca operaciones con coste/riesgo, break-even o R/R desfavorables. Por defecto opera en sombra; solo bloquea si se cambia explícitamente a modo bloqueo.
 - Empareja las entradas marcadas en sombra con sus cierres y muestra su PnL neto estimado. También avisa cuando un umbral marcaría por construcción todas las señales con el apalancamiento observado.
@@ -57,12 +57,12 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Separa en `Incidencias 24h` los problemas activos, los ya recuperados y los registros informativos. Una alerta histórica no mantiene el panel en aviso si la fuente correspondiente vuelve a estar sana.
 - Arranca el canal en tiempo real antes que las consultas auxiliares. Si una fuente inicial devuelve un error temporal o no responde en 8 segundos, el navegador cancela esa lectura, el resto del panel permanece operativo y solo esa fuente se reintenta a los 2, 5, 15 y 30 segundos.
 - Carga Google Sheet, auditoría de réplica, fuentes VST/real y PnL de cuenta de forma independiente, con 30 segundos máximos por lectura. Una caída de la hoja no bloquea las cifras de BingX y una caída de BingX no elimina la última copia válida de la hoja.
-- Resume al principio de la auditoría la brecha entre réplica teórica y BingX neto. Separa ejecución emparejada, comisiones/funding y cobertura/ausencias, identifica el tramo individual de mayor arrastre y permite alternar entre `Cohorte vigente` y `Mes completo`. El ámbito elegido gobierna todo el detalle visible: métricas, puentes, atribuciones, impacto, filtros y filas. La cohorte es la vista inicial cuando está disponible, para no atribuir al comportamiento actual incidencias históricas ya corregidas. Cada causa enlaza con su evidencia contable, transfiere allí el foco de teclado y conserva el destino visible aunque Plotly termine de dimensionar el gráfico o una actualización sustituya el panel después de la activación. La intención se cancela en cuanto el usuario enfoca otro control, por lo que los refrescos posteriores no deshacen su navegación.
+- Resume al principio de la auditoría la brecha entre réplica teórica y BingX neto. Separa ejecución emparejada, comisiones/financiación y cobertura/ausencias, identifica el tramo individual de mayor arrastre y permite alternar entre `Cohorte vigente` y `Mes completo`. El ámbito elegido gobierna todo el detalle visible: métricas, puentes, atribuciones, impacto, filtros y filas. La cohorte es la vista inicial cuando está disponible, para no atribuir al comportamiento actual incidencias históricas ya corregidas. Cada causa enlaza con su evidencia contable, transfiere allí el foco de teclado y conserva el destino visible aunque Plotly termine de dimensionar el gráfico o una actualización sustituya el panel después de la activación. La intención se cancela en cuanto el usuario enfoca otro control, por lo que las actualizaciones posteriores no deshacen su navegación.
 - Permite recorrer la extensa vista de Rendimiento mediante un navegador fijo con ocho destinos: resumen, fiabilidad, guardia, posiciones, hoja propia, hoja externa, rendimiento y auditoría. La sección activa sigue el desplazamiento, el destino recibe foco al activarlo con teclado y la banda se desplaza horizontalmente en móvil sin ensanchar la página. `Saltar al contenido` transfiere igualmente el foco al área principal.
-- El botón `Actualizar` de Rendimiento y el icono local de `Hoja externa` omiten las cachés de lectura de Google Sheet, auditoría y PnL para solicitar el dato más reciente. El control local permanece junto al estado aunque la tabla conserve datos antiguos o esté vacía, muestra la lectura en curso y evita obligar a volver al principio de la vista. Ambos mantienen el cooldown protector de BingX y agrupan las lecturas simultáneas de la misma hoja para no duplicar peticiones.
+- El botón `Actualizar` de Rendimiento y el icono local de `Hoja externa` omiten las cachés de lectura de Google Sheet, auditoría y PnL para solicitar el dato más reciente. El control local permanece junto al estado aunque la tabla conserve datos antiguos o esté vacía, muestra la lectura en curso y evita obligar a volver al principio de la vista. Ambos mantienen la espera protectora de BingX y agrupan las lecturas simultáneas de la misma hoja para no duplicar peticiones.
 - La auditoría diaria solicita una réplica fresca y aplica la misma gracia de 15 minutos que las alertas de Telegram antes de registrar como degradación una ausencia temporal de publicaciones visibles.
 - Agrupa las ráfagas de precios de BingX y actualiza primero posiciones, riesgo y totales. Gráficos, histórico y auditoría se sincronizan después sin reconstruirse con cada tick.
-- Sirve Lucide desde la propia aplicación y carga Plotly localmente solo al abrir Rendimiento. Posts y Eventos arrancan sin la librería de gráficos y los CDN quedan como respaldo, no como dependencia del funcionamiento normal.
+- Sirve Lucide desde la propia aplicación y carga Plotly localmente solo al abrir Rendimiento. Publicaciones y Eventos arrancan sin la librería de gráficos y los CDN quedan como respaldo, no como dependencia del funcionamiento normal.
 - Negocia Brotli o gzip para HTML, CSS, JavaScript, JSON y SVG, y usa `ETag` para responder `304` cuando el archivo no ha cambiado. Esto reduce especialmente la carga de Rendimiento mediante móvil o túnel.
 - Guarda los JSON locales mediante escrituras en cola y reemplazo atómico para no dejar archivos parciales ante reinicios.
 - Genera informes de estudio estratégico para aprender patrones de la operativa.
@@ -104,7 +104,7 @@ flowchart LR
   study --> reports["docs/strategy-reports/"]
   api --> audit["Auditoría integral<br/>scripts/systemAudit.js"]
   audit --> auditReports["docs/audits/"]
-  api --> backup["Backups redactados y cifrados<br/>scripts/secureBackup.js"]
+  api --> backup["Copias redactadas y cifradas<br/>scripts/secureBackup.js"]
   backup --> key["Clave externa al repositorio<br/>~/.futures-magician/backup.key"]
 ```
 
@@ -308,7 +308,7 @@ No escribas tokens en README, issues, commits ni capturas.
 2. Elige modo: `test`, `demo`, `live` o `dual`.
 3. Pega API key y API secret.
 4. Configura capital mensual, porcentaje fijo por señal, margen, apalancamiento máximo y límites.
-5. El filtro de coste avisa cuando las fees exigen demasiado margen. En modo bloqueo solo rechaza una entrada cuando existe un TP explícito y ese objetivo no cubre la ida y vuelta estimada; una señal sin TP no se descarta solo por usar x25.
+5. El filtro de coste avisa cuando las comisiones exigen demasiado margen. En modo bloqueo solo rechaza una entrada cuando existe un TP explícito y ese objetivo no cubre la ida y vuelta estimada; una señal sin TP no se descarta solo por usar x25.
 6. En Demo VST, deja el filtro neto en sombra para auditar entradas que no compensan por coste/riesgo, break-even o R/R. Los valores por defecto son 18% de coste/riesgo máximo, 3% de break-even de margen máximo y 0,9 de R/R mínimo.
    El panel de fiabilidad contrasta las señales marcadas con sus cierres y no recomienda valorar el bloqueo antes de reunir al menos 20 operaciones marcadas cerradas.
 7. En Demo VST, activa la reserva técnica para asegurar margen libre antes de cada paquete. La base estadística sigue siendo 300 VST y cada ticker sigue usando 45 VST; las recargas son colateral virtual externo y no cuentan como beneficio.
@@ -325,13 +325,13 @@ Antes de dejar la app funcionando:
 
 - `/api/health` debe devolver `ok`.
 - PM2 debe estar `online`.
-- En la UI, `Monitor live activo` debe estar verde.
+- En la interfaz, `Monitor en tiempo real activo` debe estar verde.
 - `API BingX validada` debe estar verde si usas BingX.
 - `Stop loss obligatorio` debe estar verde.
 - La antigüedad máxima, el desvío adverso, la distancia máxima del stop y el filtro neto Demo deben coincidir con la política operativa.
 - `Seguro demo VST` muestra equity, margen libre/usado, exposición, distancia a liquidación y cobertura real de SL/TP en la cuenta demo. Un stop no se cuenta también como take profit.
 - `Seguro real BingX` debe aparecer como `Real inactivo` cuando el modo actual sea solo Demo VST y debe indicar que no faltan SL/TP críticos al activar live o dual.
-- `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestión.
+- `Vigilancia de Telegram Web` debe indicar una lectura reciente si Telegram es fuente de gestión.
 - `Guardia nocturna` debe estar estable.
 - `Incidencias 24h` no debe mostrar errores críticos sin revisar.
 - `Backup auto` debe tener una ejecución reciente o programada.
@@ -373,7 +373,7 @@ Los botones destructivos piden confirmación textual.
 
 ## Paneles de la UI
 
-### Posts
+### Publicaciones
 
 Muestra posts guardados, mensajes detectados, enlaces y texto scrapeado. La lista carga 12 filas y permite ampliar el bloque sin renderizar todo el histórico de golpe. La pestaña PnL se construye bajo demanda para no penalizar el monitor ni la lectura de posts. La navegación mantiene visibles el estado del monitor, las fuentes activas y la cuenta de ejecución.
 
@@ -401,7 +401,7 @@ Incluye:
 - Incidencias 24h.
 - Preparado para live.
 - Salud del monitor.
-- Watchdog Telegram Web.
+- Vigilancia de Telegram Web.
 - Riesgo operativo local.
 - Seguro demo VST.
 - Seguro real BingX.
@@ -437,7 +437,7 @@ La UI lee el último informe desde:
 /api/strategy-study/latest
 ```
 
-### Backup redactado
+### Copia redactada
 
 Endpoint manual:
 
@@ -462,7 +462,7 @@ El backup redactado omite:
 
 Sirve para diagnóstico, pero no permite recuperar credenciales ni sesiones. Para una restauración completa se usa el backup cifrado.
 
-### Backup cifrado restaurable
+### Copia cifrada restaurable
 
 Inicializa una clave fuera del repositorio una sola vez:
 
@@ -559,7 +559,7 @@ El comparador reconstruye además la cadena `hoja → señal/objetivo → cotiza
 
 El bloque `Ruta causal de salida` clasifica cada operación emparejada como cierre explícito, stop, incidencia histórica, reintento protegido o falta de evidencia local. Muestra el resultado de referencia, el bruto de BingX y los impactos de entrada y salida por ruta. Las incidencias históricas se aíslan de la cohorte vigente y su gap se presenta como asociación observada, nunca como dinero supuestamente recuperable.
 
-Para reconstruir los ciclos utiliza el histórico firmado de órdenes de BingX como evidencia principal. Conserva `orderId`, `positionID` y `tradeId` como cadenas para no perder precisión, reparte cierres de posiciones agregadas y enlaza cada `avgPrice` ejecutado con su PnL y sus comisiones. El panel indica la cobertura exacta, las aperturas recuperadas y los cierres sin enlazar. Si BingX no entrega el histórico, la auditoría activa y etiqueta un fallback basado en eventos e ingresos; ese fallback nunca se presenta como fill exacto.
+Para reconstruir los ciclos utiliza el histórico firmado de órdenes de BingX como evidencia principal. Conserva `orderId`, `positionID` y `tradeId` como cadenas para no perder precisión, reparte cierres de posiciones agregadas y enlaza cada `avgPrice` ejecutado con su PnL y sus comisiones. El panel indica la cobertura exacta, las aperturas recuperadas y los cierres sin enlazar. Si BingX no entrega el histórico, la auditoría activa y etiqueta un respaldo basado en eventos e ingresos; ese respaldo nunca se presenta como una ejecución exacta.
 
 Si un paquete Demo reciente presenta una apertura sin evento de ejecución, la cobertura vuelve a validar la señal tras un breve margen y la reenvía por la ruta idempotente. Las aperturas ya ejecutadas desde otra fuente se enlazan mediante su identidad estable en lugar de contarse como ausentes. Esta recuperación no cambia el modo, no arma Live y no habilita aperturas desde Telegram Web.
 
@@ -583,7 +583,7 @@ Endpoints:
 | `GET /api/health` | Salud del monitor. |
 | `GET /api/state` | Estado completo de app y monitor. |
 | `GET /api/audit` | Snapshot auditable. |
-| `GET /api/operational-status` | Guardia, incidencias, backups, capacidad local saneada y cooldown PnL. |
+| `GET /api/operational-status` | Guardia, incidencias, copias de seguridad, capacidad local saneada y espera de PnL. |
 | `GET /api/price-feed` | Estado WebSocket, cotizaciones y diagnóstico pasivo del reloj de BingX. |
 | `GET /api/execution-packages` | Paquetes detectados, reintentos persistentes y estado de promoción. |
 | `GET /api/promotion-gate` | Criterios objetivos de muestra, cobertura, seguridad y resultado neto. |
@@ -612,7 +612,7 @@ src/
   executionReliability.js Identidad idempotente y clasificación de reintentos
   executionRetryStore.js Cola persistente de aperturas y cierres pendientes
   editedSignalRecovery.js Correcciones recientes de aperturas editadas en Demo
-  pnlSnapshotStore.js    Última lectura PnL válida y fallback por fuente
+  pnlSnapshotStore.js    Última lectura PnL válida y respaldo por fuente
   promotionGate.js       Criterios de promoción sin activación automática
   backupStorage.js       Capacidad local y parciales abandonados, solo observación
   httpSecurity.js        Autenticación opcional y protecciones HTTP
@@ -620,14 +620,14 @@ src/
   bingxClock.js          Desfase pasivo del reloj REST de BingX
   bingxPriceWebSocket.js WebSocket de precios y bid/ask
   referenceLedger.js     hoja de Google de referencia
-  replicaAuditMatcher.js Emparejamiento hoja/apertura/cierre/fees
+  replicaAuditMatcher.js Emparejamiento hoja/apertura/cierre/comisiones
   portfolioDetector.js   Detección de portfolio
   *Store.js              Persistencia local
 
 scripts/
   strategyStudy.js       Informe estratégico
   systemAudit.js         Auditoría integral reproducible
-  secureBackup.js        Backup cifrado, verificación y restauración aislada
+  secureBackup.js        Copia cifrada, verificación y restauración aislada
   portableCheck.js       Comprobación portable del entorno
   registerWindowsTasks.ps1 Tareas Windows para PM2 y backups
   startPm2.ps1           Restauración PM2 en Windows
@@ -670,7 +670,7 @@ Contenido importante:
 .data/trade-events.json.journal Diario incremental pendiente de compactación
 .data/paper-trades.json       Simulación local
 .data/pnl-snapshots.json      Último snapshot PnL válido
-.data/backups/                Backups redacted
+.data/backups/                Copias redactadas
 .yt-profile/                  Sesiones Chromium
 ```
 
@@ -725,7 +725,7 @@ Una lectura aislada no implica que el monitor esté parado. La app agrupa el avi
 
 ### Telegram Web no lee mensajes
 
-Revisa el panel `Watchdog Telegram Web`.
+Revisa el panel `Vigilancia de Telegram Web`.
 
 Acciones:
 
@@ -736,13 +736,13 @@ Acciones:
 
 ### BingX PnL muestra rate-limit
 
-Es normal si se consulta demasiado el histórico. La app entra en cooldown y usa último dato/fallback hasta que BingX permita reintentar.
+Es normal si se consulta demasiado el histórico. La aplicación entra en espera y usa el último dato válido o el respaldo hasta que BingX permita reintentar.
 
 Revisa:
 
 ```text
 Guardia nocturna -> PnL histórico
-Watchdog Telegram Web -> PnL BingX
+Vigilancia de Telegram Web -> PnL BingX
 ```
 
 ### Hay posiciones sin SL/TP confirmado

@@ -137,6 +137,15 @@ try {
     return {
       toolPanelLabel: document.querySelector('#tool-panel')?.getAttribute('aria-label') || '',
       channelLabel: document.querySelector('label[for="channel-url"]')?.textContent.trim() || '',
+      postsTab: document.querySelector('#posts-tab')?.textContent.replace(/\s+/g, ' ').trim() || '',
+      maxScrollsLabel: document.querySelector('label[for="max-scrolls"]')?.textContent.replace(/\s+/g, ' ').trim() || '',
+      bingxPanelLabel: document.querySelector('details[aria-label="Operativa BingX"]')?.getAttribute('aria-label') || '',
+      bingxModeOptions: [...document.querySelectorAll('#bingx-mode option')].map((option) => option.textContent.trim()),
+      marginOptions: [...document.querySelectorAll('#bingx-margin option')].map((option) => option.textContent.trim()),
+      apiKeyLabel: document.querySelector('label[for="bingx-api-key"]')?.textContent.trim() || '',
+      maxLeverageLabel: document.querySelector('label[for="bingx-max-signal-leverage"]')?.textContent.replace(/\s+/g, ' ').trim() || '',
+      breakEvenLabel: document.querySelector('label[for="bingx-cost-guard-max-margin"]')?.textContent.replace(/\s+/g, ' ').trim() || '',
+      dryRunLabel: document.querySelector('#bingx-dry-run-required')?.closest('label')?.textContent.replace(/\s+/g, ' ').trim() || '',
       headings,
       missingRequired: required.filter((text) => !headings.some((heading) => heading.text === text)),
       forbiddenPresent: forbidden.filter((text) => headings.some((heading) => heading.text === text)),
@@ -145,6 +154,15 @@ try {
   });
   if (semanticSpanishCopy.toolPanelLabel !== 'Configuración operativa'
     || semanticSpanishCopy.channelLabel !== 'Canal o pestaña de publicaciones'
+    || semanticSpanishCopy.postsTab !== 'Publicaciones'
+    || semanticSpanishCopy.maxScrollsLabel !== 'Desplazamientos máx.'
+    || semanticSpanishCopy.bingxPanelLabel !== 'Operativa BingX'
+    || JSON.stringify(semanticSpanishCopy.bingxModeOptions) !== JSON.stringify(['Orden de prueba', 'Demo VST', 'Real USDT', 'Demo VST + Real USDT'])
+    || JSON.stringify(semanticSpanishCopy.marginOptions) !== JSON.stringify(['Aislado', 'Cruzado'])
+    || semanticSpanishCopy.apiKeyLabel !== 'Clave API'
+    || semanticSpanishCopy.maxLeverageLabel !== 'Apalancamiento máx. de la señal'
+    || semanticSpanishCopy.breakEvenLabel !== 'Punto de equilibrio máx. sobre margen (%)'
+    || semanticSpanishCopy.dryRunLabel !== 'Exigir simulación previa antes de operar en real'
     || semanticSpanishCopy.missingRequired.length
     || semanticSpanishCopy.forbiddenPresent.length
     || semanticSpanishCopy.levelJumps.length) {
@@ -270,8 +288,8 @@ try {
     renderGuardDashboard();
     return text;
   });
-  if (!backupContinuityPanel.includes('Backup redactado')
-    || !backupContinuityPanel.includes('Backup cifrado')
+  if (!backupContinuityPanel.includes('Copia redactada')
+    || !backupContinuityPanel.includes('Copia cifrada')
     || !backupContinuityPanel.includes('restaurado')
     || !backupContinuityPanel.includes('Almacén local')
     || !backupContinuityPanel.includes('12 copias')
@@ -1105,11 +1123,11 @@ try {
     || !cohortScopeState.economicDiagnosis.includes('BingX neto 5,00 VST')
     || !cohortScopeState.economicDiagnosis.includes('Brecha total -15,00 VST')
     || !cohortScopeState.economicDiagnosis.includes('Ejecución emparejada -9,00 VST 60%')
-    || !cohortScopeState.economicDiagnosis.includes('Comisiones y funding -4,00 VST 26,7%')
+    || !cohortScopeState.economicDiagnosis.includes('Comisiones y financiación -4,00 VST 26,7%')
     || !cohortScopeState.economicDiagnosis.includes('La ejecución de precios es el mayor arrastre')
     || !cohortScopeState.economicDiagnosis.includes('La entrada concentra 100%')
-    || !cohortScopeState.economicDiagnosis.includes('Mayor tramo individual: Cotización a fill de entrada, -6,00 VST')
-    || !cohortScopeState.economicDiagnosis.includes('100% de cierres con fill exacto')
+    || !cohortScopeState.economicDiagnosis.includes('Mayor tramo individual: Cotización a ejecución de entrada, -6,00 VST')
+    || !cohortScopeState.economicDiagnosis.includes('100% de cierres con ejecución exacta')
     || !cohortScopeState.economicDiagnosis.includes('Sin incidencias históricas en la muestra')
     || !cohortScopeState.economicDiagnosis.includes('no demuestra rentabilidad futura')
     || cohortScopeState.economicSegments !== 3
@@ -1381,9 +1399,9 @@ try {
     || !outcomeImpactState.economicDiagnosis.includes('BingX neto 16,00 VST')
     || !outcomeImpactState.economicDiagnosis.includes('Brecha total -39,00 VST')
     || !outcomeImpactState.economicDiagnosis.includes('Ejecución emparejada -32,00 VST 82,1%')
-    || !outcomeImpactState.economicDiagnosis.includes('Comisiones y funding -7,00 VST 17,9%')
+    || !outcomeImpactState.economicDiagnosis.includes('Comisiones y financiación -7,00 VST 17,9%')
     || !outcomeImpactState.economicDiagnosis.includes('La salida concentra 62,5%')
-    || !outcomeImpactState.economicDiagnosis.includes('Mayor tramo individual: Cotización a fill de salida, -11,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('Mayor tramo individual: Cotización a ejecución de salida, -11,00 VST')
     || !outcomeImpactState.economicDiagnosis.includes('1 incidencia histórica separada')
     || !outcomeImpactState.economicDiagnosis.includes('todo el histórico del mes')
     || outcomeImpactState.economicSegments.length !== 2

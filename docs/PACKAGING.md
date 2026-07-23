@@ -200,7 +200,7 @@ El comando crea contenedores y volúmenes con nombres únicos, verifica `/api/he
 
 La persistencia depende de los volúmenes de `.data`, `.yt-profile`, `docs/strategy-reports` y `docs/audits`. Un `docker compose down` no debe borrar esos directorios. La validación recomendada consiste en crear datos, reiniciar el contenedor y comprobar que siguen disponibles.
 
-## Backup portable
+## Copia portátil
 
 ```bash
 npm run backup:secure:init

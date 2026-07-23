@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/styles.css?v=52">
     <link rel="stylesheet" href="/polish.css?v=10">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=115" defer></script>
+    <script src="/app.js?v=116" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -30,7 +30,7 @@
           </div>
           <div class="context-chip" id="header-mode-chip" data-tone="test">
             <span>Cuenta</span>
-            <strong id="header-mode-status">Test</strong>
+            <strong id="header-mode-status">Prueba</strong>
           </div>
         </div>
         <div class="topbar-actions">
@@ -85,7 +85,7 @@
           <div class="options-grid">
             <label class="check-option">
               <input id="backfill-enabled" type="checkbox" checked>
-              <span>Posts pasados</span>
+              <span>Publicaciones anteriores</span>
             </label>
             <label class="check-option">
               <input id="live-enabled" type="checkbox" checked>
@@ -104,7 +104,7 @@
               </select>
             </label>
             <label for="max-scrolls">
-              <span>Scrolls max.</span>
+              <span>Desplazamientos máx.</span>
               <input id="max-scrolls" type="number" min="1" max="500" value="120">
             </label>
           </div>
@@ -121,7 +121,7 @@
             <div class="fold-body">
               <label class="check-option">
                 <input id="telegram-source-enabled" type="checkbox">
-                <span>Scrapear canal</span>
+                <span>Leer canal</span>
               </label>
               <div class="field">
                 <label for="telegram-source-url">Canal Telegram Web</label>
@@ -215,10 +215,10 @@
             </div>
           </details>
 
-          <details class="panel-section compact-fold" aria-label="Trading BingX">
+          <details class="panel-section compact-fold" aria-label="Operativa BingX">
             <summary class="section-title">
               <i data-lucide="candlestick-chart"></i>
-              <span>BingX Futures</span>
+              <span>Futuros BingX</span>
             </summary>
             <div class="fold-body">
             <label class="check-option">
@@ -229,17 +229,17 @@
               <label for="bingx-mode">
                 <span>Modo</span>
 	                <select id="bingx-mode">
-	                  <option value="test" selected>Test order</option>
+	                  <option value="test" selected>Orden de prueba</option>
 	                  <option value="demo">Demo VST</option>
-	                  <option value="live">Live real</option>
-	                  <option value="dual">VST + Live real</option>
+	                  <option value="live">Real USDT</option>
+	                  <option value="dual">Demo VST + Real USDT</option>
 	                </select>
               </label>
               <label for="bingx-margin">
                 <span>Margen</span>
                 <select id="bingx-margin">
-                  <option value="ISOLATED" selected>Isolated</option>
-                  <option value="CROSSED">Cross</option>
+                  <option value="ISOLATED" selected>Aislado</option>
+                  <option value="CROSSED">Cruzado</option>
                 </select>
               </label>
             </div>
@@ -261,12 +261,12 @@
             </div>
             <div class="field-hint">Se aplica a los próximos SL creados o modificados. No reemplaza protecciones que ya están abiertas.</div>
             <div class="field">
-              <label for="bingx-api-key">API key</label>
-              <input id="bingx-api-key" type="password" autocomplete="off" placeholder="BingX API key">
+              <label for="bingx-api-key">Clave API</label>
+              <input id="bingx-api-key" type="password" autocomplete="off" placeholder="Clave API de BingX">
             </div>
             <div class="field">
-              <label for="bingx-api-secret">API secret</label>
-              <input id="bingx-api-secret" type="password" autocomplete="off" placeholder="BingX API secret">
+              <label for="bingx-api-secret">Secreto API</label>
+              <input id="bingx-api-secret" type="password" autocomplete="off" placeholder="Secreto API de BingX">
             </div>
             <div class="range-grid">
               <label for="bingx-monthly-initial-usdt">
@@ -278,25 +278,25 @@
                 <input id="bingx-monthly-order-percent" type="number" min="1" max="100" step="1" value="10">
               </label>
             </div>
-            <div class="field-hint">Futuros reales usa capital mensual * porcentaje. Con 300 USDT y 10%, cada ticker abre 30 USDT de margen.</div>
+            <div class="field-hint">La operativa real usa el capital mensual multiplicado por el porcentaje. Con 300 USDT y un 10 %, cada activo abre 30 USDT de margen.</div>
             <div class="range-grid hidden" aria-hidden="true">
               <label for="bingx-notional">
-                <span>USDT por trade legacy</span>
+                <span>USDT por operación heredada</span>
                 <input id="bingx-notional" type="number" min="2" step="1" value="30">
               </label>
               <label for="bingx-max-notional">
-                <span>Max USDT legacy</span>
+                <span>Máx. USDT heredados</span>
                 <input id="bingx-max-notional" type="number" min="2" step="1" value="30">
               </label>
             </div>
             <div class="range-grid">
               <label for="bingx-max-leverage">
-                <span>Leverage si falta</span>
+                <span>Apalancamiento si falta</span>
                 <input id="bingx-max-leverage" type="number" min="1" max="125" step="1" value="5">
               </label>
               <label for="bingx-symbols">
-                <span>Allowlist opcional</span>
-                <input id="bingx-symbols" type="text" placeholder="Vacio = cualquier ticker">
+                <span>Activos permitidos</span>
+                <input id="bingx-symbols" type="text" placeholder="Vacío = cualquier activo">
               </label>
             </div>
             <label class="check-option">
@@ -317,11 +317,11 @@
             </label>
             <div class="range-grid">
               <label for="bingx-max-open">
-                <span>Max abiertas</span>
+                <span>Máx. abiertas</span>
                 <input id="bingx-max-open" type="number" min="1" max="100" step="1" value="5">
               </label>
 	              <label for="bingx-max-signal-leverage">
-	                <span>Leverage max señal</span>
+	                <span>Apalancamiento máx. de la señal</span>
 	                <input id="bingx-max-signal-leverage" type="number" min="1" max="125" step="1" value="125">
 	              </label>
 	            </div>
@@ -337,7 +337,7 @@
 	            </div>
 	            <div class="range-grid">
 	              <label for="bingx-max-entry-deviation">
-	                <span>Desvio entrada %</span>
+	                <span>Desvío de entrada (%)</span>
 	                <input id="bingx-max-entry-deviation" type="number" min="0" max="50" step="0.01" value="0.15">
 	              </label>
 	              <label for="bingx-max-stop-distance">
@@ -351,7 +351,7 @@
             </label>
             <div class="range-grid">
               <label for="bingx-cost-guard-mode">
-                <span>Modo filtro coste</span>
+                <span>Modo del filtro de coste</span>
                 <select id="bingx-cost-guard-mode">
                   <option value="block">Bloquear señales caras</option>
                   <option value="warn">Solo avisar</option>
@@ -364,7 +364,7 @@
             </div>
             <div class="range-grid">
               <label for="bingx-cost-guard-max-margin">
-                <span>Break-even max margen %</span>
+                <span>Punto de equilibrio máx. sobre margen (%)</span>
                 <input id="bingx-cost-guard-max-margin" type="number" min="0" max="100" step="0.1" value="3">
               </label>
               <label for="bingx-estimated-fee-rebate">
@@ -379,20 +379,20 @@
             </label>
             <div class="range-grid">
               <label for="bingx-net-entry-filter-mode">
-                <span>Modo filtro neto</span>
+                <span>Modo del filtro neto</span>
                 <select id="bingx-net-entry-filter-mode">
                   <option value="shadow">Sombra</option>
                   <option value="block">Bloqueo</option>
                 </select>
               </label>
               <label for="bingx-net-entry-filter-max-cost-risk">
-                <span>Coste/riesgo max %</span>
+                <span>Coste/riesgo máx. (%)</span>
                 <input id="bingx-net-entry-filter-max-cost-risk" type="number" min="0" max="100" step="0.1" value="18">
               </label>
             </div>
             <div class="range-grid">
               <label for="bingx-net-entry-filter-max-be">
-                <span>BE margen max %</span>
+                <span>Punto de equilibrio máx. sobre margen (%)</span>
                 <input id="bingx-net-entry-filter-max-be" type="number" min="0" max="100" step="0.1" value="3">
               </label>
               <label for="bingx-net-entry-filter-min-rr">
@@ -411,24 +411,24 @@
 	                <input id="bingx-vst-capital-percent" type="number" min="1" max="100" step="1" value="10" readonly>
 	              </label>
 	            </div>
-	            <div class="field-hint">Demo VST usa el mismo porcentaje mensual. Con 300 VST y 10%, cada ticker abre 30 VST de margen.</div>
+	            <div class="field-hint">Demo VST usa el mismo porcentaje mensual. Con 300 VST y un 10 %, cada activo abre 30 VST de margen.</div>
 	            <div class="range-grid">
               <label for="bingx-daily-loss">
-                <span>Perdida max dia</span>
+                <span>Pérdida máx. diaria</span>
                 <input id="bingx-daily-loss" type="number" min="0" step="1" value="100">
               </label>
               <label for="bingx-monthly-loss">
-                <span>Perdida max mes</span>
+                <span>Pérdida máx. mensual</span>
                 <input id="bingx-monthly-loss" type="number" min="0" step="1" value="500">
               </label>
             </div>
             <label class="check-option">
               <input id="bingx-dry-run-required" type="checkbox" checked>
-              <span>Exigir dry-run antes de live</span>
+              <span>Exigir simulación previa antes de operar en real</span>
             </label>
             <label class="check-option live-confirm hidden" id="bingx-live-confirm-row">
               <input id="bingx-live-confirm" type="checkbox">
-              <span>Entiendo que Live envía órdenes reales</span>
+              <span>Entiendo que el modo real envía órdenes reales</span>
             </label>
             <div class="telegram-actions">
               <button id="save-bingx" class="button secondary" type="button">
@@ -454,18 +454,18 @@
 	                <label for="bingx-probe-side">
 	                  <span>Lado</span>
 	                  <select id="bingx-probe-side">
-	                    <option value="LONG" selected>Long</option>
-	                    <option value="SHORT">Short</option>
+	                    <option value="LONG" selected>Largo</option>
+	                    <option value="SHORT">Corto</option>
 	                  </select>
 	                </label>
 	              </div>
 	              <div class="range-grid">
 	                <label for="bingx-probe-notional">
-	                  <span>USDT</span>
+	                  <span>Importe (USDT)</span>
 	                  <input id="bingx-probe-notional" type="number" min="2" step="1" value="10">
 	                </label>
 	                <label for="bingx-probe-leverage">
-	                  <span>Leverage</span>
+	                  <span>Apalancamiento</span>
 	                  <input id="bingx-probe-leverage" type="number" min="1" max="125" step="1" value="1">
 	                </label>
 	              </div>
@@ -491,7 +491,7 @@
 	              </div>
 	            </div>
 	            <textarea id="bingx-parser-text" class="parser-box" rows="4" placeholder="Pega aquí una señal para probar el parser"></textarea>
-            <p class="status-line" id="bingx-status">Test order desactivado</p>
+            <p class="status-line" id="bingx-status">Orden de prueba desactivada</p>
             </div>
           </details>
           <p class="client-error hidden" id="client-error" role="alert"></p>
@@ -526,7 +526,7 @@
             <div class="tabs" role="tablist" aria-label="Vistas" aria-orientation="horizontal">
               <button class="tab active" id="posts-tab" type="button" role="tab" aria-selected="true" aria-controls="posts-view">
                 <i data-lucide="messages-square"></i>
-                <span>Posts</span>
+                <span>Publicaciones</span>
               </button>
               <button class="tab" id="logs-tab" type="button" role="tab" aria-selected="false" aria-controls="logs-view">
                 <i data-lucide="list-checks"></i>
@@ -678,7 +678,7 @@
               <div class="pnl-hero-side">
                 <div>
                   <span>Modo</span>
-                  <strong id="pnl-mode-label">Test</strong>
+                <strong id="pnl-mode-label">Prueba</strong>
                 </div>
                 <div>
                   <span>Win rate</span>
@@ -720,11 +720,11 @@
                 <strong id="pnl-open-exposure">0.00 USDT</strong>
               </div>
               <div class="pnl-card secondary-metric">
-                <span>Fees</span>
+                <span>Comisiones</span>
                 <strong id="pnl-fees-month">0.00 USDT</strong>
               </div>
               <div class="pnl-card secondary-metric">
-                <span>Funding</span>
+                <span>Financiación</span>
                 <strong id="pnl-funding-month">0.00 USDT</strong>
               </div>
               <div class="pnl-card">
@@ -738,7 +738,7 @@
             </div>
 
             <p class="pnl-note" id="pnl-note">
-              Modo de prueba: el neto superior suma el paper local. Las posiciones abiertas se actualizan con el último precio de BingX Futuros Perpetuo USDⓈ.
+              Modo de prueba: el neto superior suma la simulación local. Las posiciones abiertas se actualizan con el último precio de BingX Futuros Perpetuo USDⓈ.
             </p>
 
             <div class="real-mode-banner" id="real-mode-banner"></div>
@@ -765,18 +765,18 @@
             <div class="ops-grid ops-grid-three">
               <div class="ops-panel live-readiness-panel" id="live-readiness-panel">
                 <div class="trade-section-header">
-                  <h3>Preparado para live</h3>
+                  <h3>Preparado para operar en real</h3>
                   <span id="live-readiness-status">Revisando</span>
                 </div>
                 <div class="live-checklist" id="live-readiness-list"></div>
                 <div class="live-actions">
                   <button id="arm-live" class="button danger" type="button" disabled>
                     <i data-lucide="radio-tower"></i>
-                    <span>Armar live</span>
+                    <span>Activar real</span>
                   </button>
                   <button id="disarm-live" class="button secondary" type="button">
                     <i data-lucide="shield"></i>
-                    <span>Volver a test</span>
+                    <span>Volver a prueba</span>
                   </button>
                 </div>
               </div>
@@ -789,7 +789,7 @@
               </div>
               <div class="ops-panel telegram-watch-panel" id="telegram-watch-panel">
                 <div class="trade-section-header">
-                  <h3>Watchdog Telegram Web</h3>
+                  <h3>Vigilancia de Telegram Web</h3>
                   <span id="telegram-watch-status">Sin datos</span>
                 </div>
                 <div class="ops-metrics" id="telegram-watch-metrics"></div>
@@ -869,9 +869,9 @@
                     <i data-lucide="line-chart"></i>
                     <span>Estudio JSON</span>
                   </a>
-                  <a class="icon-link" href="/api/backup/redacted" title="Descargar backup sin credenciales">
+                  <a class="icon-link" href="/api/backup/redacted" title="Descargar copia sin credenciales">
                     <i data-lucide="archive"></i>
-                    <span>Backup seguro</span>
+                    <span>Copia segura</span>
                   </a>
                 </div>
                 <div class="strategy-study-grid" id="strategy-study-grid"></div>
@@ -1027,7 +1027,7 @@
                 <div class="audit-actions">
                   <a class="icon-link" href="/api/trades.csv" title="Exportar operaciones CSV">
                     <i data-lucide="download"></i>
-                    <span>Trades CSV</span>
+                    <span>Operaciones CSV</span>
                   </a>
                   <a class="icon-link" href="/api/audit" title="Ver auditoría JSON" target="_blank" rel="noreferrer">
                     <i data-lucide="shield-check"></i>
@@ -1049,7 +1049,7 @@
                         <th>Respuesta</th>
                         <th>Snapshot</th>
                         <th>PnL</th>
-                        <th>Fees/Funding</th>
+                        <th>Comisiones/financiación</th>
                         <th>Motivo</th>
                       </tr>
                     </thead>
@@ -1096,8 +1096,8 @@
                     <span>Lado</span>
                     <select id="pnl-sim-side">
                       <option value="ALL">Todos</option>
-                      <option value="LONG">Long</option>
-                      <option value="SHORT">Short</option>
+                      <option value="LONG">Largo</option>
+                      <option value="SHORT">Corto</option>
                     </select>
                   </label>
                   <label for="pnl-sim-outcome">
@@ -1112,11 +1112,11 @@
                 </div>
                 <div class="simulation-filters">
                   <label for="pnl-sim-leverage">
-                    <span>Leverage sim.</span>
+                    <span>Apalancamiento simulado</span>
                     <input id="pnl-sim-leverage" type="number" min="1" max="125" step="1" inputmode="numeric" placeholder="Original">
                   </label>
                   <label for="pnl-sim-fee">
-                    <span>Fee total %</span>
+                    <span>Comisión total (%)</span>
                     <input id="pnl-sim-fee" type="number" min="0" step="0.01" inputmode="decimal" value="0">
                   </label>
                   <label for="pnl-sim-capital">
@@ -1158,8 +1158,8 @@
             <div class="ops-grid">
               <div class="ops-panel">
                 <div class="trade-section-header">
-                  <h3>PnL por ticker</h3>
-                  <span id="ticker-pnl-status">0 tickers</span>
+                  <h3>PnL por activo</h3>
+                  <span id="ticker-pnl-status">0 activos</span>
                 </div>
                 <div class="pnl-chart" id="ticker-pnl-chart"></div>
               </div>
@@ -1253,8 +1253,8 @@
                     <th>Neto</th>
                     <th>Realizado</th>
                     <th>Flotante</th>
-                    <th>Fees</th>
-                    <th>Funding</th>
+                    <th>Comisiones</th>
+                    <th>Financiación</th>
                     <th>Cierres</th>
                     <th>Ops.</th>
                   </tr>

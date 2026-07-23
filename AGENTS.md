@@ -156,7 +156,7 @@ pm2 save
 - Usar placeholders para URLs privadas, IDs, tokens y saldos sensibles.
 - Si añades diagramas, usa Mermaid para que GitHub los renderice.
 
-### Backups y réplica externa
+### Copias de seguridad y réplica externa
 
 - No configures automáticamente OneDrive, Dropbox, una unidad de red ni otro destino externo.
 - Copiar un `.fmbak` a un proveedor externo requiere una ruta elegida explícitamente por el usuario.
