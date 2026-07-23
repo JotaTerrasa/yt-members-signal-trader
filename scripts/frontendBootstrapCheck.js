@@ -182,7 +182,16 @@ try {
         lastSuccessAt: new Date().toISOString(),
         lastError: null,
         restoreDrill: { ok: true, stale: false, checkedAt: new Date().toISOString() },
-        profile: { available: true, stale: false, lastSuccessAt: new Date().toISOString() }
+        profile: { available: true, stale: false, lastSuccessAt: new Date().toISOString() },
+        mirror: {
+          configured: true,
+          ok: true,
+          stale: false,
+          checkedAt: new Date().toISOString(),
+          sameVolume: false,
+          resilient: true,
+          lastError: null
+        }
       }
     };
     renderGuardDashboard();
@@ -195,7 +204,9 @@ try {
     || !backupContinuityPanel.includes('Backup cifrado')
     || !backupContinuityPanel.includes('restaurado')
     || !backupContinuityPanel.includes('Perfil Chromium')
-    || !backupContinuityPanel.includes('guardado')) {
+    || !backupContinuityPanel.includes('guardado')
+    || !backupContinuityPanel.includes('Réplica externa')
+    || !backupContinuityPanel.includes('verificada')) {
     throw new Error(`El panel no distingue las copias restaurables: ${backupContinuityPanel}.`);
   }
 

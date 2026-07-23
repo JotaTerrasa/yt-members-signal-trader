@@ -137,11 +137,14 @@ Reglas:
 - cualquier ruta absoluta, transversal o ajena a `.data` y `.yt-profile` se rechaza antes de extraer;
 - vuelve a ejecutar `verify` después de copiar el backup a otro soporte;
 - usa `drill` para demostrar que una copia transportada se puede extraer realmente;
+- configura una réplica externa solo mediante `configure-mirror --target`; nunca elijas automáticamente una carpeta de nube;
+- la réplica se copia a un archivo parcial, se verifica con la misma clave y se renombra al final;
+- una carpeta del mismo sistema de archivos no cuenta como resiliente, aunque se permita expresamente para un cliente de sincronización;
 - restaura primero en `.data/restore-tests/`;
 - para respaldar `.yt-profile/`, detén Chromium/PM2 mediante `scripts/profileBackup.ps1` para que Cookies no quede bloqueado;
 - no excluyas Cookies del backup del perfil: contiene la sesión que permite recuperar el acceso web.
 
-La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro y raíces permitidas. No publica la clave, la contraseña derivada ni el contenido del backup.
+La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro, raíces permitidas y salud de la réplica. No publica la clave, la ruta completa del destino, la contraseña derivada ni el contenido del backup. La configuración privada vive en `~/.futures-magician/backup-mirror.json` con permisos restringidos al usuario.
 
 ## UI expuesta
 

@@ -66,6 +66,8 @@ pm2 save
 
 En Windows, `npm run windows:tasks` registra el arranque de PM2 y los backups periódicos. Cada backup programado incluye un simulacro de extracción temporal y deja su estado visible en la app. `scripts/startPm2.ps1` restaura el volcado de PM2 y arranca el ecosistema si fuese necesario.
 
+La réplica externa es portable porque solo requiere una ruta escribible. Se configura fuera del paquete con `npm run backup:secure:mirror:configure -- --target "RUTA"`; si no existe esa configuración, la app continúa con backups locales y muestra la réplica como no configurada.
+
 Comandos útiles:
 
 ```bash

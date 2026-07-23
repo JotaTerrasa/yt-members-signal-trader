@@ -8,10 +8,12 @@ export function buildSecureBackupStatus(record = {}, now = Date.now()) {
   const drillCheckedAt = validIso(record.restoreDrill?.checkedAt);
   const profileSuccessAt = validIso(record.lastProfileSuccessAt);
   const profileDrillCheckedAt = validIso(record.profileRestoreDrill?.checkedAt);
+  const mirrorCheckedAt = validIso(record.mirror?.checkedAt);
   const ageSeconds = secondsSince(lastSuccessAt, now);
   const drillAgeSeconds = secondsSince(drillCheckedAt, now);
   const profileAgeSeconds = secondsSince(profileSuccessAt, now);
   const profileDrillAgeSeconds = secondsSince(profileDrillCheckedAt, now);
+  const mirrorAgeSeconds = secondsSince(mirrorCheckedAt, now);
   const drillOk = Boolean(record.restoreDrill?.ok && record.restoreDrill?.extracted);
 
   return {
@@ -50,6 +52,22 @@ export function buildSecureBackupStatus(record = {}, now = Date.now()) {
         checkedAt: profileDrillCheckedAt,
         ageSeconds: profileDrillAgeSeconds
       }
+    },
+    mirror: {
+      configured: Boolean(record.mirror?.configured),
+      ok: Boolean(record.mirror?.configured && record.mirror?.ok && record.mirror?.verified),
+      checkedAt: mirrorCheckedAt,
+      ageSeconds: mirrorAgeSeconds,
+      stale: Boolean(record.mirror?.configured)
+        && (mirrorAgeSeconds === null || mirrorAgeSeconds > DATA_BACKUP_STALE_SECONDS),
+      lastFile: safeFilename(record.mirror?.lastFile),
+      targetLabel: safeLabel(record.mirror?.targetLabel),
+      bytes: positiveNumber(record.mirror?.bytes),
+      verified: Boolean(record.mirror?.verified),
+      sameVolume: typeof record.mirror?.sameVolume === 'boolean' ? record.mirror.sameVolume : null,
+      resilient: Boolean(record.mirror?.resilient && record.mirror?.sameVolume === false),
+      cloudSyncUnverified: Boolean(record.mirror?.cloudSyncUnverified),
+      lastError: safeText(record.mirror?.lastError)
     }
   };
 }
@@ -73,6 +91,10 @@ function safeFilename(value) {
 
 function safeText(value) {
   return String(value || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 300) || null;
+}
+
+function safeLabel(value) {
+  return String(value || '').replace(/[\r\n\\/]+/g, ' ').trim().slice(0, 120) || null;
 }
 
 function positiveNumber(value) {

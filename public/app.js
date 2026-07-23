@@ -4388,6 +4388,7 @@ function renderGuardDashboard() {
     ['Backup redactado', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
     ['Backup cifrado', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
     ['Perfil Chromium', secureProfileBackupStatusText(secureBackup.profile), secureBackup.profile?.stale ? 'warn' : secureBackup.profile?.available ? 'positive' : 'warn'],
+    ['Réplica externa', secureMirrorStatusText(secureBackup.mirror), secureMirrorTone(secureBackup.mirror)],
     ['Ultimo evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
@@ -4509,6 +4510,32 @@ function secureProfileBackupStatusText(profile = {}) {
     return 'pendiente';
   }
   return `${profile.stale ? 'caducado' : 'guardado'} ${humanLogAge(profile.lastSuccessAt)}`;
+}
+
+function secureMirrorStatusText(mirror = {}) {
+  if (!mirror.configured) {
+    return 'no configurada';
+  }
+  if (mirror.lastError) {
+    return 'error';
+  }
+  if (mirror.sameVolume) {
+    return 'mismo disco';
+  }
+  if (mirror.ok && mirror.checkedAt) {
+    return `verificada ${humanLogAge(mirror.checkedAt)}`;
+  }
+  return mirror.stale ? 'caducada' : 'pendiente';
+}
+
+function secureMirrorTone(mirror = {}) {
+  if (!mirror.configured || mirror.sameVolume || mirror.cloudSyncUnverified) {
+    return 'warn';
+  }
+  if (mirror.lastError || mirror.stale || !mirror.ok || !mirror.resilient) {
+    return 'negative';
+  }
+  return 'positive';
 }
 
 function renderTelegramWatchPanel() {

@@ -25,6 +25,17 @@ test('publica una copia reciente y restaurada sin exponer campos desconocidos', 
       extracted: true,
       checkedAt: '2026-07-23T10:00:00.000Z'
     },
+    mirror: {
+      configured: true,
+      ok: true,
+      checkedAt: '2026-07-23T11:03:00.000Z',
+      lastFile: 'futures-magician-data.fmbak',
+      targetLabel: 'Unidad externa',
+      bytes: 2048,
+      verified: true,
+      sameVolume: false,
+      resilient: true
+    },
     secretField: 'no-publicar'
   }, now);
 
@@ -35,6 +46,9 @@ test('publica una copia reciente y restaurada sin exponer campos desconocidos', 
   assert.deepEqual(status.restoreDrill.roots, ['.data']);
   assert.equal(status.profile.stale, false);
   assert.equal(status.profile.restoreDrill.ok, true);
+  assert.equal(status.mirror.ok, true);
+  assert.equal(status.mirror.stale, false);
+  assert.equal(status.mirror.resilient, true);
   assert.equal(Object.hasOwn(status, 'secretField'), false);
 });
 
@@ -47,6 +61,14 @@ test('marca como caducados los datos y el perfil sin un simulacro reciente', () 
       ok: true,
       extracted: true,
       checkedAt: '2026-07-21T00:00:00.000Z'
+    },
+    mirror: {
+      configured: true,
+      ok: true,
+      verified: true,
+      checkedAt: '2026-07-21T00:00:00.000Z',
+      sameVolume: false,
+      resilient: true
     }
   }, now);
 
@@ -54,6 +76,7 @@ test('marca como caducados los datos y el perfil sin un simulacro reciente', () 
   assert.equal(status.restoreDrill.stale, true);
   assert.equal(status.profile.available, true);
   assert.equal(status.profile.stale, true);
+  assert.equal(status.mirror.stale, true);
 });
 
 test('sanea nombres, errores y fechas antes de enviarlos al navegador', () => {

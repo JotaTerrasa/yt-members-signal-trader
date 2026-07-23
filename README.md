@@ -480,6 +480,15 @@ node scripts/secureBackup.js drill --input ".data/backups/secure/ARCHIVO.fmbak"
 
 El resultado se guarda sin secretos en `.data/backups/secure/status.json`. La guardia nocturna distingue en pantalla el backup redactado, el backup cifrado restaurado y la antigüedad de la última copia del perfil Chromium. La tarea diaria de las 03:15 y la semanal del perfil ejecutan el simulacro automáticamente. No se elimina ninguna copia histórica.
 
+Para añadir una segunda copia en otra unidad o recurso montado, configura el destino de forma explícita:
+
+```powershell
+npm run backup:secure:mirror:configure -- --target "E:\FuturesMagicianBackups"
+npm run backup:secure:mirror:status
+```
+
+La configuración privada se guarda en `~/.futures-magician/backup-mirror.json`. Desde ese momento, cada backup se copia mediante un archivo parcial, se verifica de nuevo en el destino y solo entonces se publica. Un fallo de réplica no elimina la copia local, pero hace fallar la tarea para que quede visible. Una ruta del mismo disco se rechaza por defecto; `--allow-same-volume` permite usar deliberadamente una carpeta sincronizada, aunque la UI seguirá indicando que la resiliencia externa no se puede demostrar. Configurar OneDrive, Dropbox o una ruta de red transmite el contenedor cifrado a ese proveedor y debe ser una decisión explícita del operador.
+
 La restauración, por defecto, se extrae en `.data/restore-tests/` y nunca pisa los datos activos:
 
 ```bash
@@ -492,7 +501,7 @@ El perfil Chromium se respalda durante una ventana de mantenimiento para evitar 
 npm run backup:secure:profile:maintenance
 ```
 
-La clave predeterminada está en `~/.futures-magician/backup.key`. El archivo `.fmbak` y su clave deben guardarse en ubicaciones distintas. Ninguno se versiona en Git.
+La clave predeterminada está en `~/.futures-magician/backup.key`. El archivo `.fmbak`, la configuración de réplica y su clave quedan fuera de Git. La clave debe conservarse separada de todas las copias: sin ella no se puede restaurar el contenedor.
 
 ### Auditoría
 

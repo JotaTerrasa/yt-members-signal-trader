@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,10 @@ async function main(values) {
   const args = parseArgs(values.slice(1));
   if (command === 'init-key') {
     await initializeKey(args.keyFile);
+  } else if (command === 'configure-mirror') {
+    await configureBackupMirror(args);
+  } else if (command === 'mirror-status') {
+    await printBackupMirrorStatus(args);
   } else if (command === 'create') {
     await createBackupCommand(args);
   } else if (command === 'verify') {
@@ -37,18 +41,20 @@ async function main(values) {
   } else if (command === 'restore') {
     await restoreBackup(args);
   } else {
-    fail('Uso: secureBackup.js init-key|create|verify|drill|restore [opciones]');
+    fail('Uso: secureBackup.js init-key|configure-mirror|mirror-status|create|verify|drill|restore [opciones]');
   }
 }
 
 async function createBackupCommand(options) {
   const attemptedAt = new Date().toISOString();
   let created = null;
+  let mirror = null;
   try {
     created = await createBackup(options, { silent: true });
     const restoreDrill = options.drill
       ? await drillBackup({ input: created.output, keyFile: options.keyFile }, { silent: true })
       : null;
+    mirror = await mirrorBackupIfConfigured(created.output, { keyFile: options.keyFile });
     const successAt = validBackupTimestamp(restoreDrill?.metadata?.createdAt) || new Date().toISOString();
     await updateSecureBackupStatus({
       lastAttemptAt: attemptedAt,
@@ -60,6 +66,7 @@ async function createBackupCommand(options) {
       includeProfile: created.includeProfile,
       verified: created.verified,
       restoreDrill: statusDrillResult(restoreDrill),
+      mirror: statusMirrorResult(mirror),
       ...(created.includeProfile ? {
         lastProfileSuccessAt: successAt,
         lastProfileFile: basename(created.output),
@@ -67,7 +74,10 @@ async function createBackupCommand(options) {
         profileRestoreDrill: statusDrillResult(restoreDrill)
       } : {})
     });
-    console.log(JSON.stringify({ ...created, restoreDrill }, null, 2));
+    if (mirror.configured && !mirror.ok) {
+      fail(`El backup local es correcto, pero la réplica externa falló: ${mirror.lastError}`);
+    }
+    console.log(JSON.stringify({ ...created, restoreDrill, mirror }, null, 2));
   } catch (error) {
     await updateSecureBackupStatus({
       lastAttemptAt: attemptedAt,
@@ -77,7 +87,8 @@ async function createBackupCommand(options) {
         lastFile: basename(created.output),
         bytes: created.bytes,
         includeProfile: created.includeProfile,
-        verified: created.verified
+        verified: created.verified,
+        ...(mirror ? { mirror: statusMirrorResult(mirror) } : {})
       } : {})
     }).catch(() => {});
     throw error;
@@ -128,17 +139,17 @@ async function initializeKey(keyFileInput) {
   const keyFile = resolveKeyFile(keyFileInput);
   const existing = await stat(keyFile).catch(() => null);
   if (existing?.isFile()) {
-    await hardenKeyPermissions(keyFile);
+    await hardenPrivateFilePermissions(keyFile);
     console.log(JSON.stringify({ ok: true, created: false, keyFile }, null, 2));
     return;
   }
   await mkdir(dirname(keyFile), { recursive: true });
   await writeFile(keyFile, `${randomBytes(48).toString('base64url')}\n`, { mode: 0o600, flag: 'wx' });
-  await hardenKeyPermissions(keyFile);
+  await hardenPrivateFilePermissions(keyFile);
   console.log(JSON.stringify({ ok: true, created: true, keyFile }, null, 2));
 }
 
-async function hardenKeyPermissions(keyFile) {
+async function hardenPrivateFilePermissions(keyFile) {
   if (process.platform !== 'win32') {
     await chmod(keyFile, 0o600);
     return;
@@ -153,6 +164,236 @@ async function hardenKeyPermissions(keyFile) {
     cwd: dirname(keyFile),
     capture: true
   });
+}
+
+export async function configureBackupMirror(options = {}, {
+  configFile,
+  localBackupDir = join(projectRoot, '.data', 'backups', 'secure'),
+  root = projectRoot,
+  silent = false
+} = {}) {
+  const targetInput = String(options.target || '').trim();
+  if (!targetInput) {
+    fail('Indica el destino con --target.');
+  }
+  const targetDir = resolve(targetInput);
+  const projectDir = resolve(root);
+  const localDir = resolve(localBackupDir);
+  const configPath = resolveMirrorConfigFile(options.configFile || configFile);
+  if (isPathWithin(projectDir, targetDir) || isPathWithin(localDir, targetDir)) {
+    fail('El destino de la réplica no puede estar dentro del proyecto ni de sus backups locales.');
+  }
+  await Promise.all([
+    mkdir(targetDir, { recursive: true }),
+    mkdir(localDir, { recursive: true }),
+    mkdir(dirname(configPath), { recursive: true })
+  ]);
+  const [targetReal, localReal, projectReal] = await Promise.all([
+    realpath(targetDir),
+    realpath(localDir),
+    realpath(projectDir)
+  ]);
+  if (isPathWithin(projectReal, targetReal) || isPathWithin(localReal, targetReal)) {
+    fail('El destino de la réplica no puede estar dentro del proyecto ni de sus backups locales.');
+  }
+  const [targetInfo, localInfo] = await Promise.all([stat(targetReal), stat(localReal)]);
+  const sameVolume = targetInfo.dev === localInfo.dev;
+  const allowSameVolume = Boolean(options.allowSameVolume);
+  if (sameVolume && !allowSameVolume) {
+    fail('El destino está en el mismo sistema de archivos. Usa otra unidad o confirma --allow-same-volume para una carpeta sincronizada.');
+  }
+
+  const config = {
+    version: 1,
+    enabled: true,
+    targetDir: targetReal,
+    allowSameVolume,
+    configuredAt: new Date().toISOString()
+  };
+  const partialPath = `${configPath}.${process.pid}-${Date.now()}.partial`;
+  try {
+    await writeFile(partialPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    await rename(partialPath, configPath);
+    await hardenPrivateFilePermissions(configPath);
+  } finally {
+    await rm(partialPath, { force: true });
+  }
+
+  const result = {
+    ok: true,
+    configured: true,
+    configFile: configPath,
+    targetDir: targetReal,
+    targetLabel: mirrorTargetLabel(targetReal),
+    sameVolume,
+    resilient: !sameVolume,
+    cloudSyncUnverified: sameVolume
+  };
+  if (!silent) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+  return result;
+}
+
+async function printBackupMirrorStatus(options = {}) {
+  const configFile = resolveMirrorConfigFile(options.configFile);
+  const config = await loadBackupMirrorConfig({ configFile });
+  if (!config) {
+    console.log(JSON.stringify({ ok: true, configured: false, configFile }, null, 2));
+    return;
+  }
+  const localBackupDir = join(projectRoot, '.data', 'backups', 'secure');
+  await mkdir(localBackupDir, { recursive: true });
+  const [targetInfo, localInfo] = await Promise.all([
+    stat(config.targetDir).catch(() => null),
+    stat(localBackupDir)
+  ]);
+  const sameVolume = targetInfo ? targetInfo.dev === localInfo.dev : null;
+  console.log(JSON.stringify({
+    ok: Boolean(targetInfo?.isDirectory()),
+    configured: true,
+    configFile,
+    targetDir: config.targetDir,
+    targetLabel: mirrorTargetLabel(config.targetDir),
+    reachable: Boolean(targetInfo?.isDirectory()),
+    sameVolume,
+    resilient: sameVolume === false,
+    cloudSyncUnverified: sameVolume === true
+  }, null, 2));
+}
+
+export async function mirrorBackupIfConfigured(inputValue, {
+  keyFile,
+  configFile,
+  localBackupDir = dirname(resolve(inputValue))
+} = {}) {
+  const resolvedConfigFile = resolveMirrorConfigFile(configFile);
+  let config;
+  try {
+    config = await loadBackupMirrorConfig({ configFile: resolvedConfigFile });
+  } catch (error) {
+    return {
+      configured: true,
+      ok: false,
+      resilient: false,
+      sameVolume: null,
+      targetLabel: null,
+      lastError: safeStatusError(error)
+    };
+  }
+  if (!config) {
+    return {
+      configured: false,
+      ok: true,
+      resilient: false,
+      sameVolume: null,
+      targetLabel: null,
+      lastError: null
+    };
+  }
+
+  const input = resolve(inputValue);
+  const targetDir = config.targetDir;
+  const targetLabel = mirrorTargetLabel(targetDir);
+  const output = join(targetDir, basename(input));
+  const partialOutput = `${output}.${process.pid}-${Date.now()}.partial`;
+  try {
+    await Promise.all([
+      mkdir(targetDir, { recursive: true }),
+      mkdir(localBackupDir, { recursive: true })
+    ]);
+    const [inputInfo, targetInfo, localInfo] = await Promise.all([
+      stat(input),
+      stat(targetDir),
+      stat(localBackupDir)
+    ]);
+    const sameVolume = targetInfo.dev === localInfo.dev;
+    if (sameVolume && !config.allowSameVolume) {
+      fail('La réplica configurada ha pasado al mismo sistema de archivos y requiere revisión.');
+    }
+    const existing = await stat(output).catch(() => null);
+    if (existing) {
+      if (!existing.isFile() || existing.size !== inputInfo.size) {
+        fail(`Ya existe una réplica distinta con el nombre ${basename(output)}.`);
+      }
+      await verifyBackup({ input: output, keyFile }, { silent: true });
+      return {
+        configured: true,
+        ok: true,
+        output,
+        targetLabel,
+        bytes: existing.size,
+        checkedAt: new Date().toISOString(),
+        verified: true,
+        reused: true,
+        sameVolume,
+        resilient: !sameVolume,
+        cloudSyncUnverified: sameVolume,
+        lastError: null
+      };
+    }
+
+    await copyFile(input, partialOutput);
+    const verification = await verifyBackup({ input: partialOutput, keyFile }, { silent: true });
+    await rename(partialOutput, output);
+    if (process.platform !== 'win32') {
+      await chmod(output, 0o600);
+    }
+    const outputInfo = await stat(output);
+    return {
+      configured: true,
+      ok: true,
+      output,
+      targetLabel,
+      bytes: outputInfo.size,
+      checkedAt: new Date().toISOString(),
+      verified: verification.ok,
+      reused: false,
+      sameVolume,
+      resilient: !sameVolume,
+      cloudSyncUnverified: sameVolume,
+      lastError: null
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      ok: false,
+      targetLabel,
+      bytes: null,
+      checkedAt: new Date().toISOString(),
+      verified: false,
+      sameVolume: null,
+      resilient: false,
+      cloudSyncUnverified: false,
+      lastError: safeStatusError(error)
+    };
+  } finally {
+    await rm(partialOutput, { force: true });
+  }
+}
+
+export async function loadBackupMirrorConfig({ configFile } = {}) {
+  const configPath = resolveMirrorConfigFile(configFile);
+  const raw = await readFile(configPath, 'utf8').catch((error) => {
+    if (error?.code === 'ENOENT') {
+      return '';
+    }
+    throw error;
+  });
+  if (!raw) {
+    return null;
+  }
+  const config = JSON.parse(raw);
+  if (config?.version !== 1 || config.enabled !== true || !String(config.targetDir || '').trim()) {
+    fail('La configuración de la réplica externa no es válida.');
+  }
+  return {
+    version: 1,
+    enabled: true,
+    targetDir: resolve(config.targetDir),
+    allowSameVolume: Boolean(config.allowSameVolume),
+    configuredAt: validBackupTimestamp(config.configuredAt)
+  };
 }
 
 export async function createBackup(options, { root = projectRoot, silent = false } = {}) {
@@ -458,7 +699,7 @@ function parseArgs(values) {
       continue;
     }
     const key = value.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-    if (key === 'includeProfile' || key === 'drill') {
+    if (key === 'includeProfile' || key === 'drill' || key === 'allowSameVolume') {
       result[key] = true;
       continue;
     }
@@ -520,6 +761,37 @@ function statusDrillResult(result) {
     extracted: Boolean(result.extracted),
     cleaned: Boolean(result.cleaned)
   };
+}
+
+function statusMirrorResult(result = {}) {
+  return {
+    configured: Boolean(result.configured),
+    ok: Boolean(result.ok),
+    checkedAt: validBackupTimestamp(result.checkedAt),
+    lastFile: result.output ? basename(result.output) : null,
+    targetLabel: String(result.targetLabel || '').trim().slice(0, 120) || null,
+    bytes: Number.isFinite(Number(result.bytes)) ? Number(result.bytes) : null,
+    verified: Boolean(result.verified),
+    reused: Boolean(result.reused),
+    sameVolume: typeof result.sameVolume === 'boolean' ? result.sameVolume : null,
+    resilient: Boolean(result.resilient),
+    cloudSyncUnverified: Boolean(result.cloudSyncUnverified),
+    lastError: safeStatusError(result.lastError || '') || null
+  };
+}
+
+function resolveMirrorConfigFile(value) {
+  return resolve(value || process.env.FUTURES_BACKUP_MIRROR_CONFIG || join(homedir(), '.futures-magician', 'backup-mirror.json'));
+}
+
+function mirrorTargetLabel(targetDir) {
+  return basename(resolve(targetDir)) || resolve(targetDir);
+}
+
+function isPathWithin(parent, candidate) {
+  const pathFromParent = relative(parent, candidate);
+  return pathFromParent === ''
+    || (!isAbsolute(pathFromParent) && pathFromParent !== '..' && !pathFromParent.startsWith(`..${sep}`));
 }
 
 function safeStatusError(error) {

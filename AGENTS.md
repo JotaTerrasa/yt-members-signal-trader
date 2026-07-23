@@ -156,6 +156,14 @@ pm2 save
 - Usar placeholders para URLs privadas, IDs, tokens y saldos sensibles.
 - Si añades diagramas, usa Mermaid para que GitHub los renderice.
 
+### Backups y réplica externa
+
+- No configures automáticamente OneDrive, Dropbox, una unidad de red ni otro destino externo.
+- Copiar un `.fmbak` a un proveedor externo requiere una ruta elegida explícitamente por el usuario.
+- No borres backups históricos ni la clave durante tareas de mantenimiento.
+- Una carpeta del mismo volumen no demuestra resiliencia; mantenla como aviso aunque esté sincronizada.
+- Verifica la copia en el destino antes de considerarla publicada.
+
 ## Checklist antes de entregar
 
 1. `git status --short` entendido.
