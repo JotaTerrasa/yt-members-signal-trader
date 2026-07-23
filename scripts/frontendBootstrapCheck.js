@@ -171,6 +171,84 @@ try {
     throw new Error(`La UI no distingue incidencias activas, recuperadas e informativas: ${JSON.stringify(incidentLifecycleState)}.`);
   }
 
+  const exchangeSafetyPanels = await page.evaluate(() => {
+    const previousSafety = appState.exchangeSafety;
+    appState.exchangeSafety = {
+      level: 'ok',
+      mode: 'demo',
+      enabled: true,
+      ageSeconds: 4,
+      stale: false,
+      real: {
+        asset: 'USDT',
+        openPositions: 0,
+        protectedStopLoss: 0,
+        protectedTakeProfit: 0,
+        missingStopLoss: 0,
+        missingTakeProfit: 0,
+        openOrders: 0,
+        orphanOrders: 0
+      },
+      demo: {
+        asset: 'VST',
+        balance: {
+          asset: 'VST',
+          equity: 571.75,
+          availableMargin: 526.36,
+          usedMargin: 44.7,
+          marginUsagePercent: 7.82
+        },
+        openPositions: 1,
+        protectedStopLoss: 1,
+        protectedTakeProfit: 0,
+        missingStopLoss: 0,
+        missingTakeProfit: 1,
+        openOrders: 1,
+        orphanOrders: 0,
+        exposure: 1119.17,
+        floatingPnl: 0.73,
+        nearestLiquidation: {
+          symbol: 'BTC-USDT',
+          distancePercent: 3.63
+        }
+      },
+      checks: []
+    };
+    renderExchangeSafetyPanel();
+    const demoPanel = document.querySelector('#demo-safety-panel');
+    const realPanel = document.querySelector('#exchange-safety-panel');
+    const tpCheck = [...document.querySelectorAll('#demo-safety-checks .exchange-safety-check')]
+      .find((item) => item.textContent.includes('TP demo'));
+    const liquidationMetric = [...document.querySelectorAll('#demo-safety-metrics > div')]
+      .find((item) => item.textContent.includes('Liq. cercana'));
+    const result = {
+      demoStatus: document.querySelector('#demo-safety-status')?.textContent.trim() || '',
+      realStatus: document.querySelector('#exchange-safety-status')?.textContent.trim() || '',
+      demoText: demoPanel?.textContent.replace(/\s+/g, ' ').trim() || '',
+      realText: realPanel?.textContent.replace(/\s+/g, ' ').trim() || '',
+      tpClass: tpCheck?.className || '',
+      tpText: tpCheck?.textContent.replace(/\s+/g, ' ').trim() || '',
+      liquidationClass: liquidationMetric?.querySelector('strong')?.className || '',
+      liquidationText: liquidationMetric?.textContent.replace(/\s+/g, ' ').trim() || '',
+      scrollMarginTop: Number.parseFloat(getComputedStyle(demoPanel).scrollMarginTop || '0')
+    };
+    appState.exchangeSafety = previousSafety;
+    renderExchangeSafetyPanel();
+    return result;
+  });
+  if (exchangeSafetyPanels.demoStatus !== 'Demo protegido'
+    || exchangeSafetyPanels.realStatus !== 'Real inactivo'
+    || !exchangeSafetyPanels.demoText.includes('Equity VST')
+    || !exchangeSafetyPanels.demoText.includes('SL demo confirmado')
+    || !exchangeSafetyPanels.realText.includes('la cuenta real no se esta operando')
+    || !exchangeSafetyPanels.tpClass.includes('pending')
+    || !exchangeSafetyPanels.tpText.includes('0/1')
+    || !exchangeSafetyPanels.liquidationClass.includes('negative')
+    || !exchangeSafetyPanels.liquidationText.includes('BTC-USDT')
+    || exchangeSafetyPanels.scrollMarginTop < 80) {
+    throw new Error(`Los paneles de seguridad demo/real no reflejan el modo y las protecciones: ${JSON.stringify(exchangeSafetyPanels)}.`);
+  }
+
   const versionPage = await browser.newPage();
   const versionPageErrors = [];
   let frontendVersionTag = 'v1';
@@ -516,8 +594,11 @@ try {
     const panel = document.querySelector('#external-sheet-panel');
     const wrap = document.querySelector('.external-sheet-table-wrap');
     const domainGrid = document.querySelector('#reliability-domains');
+    const demoSafetyPanel = document.querySelector('#demo-safety-panel');
+    const demoSafetyMetrics = document.querySelector('#demo-safety-metrics');
     const skipLink = document.querySelector('.skip-link');
     const panelRect = panel?.getBoundingClientRect();
+    const demoSafetyRect = demoSafetyPanel?.getBoundingClientRect();
     const skipLinkRect = skipLink?.getBoundingClientRect();
     const viewportWidth = document.documentElement.clientWidth;
     return {
@@ -525,6 +606,14 @@ try {
       pageOverflowX: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - viewportWidth,
       panelLeft: panelRect?.left ?? null,
       panelRight: panelRect?.right ?? null,
+      demoSafetyLeft: demoSafetyRect?.left ?? null,
+      demoSafetyRight: demoSafetyRect?.right ?? null,
+      demoMetricColumns: demoSafetyMetrics
+        ? getComputedStyle(demoSafetyMetrics).gridTemplateColumns.split(' ').filter(Boolean).length
+        : 0,
+      clippedDemoMetrics: demoSafetyMetrics
+        ? [...demoSafetyMetrics.children].filter((item) => item.scrollWidth > item.clientWidth + 1).length
+        : -1,
       rowCount: document.querySelectorAll('#external-sheet-body tr').length,
       tableClientWidth: wrap?.clientWidth ?? 0,
       tableScrollWidth: wrap?.scrollWidth ?? 0,
@@ -548,6 +637,11 @@ try {
     || mobileSheetState.panelLeft == null
     || mobileSheetState.panelLeft < 0
     || mobileSheetState.panelRight > mobileSheetState.viewportWidth + 1
+    || mobileSheetState.demoSafetyLeft == null
+    || mobileSheetState.demoSafetyLeft < 0
+    || mobileSheetState.demoSafetyRight > mobileSheetState.viewportWidth + 1
+    || mobileSheetState.demoMetricColumns !== 2
+    || mobileSheetState.clippedDemoMetrics !== 0
     || mobileSheetState.rowCount !== 40
     || mobileSheetState.tableScrollWidth <= mobileSheetState.tableClientWidth
     || mobileSheetState.tableScrollHeight <= mobileSheetState.tableClientHeight
@@ -940,6 +1034,7 @@ try {
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     incidentLifecyclePassed: true,
+    exchangeSafetyPanelsPassed: true,
     historicalFailures,
     pnlIsolationPassed: true,
     externalSheetNativePassed: true,

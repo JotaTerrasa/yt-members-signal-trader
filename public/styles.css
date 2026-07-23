@@ -1255,6 +1255,7 @@ summary.dashboard-section-title {
 .ops-panel {
   display: grid;
   gap: 10px;
+  scroll-margin-top: 96px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1446,6 +1447,10 @@ summary.dashboard-section-title {
   border-color: rgba(36, 91, 155, 0.18);
 }
 
+.demo-safety-panel {
+  border-color: rgba(15, 118, 110, 0.22);
+}
+
 .telegram-watch-panel {
   border-color: rgba(15, 118, 110, 0.22);
 }
@@ -1477,6 +1482,10 @@ summary.dashboard-section-title {
 
 .exchange-safety-check.missing {
   color: var(--danger);
+}
+
+.exchange-safety-check.pending {
+  color: #8a5b0a;
 }
 
 .exchange-safety-check strong {

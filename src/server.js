@@ -15,6 +15,7 @@ import { estimateBingXClockSample } from './bingxClock.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
 import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
 import { ExecutionRetryStore } from './executionRetryStore.js';
+import { exchangeProtectionGaps, hasStopLossProtection } from './exchangeProtection.js';
 import { FuturesTrader, validateEntryDeviation } from './futuresTrader.js';
 import { applySecurityHeaders, authorizeHttpRequest, buildHttpSecurity, createMutationRateLimiter, validateMutationOrigin } from './httpSecurity.js';
 import { buildHistoricalPnl } from './historicalPnl.js';
@@ -3403,9 +3404,12 @@ function buildExchangeSafety(inputPositions = exchangePositionsCache) {
   const positions = Array.isArray(inputPositions) ? inputPositions : [];
   const livePositions = positions.filter((position) => position.source === 'live' && position.status === 'open');
   const demoPositions = positions.filter((position) => position.source === 'demo' && position.status === 'open');
-  const liveWithoutStopLoss = livePositions.filter((position) => !hasStopLossProtection(position));
-  const liveWithoutTakeProfit = livePositions.filter((position) => !hasTakeProfitProtection(position));
-  const demoWithoutStopLoss = demoPositions.filter((position) => !hasStopLossProtection(position));
+  const liveProtectionGaps = exchangeProtectionGaps(livePositions);
+  const demoProtectionGaps = exchangeProtectionGaps(demoPositions);
+  const liveWithoutStopLoss = liveProtectionGaps.withoutStopLoss;
+  const liveWithoutTakeProfit = liveProtectionGaps.withoutTakeProfit;
+  const demoWithoutStopLoss = demoProtectionGaps.withoutStopLoss;
+  const demoWithoutTakeProfit = demoProtectionGaps.withoutTakeProfit;
   const liveOrders = exchangeOpenOrdersCache.filter((order) => order.source === 'live');
   const demoOrders = exchangeOpenOrdersCache.filter((order) => order.source === 'demo');
   const liveOrphanOrders = orphanProtectiveOrders(liveOrders, livePositions);
@@ -3429,7 +3433,7 @@ function buildExchangeSafety(inputPositions = exchangePositionsCache) {
     stale,
     staleAfterSeconds: Math.round(EXCHANGE_SYNC_STALE_MS / 1000),
     real: exchangeSafetySummary(livePositions, liveWithoutStopLoss, liveWithoutTakeProfit, liveOrders, liveOrphanOrders, exchangeBalancesCache.live, 'USDT'),
-    demo: exchangeSafetySummary(demoPositions, demoWithoutStopLoss, [], demoOrders, demoOrphanOrders, exchangeBalancesCache.demo, 'VST'),
+    demo: exchangeSafetySummary(demoPositions, demoWithoutStopLoss, demoWithoutTakeProfit, demoOrders, demoOrphanOrders, exchangeBalancesCache.demo, 'VST'),
     checks: [
       {
         key: 'exchange-sync',
@@ -3581,23 +3585,6 @@ function publicOpenOrder(order = {}) {
 
 function normalizePositionSymbol(value) {
   return String(value || '').toUpperCase().replace('/', '-');
-}
-
-function hasStopLossProtection(position = {}) {
-  return Number(position.stopLoss || 0) > 0
-    || (Array.isArray(position.protectiveOrders) && position.protectiveOrders.some((order) => (
-      String(order.type || '').toUpperCase().includes('STOP')
-      && !String(order.type || '').toUpperCase().includes('TAKE_PROFIT')
-      && Number(order.stopPrice || 0) > 0
-    )));
-}
-
-function hasTakeProfitProtection(position = {}) {
-  return Number(position.takeProfit || 0) > 0
-    || (Array.isArray(position.protectiveOrders) && position.protectiveOrders.some((order) => (
-      String(order.type || '').toUpperCase().includes('TAKE_PROFIT')
-      && Number(order.stopPrice || 0) > 0
-    )));
 }
 
 async function evaluateExchangeSafety(positions = exchangePositionsCache, reason = 'poll') {

@@ -325,7 +325,8 @@ Antes de dejar la app funcionando:
 - `API BingX validada` debe estar verde si usas BingX.
 - `Stop loss obligatorio` debe estar verde.
 - La antigüedad máxima, el desvío adverso, la distancia máxima del stop y el filtro neto Demo deben coincidir con la política operativa.
-- `Seguro real BingX` debe indicar que no faltan SL/TP críticos.
+- `Seguro demo VST` muestra equity, margen libre/usado, exposición, distancia a liquidación y cobertura real de SL/TP en la cuenta demo. Un stop no se cuenta también como take profit.
+- `Seguro real BingX` debe aparecer como `Real inactivo` cuando el modo actual sea solo Demo VST y debe indicar que no faltan SL/TP críticos al activar live o dual.
 - `Watchdog Telegram Web` debe indicar lectura reciente si Telegram es fuente de gestión.
 - `Guardia nocturna` debe estar estable.
 - `Incidencias 24h` no debe mostrar errores críticos sin revisar.
@@ -398,6 +399,7 @@ Incluye:
 - Salud del monitor.
 - Watchdog Telegram Web.
 - Riesgo operativo local.
+- Seguro demo VST.
 - Seguro real BingX.
 - Emergencia real.
 - Posiciones abiertas.

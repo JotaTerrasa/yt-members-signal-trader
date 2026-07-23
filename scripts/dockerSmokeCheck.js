@@ -58,6 +58,7 @@ async function main() {
       viewTabsKeyboard: frontendCheck.viewTabsKeyboardPassed,
       logGrouping: frontendCheck.logGroupingPassed,
       incidentLifecycle: frontendCheck.incidentLifecyclePassed,
+      exchangeSafetyPanels: frontendCheck.exchangeSafetyPanelsPassed,
       pnlSourceIsolation: frontendCheck.pnlIsolationPassed,
       externalSheetNative: frontendCheck.externalSheetNativePassed,
       externalSheetAnchor: frontendCheck.externalSheetAnchorPassed,
@@ -130,6 +131,7 @@ function verifyFrontendBootstrap(container) {
     || !result.viewTabsKeyboardPassed
     || !result.logGroupingPassed
     || !result.incidentLifecyclePassed
+    || !result.exchangeSafetyPanelsPassed
     || result.historicalFailures < 1
     || !result.pnlIsolationPassed
     || !result.externalSheetNativePassed

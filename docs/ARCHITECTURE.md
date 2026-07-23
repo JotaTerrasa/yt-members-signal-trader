@@ -24,6 +24,7 @@ flowchart TB
 
   subgraph trading["Trading y riesgo"]
     server --> trader["FuturesTrader<br/>src/futuresTrader.js"]
+    server --> protection["Cobertura SL/TP<br/>src/exchangeProtection.js"]
     trader --> parser["futuresSignalParser<br/>texto -> señal"]
     server --> matcher["ReplicaAuditMatcher<br/>hoja ↔ apertura ↔ cierre ↔ fees"]
     trader --> bingxClient["BingXClient<br/>REST firmado"]
@@ -142,6 +143,10 @@ Orquesta:
 ### `src/executionReliability.js`
 
 Genera una identidad estable para cada apertura a partir de modo, publicación, símbolo, dirección, entrada y stop. El `clientOrderId` enviado a BingX es determinista, por lo que un timeout ambiguo no puede generar una segunda orden distinta al reintentarse.
+
+### `src/exchangeProtection.js`
+
+Clasifica por separado la protección de stop loss y take profit observada en cada posición reconciliada. Una orden `STOP_MARKET` confirma únicamente el stop; solo un precio u orden `TAKE_PROFIT` confirma el objetivo. El resultado alimenta los paneles de seguridad Demo VST y Live real, pero no crea, modifica ni cancela órdenes.
 
 También clasifica qué errores son transitorios. No reintenta errores de credenciales, límites de riesgo ni configuraciones inválidas.
 

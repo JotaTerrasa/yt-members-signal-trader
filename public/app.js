@@ -132,6 +132,9 @@ const elements = {
   exchangeSafetyStatus: document.querySelector('#exchange-safety-status'),
   exchangeSafetyMetrics: document.querySelector('#exchange-safety-metrics'),
   exchangeSafetyChecks: document.querySelector('#exchange-safety-checks'),
+  demoSafetyStatus: document.querySelector('#demo-safety-status'),
+  demoSafetyMetrics: document.querySelector('#demo-safety-metrics'),
+  demoSafetyChecks: document.querySelector('#demo-safety-checks'),
   emergencyStatus: document.querySelector('#emergency-status'),
   pauseEntries: document.querySelector('#pause-entries'),
   managementOnly: document.querySelector('#management-only'),
@@ -4608,25 +4611,32 @@ function dailyOpeningExecutions() {
 }
 
 function renderExchangeSafetyPanel() {
+  const safety = appState.exchangeSafety || {};
+  renderDemoSafetyPanel(safety);
+
   if (!elements.exchangeSafetyStatus || !elements.exchangeSafetyMetrics || !elements.exchangeSafetyChecks) {
     return;
   }
 
-  const safety = appState.exchangeSafety || {};
   const real = safety.real || {};
   const level = safety.level || 'idle';
+  const realModeActive = Boolean(safety.enabled && ['live', 'dual'].includes(safety.mode));
   const missingSl = Number(real.missingStopLoss || 0);
   const missingTp = Number(real.missingTakeProfit || 0);
   const balance = real.balance || {};
   const liquidation = real.nearestLiquidation || null;
-  const status = level === 'ok'
-    ? 'Real cubierto'
-    : level === 'warn'
-      ? missingSl ? 'Falta SL real' : 'Revisar sync'
-      : 'Sin exchange activo';
+  const status = !realModeActive
+    ? 'Real inactivo'
+    : level === 'ok'
+      ? 'Real cubierto'
+      : level === 'warn'
+        ? missingSl ? 'Falta SL real' : 'Revisar sync'
+        : 'Sin exchange activo';
 
   elements.exchangeSafetyStatus.textContent = status;
-  elements.exchangeSafetyStatus.className = amountClass(level === 'ok' ? 1 : level === 'warn' ? -1 : 0);
+  elements.exchangeSafetyStatus.className = realModeActive
+    ? amountClass(level === 'ok' ? 1 : level === 'warn' ? -1 : 0)
+    : 'amount';
   elements.exchangeSafetyMetrics.innerHTML = [
     ['Sync', safety.ageSeconds === null || safety.ageSeconds === undefined ? '-' : `${safety.ageSeconds}s`, safety.stale ? 'negative' : safety.enabled ? 'positive' : ''],
     ['Equity real', balance.equity == null ? '-' : formatMoney(balance.equity, balance.asset || 'USDT'), ''],
@@ -4640,7 +4650,7 @@ function renderExchangeSafetyPanel() {
   ].map(renderOpsMetric).join('');
 
   const checks = Array.isArray(safety.checks) ? safety.checks : [];
-  elements.exchangeSafetyChecks.innerHTML = checks.length
+  elements.exchangeSafetyChecks.innerHTML = realModeActive && checks.length
     ? checks.map((check) => `
       <div class="exchange-safety-check ${check.ok ? 'ok' : 'missing'}">
         <i data-lucide="${check.ok ? 'check' : 'triangle-alert'}"></i>
@@ -4648,9 +4658,11 @@ function renderExchangeSafetyPanel() {
         <strong>${escapeHtml(check.detail || '')}</strong>
       </div>
     `).join('')
-    : '<div class="exchange-safety-empty">Activa BingX real o dual para reconciliar posiciones.</div>';
+    : realModeActive
+      ? '<div class="exchange-safety-empty">Sin comprobaciones reales disponibles.</div>'
+      : '<div class="exchange-safety-empty">Modo Demo VST: la cuenta real no se esta operando.</div>';
 
-  if (missingSl || missingTp) {
+  if (realModeActive && (missingSl || missingTp)) {
     const missing = [
       missingSl ? `${missingSl} sin SL` : '',
       missingTp ? `${missingTp} sin TP` : ''
@@ -4673,6 +4685,70 @@ function renderExchangeSafetyPanel() {
     elements.cancelRealOrders.disabled = !usesLiveMode(appState.bingx?.mode) || !appState.bingx?.liveConfirmed;
     elements.closeRealAll.disabled = !usesLiveMode(appState.bingx?.mode) || !appState.bingx?.liveConfirmed;
   }
+}
+
+function renderDemoSafetyPanel(safety = appState.exchangeSafety || {}) {
+  if (!elements.demoSafetyStatus || !elements.demoSafetyMetrics || !elements.demoSafetyChecks) {
+    return;
+  }
+
+  const demo = safety.demo || {};
+  const demoModeActive = Boolean(safety.enabled && ['demo', 'dual'].includes(safety.mode));
+  const missingSl = Number(demo.missingStopLoss || 0);
+  const missingTp = Number(demo.missingTakeProfit || 0);
+  const balance = demo.balance || {};
+  const liquidation = demo.nearestLiquidation || null;
+  const status = !demoModeActive
+    ? 'Demo inactivo'
+    : safety.stale
+      ? 'Revisar sync'
+      : missingSl ? 'Falta SL demo' : 'Demo protegido';
+
+  elements.demoSafetyStatus.textContent = status;
+  elements.demoSafetyStatus.className = !demoModeActive
+    ? 'amount'
+    : missingSl || safety.stale ? 'amount negative' : 'amount positive';
+  elements.demoSafetyMetrics.innerHTML = [
+    ['Sync', safety.ageSeconds === null || safety.ageSeconds === undefined ? '-' : `${safety.ageSeconds}s`, safety.stale ? 'negative' : demoModeActive ? 'positive' : ''],
+    ['Equity VST', balance.equity == null ? '-' : formatMoney(balance.equity, balance.asset || 'VST'), ''],
+    ['Margen libre', balance.availableMargin == null ? '-' : formatMoney(balance.availableMargin, balance.asset || 'VST'), ''],
+    ['Margen usado', balance.usedMargin == null ? '-' : `${formatMoney(balance.usedMargin, balance.asset || 'VST')} - ${formatPercent(balance.marginUsagePercent)}`, ''],
+    ['Demo abiertas', String(demo.openPositions || 0), missingSl ? 'negative' : ''],
+    ['Exposicion demo', formatMoney(demo.exposure || 0, demo.asset || 'VST'), ''],
+    ['Flotante demo', formatMoney(demo.floatingPnl || 0, demo.asset || 'VST'), amountClass(demo.floatingPnl || 0)],
+    ['Liq. cercana', liquidation ? `${liquidation.symbol} ${formatPercent(liquidation.distancePercent)}` : '-', liquidation && liquidation.distancePercent < 5 ? 'negative' : ''],
+    ['Pendientes', `${demo.openOrders || 0} - huerf. ${demo.orphanOrders || 0}`, demo.orphanOrders ? 'negative' : '']
+  ].map(renderOpsMetric).join('');
+
+  if (!demoModeActive) {
+    elements.demoSafetyChecks.innerHTML = '<div class="exchange-safety-empty">Activa Demo VST o dual para reconciliar la cuenta demo.</div>';
+    return;
+  }
+
+  const checks = [
+    {
+      label: 'SL demo confirmado',
+      detail: `${Number(demo.protectedStopLoss || 0)}/${Number(demo.openPositions || 0)}`,
+      tone: missingSl ? 'missing' : 'ok'
+    },
+    {
+      label: 'TP demo detectado',
+      detail: `${Number(demo.protectedTakeProfit || 0)}/${Number(demo.openPositions || 0)}`,
+      tone: missingTp ? 'pending' : 'ok'
+    },
+    {
+      label: 'Ordenes huerfanas',
+      detail: String(demo.orphanOrders || 0),
+      tone: Number(demo.orphanOrders || 0) ? 'missing' : 'ok'
+    }
+  ];
+  elements.demoSafetyChecks.innerHTML = checks.map((check) => `
+    <div class="exchange-safety-check ${check.tone}">
+      <i data-lucide="${check.tone === 'ok' ? 'check' : check.tone === 'pending' ? 'clock' : 'triangle-alert'}"></i>
+      <span>${escapeHtml(check.label)}</span>
+      <strong>${escapeHtml(check.detail)}</strong>
+    </div>
+  `).join('');
 }
 
 function renderTickerPnl() {
