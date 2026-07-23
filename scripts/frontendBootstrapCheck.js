@@ -1112,6 +1112,40 @@ try {
     throw new Error(`La navegación de Rendimiento no quedó completa: ${JSON.stringify(sectionNavigationState)}.`);
   }
 
+  const alignmentScrollControls = await outcomeImpactPage.evaluate(() => {
+    const expected = {
+      up: 'Subir en la auditoría',
+      down: 'Bajar en la auditoría',
+      left: 'Desplazar auditoría a la izquierda',
+      right: 'Desplazar auditoría a la derecha'
+    };
+    return [...document.querySelectorAll('[data-alignment-scroll]')].map((button) => {
+      const direction = button.dataset.alignmentScroll;
+      const rect = button.getBoundingClientRect();
+      return {
+        direction,
+        expected: expected[direction],
+        label: button.getAttribute('aria-label') || '',
+        title: button.getAttribute('title') || '',
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        icons: button.querySelectorAll('svg').length,
+        iconHidden: button.querySelector('svg')?.getAttribute('aria-hidden') === 'true'
+      };
+    });
+  });
+  if (alignmentScrollControls.length !== 4
+    || alignmentScrollControls.some((control) => (
+      control.label !== control.expected
+        || control.title !== control.expected
+        || control.width !== 34
+        || control.height !== 34
+        || control.icons !== 1
+        || !control.iconHidden
+    ))) {
+    throw new Error(`Los controles de desplazamiento de la auditoría no son estables y accesibles: ${JSON.stringify(alignmentScrollControls)}.`);
+  }
+
   await outcomeImpactPage.focus('[data-pnl-section-link="my-ledger-section"]');
   await outcomeImpactPage.keyboard.press('Enter');
   await waitForPnlAnchor(outcomeImpactPage, 'my-ledger-section');
@@ -1594,6 +1628,7 @@ try {
     economicDiagnosisScopeTogglePassed: true,
     pnlSectionNavigationPassed: true,
     pnlSectionNavigationResponsivePassed: true,
+    alignmentScrollControlsPassed: true,
     outcomeImpactPanelPassed: true,
     manualPnlRefreshPassed: true,
     externalSheetLocalRefreshPassed: true

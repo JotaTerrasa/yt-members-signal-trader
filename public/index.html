@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
-    <link rel="stylesheet" href="/styles.css?v=51">
+    <link rel="stylesheet" href="/styles.css?v=52">
     <link rel="stylesheet" href="/polish.css?v=10">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
     <script src="/app.js?v=114" defer></script>
@@ -1225,10 +1225,18 @@
               </div>
               <div class="alignment-summary" id="alignment-summary"></div>
               <div class="alignment-controls" aria-label="Navegación de la auditoría">
-                <button type="button" data-alignment-scroll="up">Subir</button>
-                <button type="button" data-alignment-scroll="down">Bajar</button>
-                <button type="button" data-alignment-scroll="left">Izquierda</button>
-                <button type="button" data-alignment-scroll="right">Derecha</button>
+                <button type="button" data-alignment-scroll="up" title="Subir en la auditoría" aria-label="Subir en la auditoría">
+                  <i data-lucide="arrow-up" aria-hidden="true"></i>
+                </button>
+                <button type="button" data-alignment-scroll="down" title="Bajar en la auditoría" aria-label="Bajar en la auditoría">
+                  <i data-lucide="arrow-down" aria-hidden="true"></i>
+                </button>
+                <button type="button" data-alignment-scroll="left" title="Desplazar auditoría a la izquierda" aria-label="Desplazar auditoría a la izquierda">
+                  <i data-lucide="arrow-left" aria-hidden="true"></i>
+                </button>
+                <button type="button" data-alignment-scroll="right" title="Desplazar auditoría a la derecha" aria-label="Desplazar auditoría a la derecha">
+                  <i data-lucide="arrow-right" aria-hidden="true"></i>
+                </button>
               </div>
               <div class="replica-control" id="replica-control"></div>
             </div>
