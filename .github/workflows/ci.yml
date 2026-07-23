@@ -80,6 +80,10 @@ jobs:
       - name: Obtener el repositorio
         uses: actions/checkout@v7
 
+      - name: Comprobar sintaxis PowerShell
+        shell: powershell
+        run: npm run lint:powershell
+
       - name: Comprobar auditoría y endurecimiento
         shell: powershell
         run: |

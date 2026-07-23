@@ -64,7 +64,7 @@ pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 ```
 
-En Windows, `npm run windows:tasks` registra el arranque de PM2 y los backups periódicos. Cada backup programado incluye un simulacro de extracción temporal y deja su estado visible en la app. `scripts/startPm2.ps1` restaura el volcado de PM2 y arranca el ecosistema si fuese necesario.
+En Windows, `npm run windows:tasks` registra el arranque de PM2 y los backups periódicos con hasta tres reintentos cada dos minutos. Cada backup programado incluye un simulacro de extracción temporal y deja su estado visible en la app. `scripts/startPm2.ps1` restaura el volcado, arranca el ecosistema si fuese necesario y espera una respuesta válida de `/api/health` antes de guardar el nuevo estado de PM2.
 
 La réplica externa es portable porque solo requiere una ruta escribible. Se configura fuera del paquete con `npm run backup:secure:mirror:configure -- --target "RUTA"`; si no existe esa configuración, la app continúa con backups locales y muestra la réplica como no configurada. `npm run backup:secure:mirror:disable` la desactiva de forma reversible y no elimina ningún contenedor.
 

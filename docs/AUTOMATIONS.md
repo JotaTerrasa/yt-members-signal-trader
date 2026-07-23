@@ -99,4 +99,4 @@ Después, revisa `git status --short`, ejecuta las validaciones aplicables y pub
 - `FuturesMagicianSecureBackup`, cada día a las 03:15;
 - `FuturesMagicianProfileBackup`, los domingos a las 04:00.
 
-Estas tareas no actualizan Git ni la documentación. Su operación se describe en [Operación diaria](OPERATIONS.md) y [Despliegue](DEPLOYMENT.md).
+Las tres tareas reintentan hasta tres veces, cada dos minutos, si su proceso termina con error. La tarea de PM2 comprueba `/api/health` antes de informar de un arranque correcto; así, el Programador de tareas puede reintentar una restauración que dejó el proceso sin servicio HTTP. Estas tareas no actualizan Git ni la documentación. Su operación se describe en [Operación diaria](OPERATIONS.md) y [Despliegue](DEPLOYMENT.md).

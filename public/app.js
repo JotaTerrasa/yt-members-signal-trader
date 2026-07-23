@@ -1039,11 +1039,16 @@ async function loadPnl({ force = false } = {}) {
   renderPnl();
 
   try {
-    const [historicalResult, sourcesResult, replicaAuditResult] = await Promise.allSettled([
-      fetchJson(readRefreshUrl('/api/historical-pnl?months=72', force), { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
+    const historicalPromise = fetchJson(
+      readRefreshUrl('/api/historical-pnl?months=72', force),
+      { timeoutMs: PNL_REQUEST_TIMEOUT_MS }
+    );
+    const pendingResults = Promise.allSettled([
+      historicalPromise,
       fetchJson(readRefreshUrl('/api/bingx/pnl-sources', force), { timeoutMs: PNL_REQUEST_TIMEOUT_MS }),
       fetchJson(readRefreshUrl('/api/replica-audit', force), { timeoutMs: PNL_REQUEST_TIMEOUT_MS })
     ]);
+    const [historicalResult] = await Promise.allSettled([historicalPromise]);
 
     let historical = appState.pnl?.historical || null;
     let historicalError = '';
@@ -1056,6 +1061,16 @@ async function loadPnl({ force = false } = {}) {
         : 'La hoja no devolvió un histórico válido.';
     }
 
+    appState.externalSheetError = historicalError;
+    appState.externalSheetLoading = false;
+    appState.pnl = {
+      ...(appState.pnl || {}),
+      months: appState.pnl?.months || [],
+      ...(historical ? { historical } : {})
+    };
+    renderPnl();
+
+    const [, sourcesResult, replicaAuditResult] = await pendingResults;
     let sourcesError = '';
     if (sourcesResult.status === 'fulfilled' && sourcesResult.value) {
       appState.pnlSources = sourcesResult.value;
@@ -1083,7 +1098,6 @@ async function loadPnl({ force = false } = {}) {
       }
     }
 
-    appState.externalSheetError = historicalError;
     const referenceErrors = [historicalError, replicaAuditError].filter(Boolean);
     if (referenceErrors.length) {
       markReferenceRefreshFailure(referenceErrors.join(' | '));

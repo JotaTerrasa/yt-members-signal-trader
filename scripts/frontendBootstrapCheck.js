@@ -770,6 +770,57 @@ try {
   fixtureAt.setDate(1);
   fixtureAt.setHours(12, 0, 0, 0);
   const fixtureOpenAt = new Date();
+
+  const earlySheetPage = await browser.newPage();
+  const earlySheetErrors = [];
+  let slowPnlSourcesCompleted = false;
+  let slowReplicaAuditCompleted = false;
+  earlySheetPage.on('pageerror', (error) => earlySheetErrors.push(error.message));
+  await earlySheetPage.route('**/api/historical-pnl?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(nativeSheetFixturePayload(fixtureMonth, fixtureAt, fixtureOpenAt))
+    });
+  });
+  await earlySheetPage.route('**/api/bingx/pnl-sources', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    slowPnlSourcesCompleted = true;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, sources: {}, positions: {} })
+    });
+  });
+  await earlySheetPage.route('**/api/replica-audit', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    slowReplicaAuditCompleted = true;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, audit: {} })
+    });
+  });
+  await earlySheetPage.goto(`${baseUrl}/?early-sheet-check=${Date.now()}#external-sheet-panel`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await earlySheetPage.waitForFunction(() => {
+    const panel = document.querySelector('#external-sheet-panel');
+    return panel?.dataset.sheetState === 'ready'
+      && panel.getAttribute('aria-busy') === 'false'
+      && document.querySelectorAll('#external-sheet-body tr').length === 2;
+  }, null, { timeout: 10_000 });
+  if (slowPnlSourcesCompleted || slowReplicaAuditCompleted) {
+    throw new Error('La hoja externa espero a BingX o a la auditoria antes de mostrarse.');
+  }
+  if (earlySheetErrors.length) {
+    throw new Error(`Errores JavaScript al pintar la hoja de forma aislada: ${earlySheetErrors.join(' | ')}`);
+  }
+  await earlySheetPage.waitForFunction(() => (
+    document.querySelector('#pnl-source-grid')?.children.length >= 2
+  ), null, { timeout: 10_000 });
+
   nativeSheetPage.on('pageerror', (error) => nativeSheetErrors.push(error.message));
   await nativeSheetPage.route('**/api/historical-pnl?**', async (route) => {
     nativeSheetRequests += 1;
