@@ -1018,6 +1018,8 @@ try {
       economicDiagnosis: economicDiagnosis?.textContent.replace(/\s+/g, ' ').trim() || '',
       economicSegments: [...document.querySelectorAll('.economic-diagnosis-segment')]
         .map((segment) => segment.style.getPropertyValue('--economic-share')),
+      activeEconomicScope: document.querySelector('[data-economic-diagnosis-scope][aria-pressed="true"]')
+        ?.dataset.economicDiagnosisScope || '',
       horizontalRange: wraps[0] ? wraps[0].scrollWidth - wraps[0].clientWidth : 0,
       horizontalPosition: wraps[0]?.scrollLeft || 0
     };
@@ -1027,19 +1029,48 @@ try {
     || !outcomeImpactState.categories.some((row) => row.includes('Ganancia absorbida por costes') && row.includes('1'))
     || !outcomeImpactState.categories.some((row) => row.includes('Mismo signo neto') && row.includes('3'))
     || !outcomeImpactState.symbols.some((row) => row.includes('SOL-USDT') && row.includes('-13') && row.includes('13,3%') && row.includes('-15'))
-    || !outcomeImpactState.economicDiagnosis.includes('Réplica teórica 55,00 VST')
-    || !outcomeImpactState.economicDiagnosis.includes('BingX neto 16,00 VST')
-    || !outcomeImpactState.economicDiagnosis.includes('Brecha total -39,00 VST')
-    || !outcomeImpactState.economicDiagnosis.includes('Ejecución emparejada -32,00 VST 82,1%')
-    || !outcomeImpactState.economicDiagnosis.includes('Comisiones y funding -7,00 VST 17,9%')
+    || outcomeImpactState.activeEconomicScope !== 'cohort'
+    || !outcomeImpactState.economicDiagnosis.includes('Muestra preliminar desde')
+    || !outcomeImpactState.economicDiagnosis.includes('Réplica teórica 20,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('BingX neto 5,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('Brecha total -15,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('Ejecución emparejada -9,00 VST 60%')
+    || !outcomeImpactState.economicDiagnosis.includes('Comisiones y funding -4,00 VST 26,7%')
     || !outcomeImpactState.economicDiagnosis.includes('La ejecución de precios es el mayor arrastre')
-    || !outcomeImpactState.economicDiagnosis.includes('Mayor tramo individual: Cotización a fill de salida, -11,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('La entrada concentra 100%')
+    || !outcomeImpactState.economicDiagnosis.includes('Mayor tramo individual: Cotización a fill de entrada, -6,00 VST')
     || !outcomeImpactState.economicDiagnosis.includes('100% de cierres con fill exacto')
-    || !outcomeImpactState.economicDiagnosis.includes('1 incidencia histórica separada')
-    || outcomeImpactState.economicSegments.length !== 2
+    || !outcomeImpactState.economicDiagnosis.includes('Sin incidencias históricas en la muestra')
+    || !outcomeImpactState.economicDiagnosis.includes('no demuestra rentabilidad futura')
+    || outcomeImpactState.economicSegments.length !== 3
     || outcomeImpactState.horizontalRange <= 0
     || outcomeImpactState.horizontalPosition <= 0) {
     throw new Error(`El impacto económico no se representó correctamente: ${JSON.stringify(outcomeImpactState)}.`);
+  }
+
+  await outcomeImpactPage.click('[data-economic-diagnosis-scope="month"]');
+  await outcomeImpactPage.waitForFunction(() => (
+    document.querySelector('[data-economic-diagnosis-scope="month"]')?.getAttribute('aria-pressed') === 'true'
+      && document.querySelector('#economic-diagnosis')?.textContent.includes('55,00 VST')
+  ));
+  const monthDiagnosisState = await outcomeImpactPage.evaluate(() => ({
+    text: document.querySelector('#economic-diagnosis')?.textContent.replace(/\s+/g, ' ').trim() || '',
+    segments: document.querySelectorAll('.economic-diagnosis-segment').length,
+    activeScope: document.querySelector('[data-economic-diagnosis-scope][aria-pressed="true"]')
+      ?.dataset.economicDiagnosisScope || ''
+  }));
+  if (monthDiagnosisState.activeScope !== 'month'
+    || !monthDiagnosisState.text.includes('Réplica teórica 55,00 VST')
+    || !monthDiagnosisState.text.includes('BingX neto 16,00 VST')
+    || !monthDiagnosisState.text.includes('Brecha total -39,00 VST')
+    || !monthDiagnosisState.text.includes('Ejecución emparejada -32,00 VST 82,1%')
+    || !monthDiagnosisState.text.includes('Comisiones y funding -7,00 VST 17,9%')
+    || !monthDiagnosisState.text.includes('La salida concentra 62,5%')
+    || !monthDiagnosisState.text.includes('Mayor tramo individual: Cotización a fill de salida, -11,00 VST')
+    || !monthDiagnosisState.text.includes('1 incidencia histórica separada')
+    || !monthDiagnosisState.text.includes('todo el histórico del mes')
+    || monthDiagnosisState.segments !== 2) {
+    throw new Error(`El cambio al mes completo no conservó la contabilidad: ${JSON.stringify(monthDiagnosisState)}.`);
   }
 
   await outcomeImpactPage.click('.replica-outcome-impact [data-replica-filter="market_mismatch"]');
@@ -1078,23 +1109,33 @@ try {
   if (economicDiagnosisAnchorTop < 80 || economicDiagnosisAnchorTop > 130) {
     throw new Error(`El ancla del diagnóstico económico quedó tapada: top=${economicDiagnosisAnchorTop}.`);
   }
+  await outcomeImpactPage.click('[data-economic-diagnosis-scope="cohort"]');
+  await outcomeImpactPage.waitForFunction(() => (
+    document.querySelector('[data-economic-diagnosis-scope="cohort"]')?.getAttribute('aria-pressed') === 'true'
+  ));
   await outcomeImpactPage.setViewportSize({ width: 390, height: 844 });
   const economicDiagnosisMobile = await outcomeImpactPage.evaluate(() => {
     const flow = document.querySelector('.economic-diagnosis-flow');
     const causes = document.querySelector('.economic-diagnosis-causes');
+    const scope = document.querySelector('.economic-diagnosis-scope');
     return {
       viewportWidth: innerWidth,
       documentScrollWidth: document.documentElement.scrollWidth,
       flowColumns: flow ? getComputedStyle(flow).gridTemplateColumns.split(' ').length : 0,
       causeColumns: causes ? getComputedStyle(causes).gridTemplateColumns.split(' ').length : 0,
-      diagnosisWidth: document.querySelector('#economic-diagnosis')?.getBoundingClientRect().width || 0
+      diagnosisWidth: document.querySelector('#economic-diagnosis')?.getBoundingClientRect().width || 0,
+      scopeWidth: scope?.getBoundingClientRect().width || 0,
+      scopeButtonCount: scope?.querySelectorAll('button').length || 0
     };
   });
   if (economicDiagnosisMobile.documentScrollWidth > economicDiagnosisMobile.viewportWidth
     || economicDiagnosisMobile.flowColumns !== 1
     || economicDiagnosisMobile.causeColumns !== 1
     || economicDiagnosisMobile.diagnosisWidth <= 0
-    || economicDiagnosisMobile.diagnosisWidth > economicDiagnosisMobile.viewportWidth) {
+    || economicDiagnosisMobile.diagnosisWidth > economicDiagnosisMobile.viewportWidth
+    || economicDiagnosisMobile.scopeWidth <= 0
+    || economicDiagnosisMobile.scopeWidth > economicDiagnosisMobile.diagnosisWidth
+    || economicDiagnosisMobile.scopeButtonCount !== 2) {
     throw new Error(`El diagnóstico económico no respondió bien en móvil: ${JSON.stringify(economicDiagnosisMobile)}.`);
   }
   if (outcomeImpactErrors.length) {
@@ -1217,6 +1258,7 @@ try {
     tabletSheetResponsivePassed: true,
     tabletReliabilityResponsivePassed: true,
     economicDiagnosisPanelPassed: true,
+    economicDiagnosisScopeTogglePassed: true,
     outcomeImpactPanelPassed: true,
     manualPnlRefreshPassed: true
   }));
@@ -1493,6 +1535,80 @@ function economicImpactAuditFixture(month) {
           provisionalLatestDay: false,
           outsideCoverageRows: 0
         }
+      },
+      cohort: {
+        startedAt: '2026-07-15T07:05:17.987Z',
+        endedAt: null,
+        generatedAt: closedAt,
+        sampleStatus: {
+          key: 'preliminary',
+          label: 'Muestra preliminar',
+          detail: '3/100 cierres; útil para orientar, todavía frágil'
+        },
+        summary: {
+          sheetRows: 3,
+          vstOpenings: 3,
+          vstCloses: 3,
+          replicaPnl: 20,
+          replicaEstimatedMarketNet: 18,
+          bingxGross: 9,
+          bingxFees: -3,
+          bingxFunding: -1,
+          bingxNet: 5,
+          referenceCoverage: {
+            comparableRows: 3,
+            outsideCoverageRows: 0,
+            stale: false,
+            provisionalLatestDay: false
+          },
+          gapBridge: {
+            replicaPnl: 20,
+            bingxFees: -3,
+            bingxFunding: -1,
+            bingxNet: 5,
+            residual: 0,
+            reconciled: true,
+            counts: { matched: 3 },
+            steps: [
+              { key: 'matched_gap', label: 'Emparejadas vs hoja', value: -9, count: 3 },
+              { key: 'missing_execution', label: 'No ejecutadas', value: -2, count: 1 },
+              { key: 'fees', label: 'Comisiones', value: -3, count: null },
+              { key: 'funding', label: 'Funding', value: -1, count: null }
+            ]
+          },
+          matchedGapAttribution: {
+            replicaPnl: 18,
+            bingxGross: 9,
+            gap: -9,
+            residual: 0,
+            reconciled: true,
+            counts: { matched: 3, decomposable: 3 },
+            steps: [
+              { key: 'entry_execution', label: 'Diferencia de entrada', value: -10, count: 3 },
+              { key: 'exit_execution', label: 'Diferencia de salida', value: 1, count: 3 },
+              { key: 'size_and_fills', label: 'Cantidad y fills', value: 0, count: 3 }
+            ],
+            bySymbol: [],
+            byCloseKind: []
+          },
+          executionPriceChain: {
+            mainDrags: [
+              { key: 'entry_fill', label: 'Cotización a fill de entrada', value: -6, count: 3 },
+              { key: 'exit_fill', label: 'Cotización a fill de salida', value: -2, count: 3 }
+            ]
+          },
+          executionRouteAnalysis: {
+            families: [],
+            groups: []
+          },
+          orderHistoryEvidence: {
+            available: true,
+            closedRows: 3,
+            exactCloseRows: 3,
+            exactCloseCoveragePercent: 100
+          }
+        },
+        rows: rows.slice(0, 3)
       },
       source: { orderHistory: { available: true, records: 6 } },
       rows

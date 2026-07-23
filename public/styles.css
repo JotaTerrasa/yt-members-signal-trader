@@ -2842,6 +2842,56 @@ summary.dashboard-section-title {
   font-size: 1rem;
 }
 
+.economic-diagnosis-heading > div > small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.economic-diagnosis-toolbar {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px !important;
+}
+
+.economic-diagnosis-scope {
+  display: inline-flex;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #edf3f2;
+}
+
+.economic-diagnosis-scope button {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.economic-diagnosis-scope button:hover {
+  color: var(--ink);
+}
+
+.economic-diagnosis-scope button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.economic-diagnosis-scope button.active {
+  background: #fff;
+  color: var(--accent-strong);
+  box-shadow: 0 1px 2px rgb(18 49 52 / 12%);
+}
+
 .economic-diagnosis-flow {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6433,6 +6483,20 @@ h1 {
   .economic-diagnosis-flow > div:last-child,
   .economic-diagnosis-cause:last-child {
     border-bottom: 0;
+  }
+
+  .economic-diagnosis-toolbar,
+  .economic-diagnosis-scope {
+    width: 100%;
+  }
+
+  .economic-diagnosis-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .economic-diagnosis-scope button {
+    flex: 1 1 50%;
   }
 
   .execution-evidence-facts {

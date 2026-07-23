@@ -333,6 +333,7 @@ const appState = {
   externalSheetVisibleLimit: EXTERNAL_SHEET_PAGE_SIZE,
   replicaAuditVisibleLimit: REPLICA_AUDIT_PAGE_SIZE,
   replicaAuditFilter: 'all',
+  economicDiagnosisScope: 'cohort',
   pnlHashAnchorRequested: '',
   pnlHashAnchorSettled: '',
   externalSheetRenderKey: '',
@@ -543,6 +544,18 @@ function bindEvents() {
   });
   const alignmentPanel = document.querySelector('#sheet-vst-alignment');
   alignmentPanel?.addEventListener('click', async (event) => {
+    const economicScopeButton = event.target.closest('[data-economic-diagnosis-scope]');
+    if (economicScopeButton) {
+      const scope = economicScopeButton.dataset.economicDiagnosisScope;
+      if ((scope === 'cohort' || scope === 'month') && scope !== appState.economicDiagnosisScope) {
+        appState.economicDiagnosisScope = scope;
+        renderReplicaControlPreservingScroll(appState.replicaAudit);
+        window.requestAnimationFrame(() => {
+          document.querySelector(`[data-economic-diagnosis-scope="${scope}"]`)?.focus();
+        });
+      }
+      return;
+    }
     const filterButton = event.target.closest('[data-replica-filter]');
     if (filterButton) {
       appState.replicaAuditFilter = filterButton.dataset.replicaFilter || 'all';
@@ -6240,7 +6253,11 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
 }
 
 function renderEconomicDiagnosis(audit = {}) {
-  const summary = audit.summary || {};
+  const cohort = audit.cohort || null;
+  const cohortSummary = cohort?.summary;
+  const hasCohort = Boolean(cohortSummary?.gapBridge && cohortSummary?.matchedGapAttribution);
+  const scope = appState.economicDiagnosisScope === 'month' || !hasCohort ? 'month' : 'cohort';
+  const summary = scope === 'cohort' ? cohortSummary : (audit.summary || {});
   const bridge = summary.gapBridge;
   const attribution = summary.matchedGapAttribution;
   if (!bridge || !Array.isArray(bridge.steps) || !attribution || !Array.isArray(attribution.steps)) {
@@ -6287,9 +6304,12 @@ function renderEconomicDiagnosis(audit = {}) {
     : null;
   const entryImpact = stepValue(attributionSteps, 'entry_execution');
   const exitImpact = stepValue(attributionSteps, 'exit_execution');
-  const executionDrag = Math.abs(Math.min(0, entryImpact)) + Math.abs(Math.min(0, exitImpact));
-  const exitShare = executionDrag > 0
-    ? (Math.abs(Math.min(0, exitImpact)) / executionDrag) * 100
+  const entryDrag = Math.abs(Math.min(0, entryImpact));
+  const exitDrag = Math.abs(Math.min(0, exitImpact));
+  const executionDrag = entryDrag + exitDrag;
+  const phaseLabel = entryDrag >= exitDrag ? 'entrada' : 'salida';
+  const phaseShare = executionDrag > 0
+    ? (Math.max(entryDrag, exitDrag) / executionDrag) * 100
     : 0;
   const mainDrag = [...(summary.executionPriceChain?.mainDrags || [])]
     .sort((left, right) => Math.abs(Number(right.value || 0)) - Math.abs(Number(left.value || 0)))[0];
@@ -6300,10 +6320,13 @@ function renderEconomicDiagnosis(audit = {}) {
       .find((family) => family.key === 'historical_defect')?.rows || 0
   );
   const reconciled = Boolean(bridge.reconciled && attribution.reconciled);
+  const executionDiagnosis = executionDrag > 0
+    ? `La ${phaseLabel} concentra ${formatPercent(phaseShare)} del deterioro neto entre entrada y salida.`
+    : 'El arrastre no se concentra en entrada o salida; revisa cantidad y fills.';
   const diagnosis = !dominantCause
     ? 'No hay contribuciones negativas que explicar en esta muestra.'
     : dominantCause.key === 'execution'
-      ? `La ejecución de precios es el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas. La salida concentra ${formatPercent(exitShare)} del deterioro de ejecución emparejado.`
+      ? `La ejecución de precios es el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas. ${executionDiagnosis}`
       : dominantCause.key === 'costs'
         ? `Los costes de BingX son el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas.`
         : `Las operaciones no comparables o ausentes son el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas.`;
@@ -6314,6 +6337,30 @@ function renderEconomicDiagnosis(audit = {}) {
       ? `${historicalDefectRows} incidencia${historicalDefectRows === 1 ? '' : 's'} histórica${historicalDefectRows === 1 ? '' : 's'} separada${historicalDefectRows === 1 ? '' : 's'}`
       : 'Sin incidencias históricas en la muestra'
   ].filter(Boolean).join(' · ');
+  const scopeContext = scope === 'cohort'
+    ? `${cohort?.sampleStatus?.label || 'Cohorte vigente'} desde ${formatDateTime(cohort?.startedAt)}`
+    : `${formatMonth(audit.month)} completo`;
+  const scopeNote = scope === 'cohort'
+    ? 'Esta lectura aísla el comportamiento posterior a las mejoras; no demuestra rentabilidad futura.'
+    : 'Esta lectura incorpora todo el histórico del mes, incluidas las incidencias ya separadas.';
+  const scopeControls = hasCohort
+    ? `
+      <div class="economic-diagnosis-scope" role="group" aria-label="Ámbito del diagnóstico económico">
+        <button
+          type="button"
+          data-economic-diagnosis-scope="cohort"
+          aria-pressed="${scope === 'cohort'}"
+          class="${scope === 'cohort' ? 'active' : ''}"
+        >Cohorte vigente</button>
+        <button
+          type="button"
+          data-economic-diagnosis-scope="month"
+          aria-pressed="${scope === 'month'}"
+          class="${scope === 'month' ? 'active' : ''}"
+        >Mes completo</button>
+      </div>
+    `
+    : '';
   const segments = causesWithShare
     .filter((cause) => cause.share > 0)
     .map((cause) => `
@@ -6337,8 +6384,12 @@ function renderEconomicDiagnosis(audit = {}) {
         <div>
           <span>Diagnóstico económico</span>
           <strong id="economic-diagnosis-title">Por qué la réplica se separa de la hoja</strong>
+          <small>${escapeHtml(scopeContext)}</small>
         </div>
-        <span class="ledger-status ${escapeAttribute(reconciled ? 'positive' : 'warn')}">${escapeHtml(reconciled ? 'Reconciliado' : 'Datos parciales')}</span>
+        <div class="economic-diagnosis-toolbar">
+          ${scopeControls}
+          <span class="ledger-status ${escapeAttribute(reconciled ? 'positive' : 'warn')}">${escapeHtml(reconciled ? 'Reconciliado' : 'Datos parciales')}</span>
+        </div>
       </div>
       <div class="economic-diagnosis-flow" aria-label="Resultado teórico, resultado BingX y brecha total">
         <div>
@@ -6366,7 +6417,7 @@ function renderEconomicDiagnosis(audit = {}) {
           ? `Mayor tramo individual: ${mainDrag.label}, ${formatMoney(mainDrag.value, 'VST')}.`
           : 'Todavía no hay un tramo individual atribuible.')}</span>
       </div>
-      <p class="economic-diagnosis-evidence">${escapeHtml(`${evidence}. La lectura mensual incluye el histórico completo; la cohorte vigente se evalúa por separado más abajo.`)}</p>
+      <p class="economic-diagnosis-evidence">${escapeHtml(`${evidence}. ${scopeNote}`)}</p>
     </section>
   `;
 }
