@@ -301,6 +301,7 @@ const PNL_SECTION_TARGET_IDS = Object.freeze([
   'guard-dashboard',
   'positions-section',
   'my-ledger-section',
+  'external-sheet-panel',
   'performance-section',
   'sheet-vst-alignment'
 ]);

@@ -635,17 +635,16 @@ try {
   await nativeSheetPage.waitForFunction(() => {
     const panel = document.querySelector('#external-sheet-panel');
     const status = document.querySelector('#external-sheet-status');
-    const panelRect = panel?.getBoundingClientRect();
     return panel
       && panel.dataset.sheetState !== 'loading'
       && document.querySelectorAll('#external-sheet-body tr').length === 2
-      && status?.textContent.includes('datos hasta')
-      && panelRect.top >= 0
-      && panelRect.top <= 180
-      && panelRect.bottom > 0
-      && panelRect.top < document.documentElement.clientHeight;
+      && status?.textContent.includes('datos hasta');
   }, null, { timeout: 20_000 });
+  await nativeSheetPage.focus('[data-pnl-section-link="external-sheet-panel"]');
+  await nativeSheetPage.keyboard.press('Enter');
+  await waitForPnlAnchor(nativeSheetPage, 'external-sheet-panel');
   await nativeSheetPage.waitForTimeout(250);
+  const nativeSheetAnchorState = await readPnlAnchorState(nativeSheetPage, 'external-sheet-panel');
   const nativeSheetState = await nativeSheetPage.evaluate(() => {
     const panel = document.querySelector('#external-sheet-panel');
     const panelRect = panel?.getBoundingClientRect();
@@ -665,8 +664,8 @@ try {
     || nativeSheetState.rowCount !== 2
     || !nativeSheetState.tableVisible
     || nativeSheetState.panelTop == null
-    || nativeSheetState.panelTop < 0
-    || nativeSheetState.panelTop > 180
+    || nativeSheetState.panelTop < nativeSheetAnchorState.stickyBottom + 4
+    || nativeSheetState.panelTop > nativeSheetAnchorState.stickyBottom + 52
     || nativeSheetState.panelBottom <= 0
     || nativeSheetState.panelTop >= nativeSheetState.viewportHeight
     || !nativeSheetState.summary.includes('1 abiertas')
@@ -918,6 +917,17 @@ try {
     document.querySelectorAll('#external-sheet-body tr').length === 40
       && document.querySelector('#external-sheet-pagination-status')?.textContent.includes('40 de 45')
   ), null, { timeout: 20_000 });
+  await sheetNavigationPage.focus('[data-pnl-section-link="my-ledger-section"]');
+  await sheetNavigationPage.keyboard.press('Enter');
+  await waitForPnlAnchor(sheetNavigationPage, 'my-ledger-section');
+  await sheetNavigationPage.focus('[data-pnl-section-link="external-sheet-panel"]');
+  await sheetNavigationPage.keyboard.press('Enter');
+  await waitForPnlAnchor(sheetNavigationPage, 'external-sheet-panel');
+  const externalSheetAnchorState = await readPnlAnchorState(sheetNavigationPage, 'external-sheet-panel');
+  if (externalSheetAnchorState.activeSection !== 'external-sheet-panel'
+    || externalSheetAnchorState.focusedId !== 'external-sheet-panel') {
+    throw new Error(`La hoja externa no quedó como destino activo: ${JSON.stringify(externalSheetAnchorState)}.`);
+  }
   await sheetNavigationPage.click('#external-sheet-load-more');
   await sheetNavigationPage.click('[data-external-sheet-scroll="down"]');
   await sheetNavigationPage.click('[data-external-sheet-scroll="right"]');
@@ -1087,7 +1097,7 @@ try {
   });
   if (sectionNavigationState.position !== 'sticky'
     || sectionNavigationState.active !== 'sheet-vst-alignment'
-    || sectionNavigationState.links.length !== 7
+    || sectionNavigationState.links.length !== 8
     || sectionNavigationState.links.some((link) => (
       !link.targetExists
         || link.targetTabIndex !== -1

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/styles.css?v=51">
     <link rel="stylesheet" href="/polish.css?v=9">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=112" defer></script>
+    <script src="/app.js?v=113" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -621,6 +621,10 @@
                 <i data-lucide="table" aria-hidden="true"></i>
                 <span>Mi hoja</span>
               </a>
+              <a class="pnl-section-link" href="#external-sheet-panel" data-pnl-anchor data-pnl-section-link="external-sheet-panel">
+                <i data-lucide="sheet" aria-hidden="true"></i>
+                <span>Hoja externa</span>
+              </a>
               <a class="pnl-section-link" href="#performance-section" data-pnl-anchor data-pnl-section-link="performance-section">
                 <i data-lucide="line-chart" aria-hidden="true"></i>
                 <span>Rendimiento</span>
@@ -952,7 +956,7 @@
                     <span>Mostrar más</span>
                   </button>
                 </div>
-                <div class="external-sheet-panel" id="external-sheet-panel" aria-busy="false">
+                <div class="external-sheet-panel pnl-section-target" id="external-sheet-panel" tabindex="-1" aria-busy="false">
                   <div class="trade-section-header">
                     <h3>Hoja externa en vivo</h3>
                     <span id="external-sheet-status" role="status" aria-live="polite">Sin hoja</span>
