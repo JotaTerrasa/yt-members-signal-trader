@@ -109,6 +109,11 @@ try {
     throw new Error(`Las vistas principales no conservan semántica y teclado ARIA: ${JSON.stringify(viewTabSemantics)}.`);
   }
 
+  const searchAccessibleName = await page.locator('#search').getAttribute('aria-label');
+  if (searchAccessibleName !== 'Filtrar publicaciones') {
+    throw new Error(`El buscador de publicaciones no tiene un nombre accesible: ${searchAccessibleName || 'vacío'}.`);
+  }
+
   const logGrouping = await page.evaluate(() => {
     const refreshMessage = 'Telegram Web refrescado automaticamente cada 30 segundos.';
     const groups = groupLogsForDisplay([
@@ -1568,6 +1573,7 @@ try {
     frontendVersionUpdatePassed: true,
     frontendAutoReloadPassed: true,
     skipLinkPassed: true,
+    searchAccessibleNamePassed: true,
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     incidentLifecyclePassed: true,
