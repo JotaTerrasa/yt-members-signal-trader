@@ -114,6 +114,43 @@ try {
     throw new Error(`El buscador de publicaciones no tiene un nombre accesible: ${searchAccessibleName || 'vacío'}.`);
   }
 
+  const semanticSpanishCopy = await page.evaluate(() => {
+    const headings = [...document.querySelectorAll('h1, #pnl-view h2, #pnl-view h3, #pnl-view h4')]
+      .map((heading) => ({
+        level: Number(heading.tagName.slice(1)),
+        text: heading.textContent.replace(/\s+/g, ' ').trim()
+      }));
+    const required = [
+      'Futures Magician',
+      'Operativa',
+      'Estudio estratégico',
+      'Línea de vida real',
+      'Simulación',
+      'Evolución mensual'
+    ];
+    const forbidden = [
+      'Estudio estrategico',
+      'Linea de vida real',
+      'Simulacion',
+      'Evolucion mensual'
+    ];
+    return {
+      toolPanelLabel: document.querySelector('#tool-panel')?.getAttribute('aria-label') || '',
+      channelLabel: document.querySelector('label[for="channel-url"]')?.textContent.trim() || '',
+      headings,
+      missingRequired: required.filter((text) => !headings.some((heading) => heading.text === text)),
+      forbiddenPresent: forbidden.filter((text) => headings.some((heading) => heading.text === text)),
+      levelJumps: headings.slice(1).filter((heading, index) => heading.level > headings[index].level + 1)
+    };
+  });
+  if (semanticSpanishCopy.toolPanelLabel !== 'Configuración operativa'
+    || semanticSpanishCopy.channelLabel !== 'Canal o pestaña de publicaciones'
+    || semanticSpanishCopy.missingRequired.length
+    || semanticSpanishCopy.forbiddenPresent.length
+    || semanticSpanishCopy.levelJumps.length) {
+    throw new Error(`La estructura semántica o la ortografía principal de la UI retrocedieron: ${JSON.stringify(semanticSpanishCopy)}.`);
+  }
+
   const logGrouping = await page.evaluate(() => {
     const refreshMessage = 'Telegram Web refrescado automaticamente cada 30 segundos.';
     const groups = groupLogsForDisplay([
@@ -317,7 +354,7 @@ try {
     || exchangeSafetyPanels.realStatus !== 'Real inactivo'
     || !exchangeSafetyPanels.demoText.includes('Equity VST')
     || !exchangeSafetyPanels.demoText.includes('SL demo confirmado')
-    || !exchangeSafetyPanels.realText.includes('la cuenta real no se esta operando')
+    || !exchangeSafetyPanels.realText.includes('la cuenta real no se está operando')
     || !exchangeSafetyPanels.tpClass.includes('pending')
     || !exchangeSafetyPanels.tpText.includes('0/1')
     || !exchangeSafetyPanels.liquidationClass.includes('negative')
@@ -1608,6 +1645,8 @@ try {
     frontendAutoReloadPassed: true,
     skipLinkPassed: true,
     searchAccessibleNamePassed: true,
+    semanticHeadingHierarchyPassed: true,
+    spanishUiCopyPassed: true,
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     incidentLifecyclePassed: true,

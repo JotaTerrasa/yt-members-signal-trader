@@ -510,7 +510,7 @@ function bindEvents() {
   });
 
   elements.restartBackend.addEventListener('click', async () => {
-    const confirmed = confirm('Reiniciar backend ahora? PM2 lo levantara de nuevo. No toca ordenes ni configuracion.');
+    const confirmed = confirm('¿Reiniciar el backend ahora? PM2 lo levantará de nuevo. No toca órdenes ni configuración.');
     if (!confirmed) {
       return;
     }
@@ -532,7 +532,7 @@ function bindEvents() {
   });
 
   elements.clearPosts.addEventListener('click', async () => {
-    if (!confirm('Vaciar el archivo local de publicaciones?')) {
+    if (!confirm('¿Vaciar el archivo local de publicaciones?')) {
       return;
     }
     await runAction(async () => {
@@ -665,7 +665,7 @@ function bindEvents() {
   elements.externalSheetRetry?.addEventListener('click', refreshPnlNow);
   elements.monthReset.addEventListener('click', async () => {
     await runAction(async () => {
-      const confirmed = confirm('Resetear el mes de rendimiento VST y real desde este momento? No toca ordenes abiertas ni la logica de senales.');
+      const confirmed = confirm('¿Reiniciar el mes de rendimiento VST y real desde este momento? No toca órdenes abiertas ni la lógica de señales.');
       if (!confirmed) {
         return;
       }
@@ -727,9 +727,9 @@ function bindEvents() {
       const readiness = liveReadiness();
       if (!readiness.ready) {
         renderLiveReadiness(readiness);
-        throw new Error('Live aun no esta preparado. Revisa el checklist.');
+        throw new Error('Live aún no está preparado. Revisa la lista de comprobación.');
       }
-      const confirmed = confirm('Vas a armar LIVE REAL. Las proximas senales validas podran enviar ordenes reales a BingX. Continuar?');
+      const confirmed = confirm('Vas a armar LIVE REAL. Las próximas señales válidas podrán enviar órdenes reales a BingX. ¿Continuar?');
       if (!confirmed) {
         return;
       }
@@ -762,13 +762,13 @@ function bindEvents() {
     await runAction(async () => {
       elements.bingxManagementOnly.checked = !elements.bingxManagementOnly.checked;
       const bingx = await saveBingxConfig();
-      renderBingx(bingx, bingx.managementOnly ? 'Solo gestion activo' : 'Gestion normal');
+      renderBingx(bingx, bingx.managementOnly ? 'Solo gestión activo' : 'Gestión normal');
       renderPnl();
     });
   });
   elements.cancelRealOrders.addEventListener('click', async () => {
     await runAction(async () => {
-      const confirmText = prompt('Escribe CANCELAR_ORDENES_REAL para cancelar ordenes pendientes reales.');
+      const confirmText = prompt('Escribe CANCELAR_ORDENES_REAL para cancelar órdenes pendientes reales.');
       if (confirmText !== 'CANCELAR_ORDENES_REAL') {
         return;
       }
@@ -817,7 +817,7 @@ function bindEvents() {
   elements.saveTelegram.addEventListener('click', async () => {
     await runAction(async () => {
       const telegram = await saveTelegramConfig();
-      renderTelegram(telegram, 'Configuracion guardada');
+      renderTelegram(telegram, 'Configuración guardada');
     });
   });
 
@@ -866,7 +866,7 @@ function bindEvents() {
   elements.saveBingx.addEventListener('click', async () => {
     await runAction(async () => {
       const bingx = await saveBingxConfig();
-      renderBingx(bingx, 'Configuracion guardada');
+      renderBingx(bingx, 'Configuración guardada');
       await loadPnl();
     });
   });
@@ -888,8 +888,8 @@ function bindEvents() {
       const validSignals = signals.filter((signal) => signal.isSignal);
       const firstInvalid = signals.find((signal) => !signal.isSignal);
       renderBingx(appState.bingx, validSignals.length
-        ? `Senales: ${validSignals.map((signal) => `${signal.symbol} ${signal.direction}`).join(', ')}`
-        : `No es senal: ${(firstInvalid?.reasons || []).join(', ')}`);
+        ? `Señales: ${validSignals.map((signal) => `${signal.symbol} ${signal.direction}`).join(', ')}`
+        : `No es una señal: ${(firstInvalid?.reasons || []).join(', ')}`);
     });
   });
 
@@ -1799,7 +1799,7 @@ function emptyPostsText(query) {
   if ((appState.state?.stats?.totalPosts || 0) > 0 && appState.posts.length === 0) {
     return 'Cargando publicaciones guardadas...';
   }
-  return 'Pega la URL del canal, abre sesion y lanza el scrapeo.';
+  return 'Pega la URL del canal, abre sesión e inicia el monitor.';
 }
 
 function renderPost(post) {
@@ -1841,7 +1841,7 @@ function renderLogs() {
   const visibleLogs = displayLogs.slice(0, appState.logsVisibleLimit);
   const visibleEvents = visibleLogs.reduce((total, log) => total + Number(log.groupCount || 1), 0);
   elements.logsList.innerHTML = visibleLogs.map(renderLogRow).join('')
-    || '<div class="empty-state">Sin eventos todavia.</div>';
+    || '<div class="empty-state">Sin eventos todavía.</div>';
   renderListPagination({
     container: elements.logsPagination,
     status: elements.logsPaginationStatus,
@@ -1979,23 +1979,23 @@ function renderPnl() {
     elements.pnlStatus.textContent = 'Leyendo PnL de BingX...';
     elements.pnlEmpty.classList.add('hidden');
   } else if (cooldownText) {
-    elements.pnlStatus.textContent = `${cooldownText}. Usando ultimo dato disponible.`;
+    elements.pnlStatus.textContent = `${cooldownText}. Usando el último dato disponible.`;
     elements.pnlEmpty.classList.add('hidden');
   } else if (appState.pnlError) {
     const friendlyError = friendlyBingxError(appState.pnlError);
     elements.pnlStatus.textContent = hasLocalPaper
       ? `BingX: ${friendlyError}. Paper local disponible.`
-      : hasHistorical ? `BingX: ${friendlyError}. Historico YouTube disponible.` : friendlyError;
+      : hasHistorical ? `BingX: ${friendlyError}. Histórico de YouTube disponible.` : friendlyError;
     elements.pnlEmpty.textContent = friendlyError;
     elements.pnlEmpty.classList.toggle('hidden', hasHistorical || hasLocalPaper);
   } else if (!rows.length) {
-    elements.pnlStatus.textContent = 'Sin PnL todavia.';
-    elements.pnlEmpty.textContent = 'Sin PnL todavia. Las ordenes test apareceran aqui como paper trading.';
+    elements.pnlStatus.textContent = 'Sin PnL todavía.';
+    elements.pnlEmpty.textContent = 'Sin PnL todavía. Las órdenes de prueba aparecerán aquí como paper trading.';
     elements.pnlEmpty.classList.remove('hidden');
   } else {
     elements.pnlStatus.textContent = hasActivity
       ? `${selectedSource.label} · ${selectedSource.status || pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference })}`
-      : 'Sin PnL todavia.';
+      : 'Sin PnL todavía.';
     elements.pnlEmpty.classList.add('hidden');
   }
 
@@ -2576,17 +2576,17 @@ function renderCostControl(source = selectedPnlSource(), reference = currentRefe
   }
 
   elements.costControlSummary.innerHTML = [
-    renderCostMetric('Bruto realizado', formatMoney(analysis.grossRealized, analysis.asset), 'Antes de fees/funding', amountClass(analysis.grossRealized)),
-    renderCostMetric('Fees + funding', formatMoney(analysis.totalCost, analysis.asset), `${formatMoney(analysis.fees, analysis.asset)} fees`, amountClass(analysis.totalCost)),
-    renderCostMetric('Neto realizado', formatMoney(analysis.realized, analysis.asset), 'Despues de costes', amountClass(analysis.realized)),
-    renderCostMetric('Fee por ejecucion', formatMoney(analysis.feePerExecution, analysis.asset), `${analysis.estimatedExecutions} ejecuciones aprox.`, amountClass(-analysis.feePerExecution)),
+    renderCostMetric('Bruto realizado', formatMoney(analysis.grossRealized, analysis.asset), 'Antes de comisiones y funding', amountClass(analysis.grossRealized)),
+    renderCostMetric('Comisiones + funding', formatMoney(analysis.totalCost, analysis.asset), `${formatMoney(analysis.fees, analysis.asset)} en comisiones`, amountClass(analysis.totalCost)),
+    renderCostMetric('Neto realizado', formatMoney(analysis.realized, analysis.asset), 'Después de costes', amountClass(analysis.realized)),
+    renderCostMetric('Comisión por ejecución', formatMoney(analysis.feePerExecution, analysis.asset), `${analysis.estimatedExecutions} ejecuciones aprox.`, amountClass(-analysis.feePerExecution)),
     renderCostMetric('Coste round-trip', formatMoney(analysis.roundTripCost, analysis.asset), 'Abrir + cerrar estimado', amountClass(-analysis.roundTripCost)),
     renderCostMetric('Break-even precio', formatPercent(analysis.breakEvenMovePercent), `${formatPercent(analysis.marginRoiBreakEven)} sobre margen`, analysis.breakEvenMovePercent > 0.18 ? 'amount negative' : analysis.breakEvenMovePercent > 0.1 ? 'warn' : 'amount positive')
   ].join('');
 
   elements.costControlSymbols.innerHTML = analysis.symbolRows.length
     ? analysis.symbolRows.map(renderCostSymbolRow).join('')
-    : '<div class="cost-empty">Sin posiciones suficientes para calcular coste por simbolo.</div>';
+    : '<div class="cost-empty">Sin posiciones suficientes para calcular el coste por símbolo.</div>';
 
   elements.costControlShadow.innerHTML = renderCostShadow(analysis.shadow);
 
@@ -2606,11 +2606,11 @@ function renderProtectedClosePanel() {
   const items = protectedCloseQueueItems();
   elements.protectedClosePanel.classList.toggle('muted', !items.length);
   elements.protectedCloseStatus.textContent = items.length
-    ? `${items.length} cierre(s) esperando zona valida`
+    ? `${items.length} cierre(s) esperando una zona válida`
     : 'Sin cierres pendientes';
   elements.protectedCloseList.innerHTML = items.length
     ? items.map(renderProtectedCloseItem).join('')
-    : '<div class="protected-close-empty">No hay cierres protegidos pendientes. Si la proteccion bloquea un cierre, aparecera aqui hasta que se ejecute o caduque.</div>';
+    : '<div class="protected-close-empty">No hay cierres protegidos pendientes. Si la protección bloquea un cierre, aparecerá aquí hasta que se ejecute o caduque.</div>';
 }
 
 function protectedCloseQueueItems() {
@@ -2623,7 +2623,7 @@ function renderProtectedCloseItem(item = {}) {
   const modeLabel = item.executionMode === 'demo' ? 'Demo VST' : 'Live real';
   const limit = parsed.limitPercent ?? parsed.limit;
   const slippage = parsed.slippagePercent ?? parsed.slippage;
-  const nextRunText = timeUntilLabel(item.nextRunAt, 'proximo intento');
+  const nextRunText = timeUntilLabel(item.nextRunAt, 'próximo intento');
   const expiresText = timeUntilLabel(item.expiresAt, 'caduca');
   const postLink = item.postUrl
     ? `<a href="${escapeAttribute(item.postUrl)}" target="_blank" rel="noreferrer">Post</a>`
@@ -2892,14 +2892,14 @@ function renderCostShadow(shadow = {}) {
     <div class="cost-shadow-header">
       <div>
         <strong>Modo sombra del filtro</strong>
-        <span>No bloquea. Simula que habria pasado con umbral ${escapeHtml(formatPercent(shadow.threshold))} y colchon x${escapeHtml(String(shadow.buffer))}.</span>
+        <span>No bloquea. Simula qué habría pasado con un umbral de ${escapeHtml(formatPercent(shadow.threshold))} y un colchón x${escapeHtml(String(shadow.buffer))}.</span>
       </div>
       <span class="ledger-status ${escapeAttribute(shadow.recommendation.className)}">${escapeHtml(shadow.recommendation.label)}</span>
     </div>
     <div class="cost-shadow-grid">
       ${renderCostMetric('Marcadas', `${shadow.flaggedCount}/${shadow.totalCount}`, `${shadow.closedFlaggedCount} cerradas con resultado`, shadow.flaggedCount ? 'warn' : 'amount positive')}
-      ${renderCostMetric('PnL marcado', formatMoney(shadow.flaggedPnl, shadow.asset), 'Resultado de lo que habria filtrado', amountClass(shadow.flaggedPnl))}
-      ${renderCostMetric('Coste estimado', formatMoney(shadow.flaggedCost, shadow.asset), 'Coste que habria evitado no entrando', amountClass(-shadow.flaggedCost))}
+      ${renderCostMetric('PnL marcado', formatMoney(shadow.flaggedPnl, shadow.asset), 'Resultado de lo que habría filtrado', amountClass(shadow.flaggedPnl))}
+      ${renderCostMetric('Coste estimado', formatMoney(shadow.flaggedCost, shadow.asset), 'Coste que habría evitado no entrando', amountClass(-shadow.flaggedCost))}
       ${renderCostMetric('W/L marcadas', `${shadow.winners}/${shadow.losers}`, 'Ganadoras/perdedoras dentro del filtro', shadow.losers > shadow.winners ? 'amount positive' : 'warn')}
     </div>
   `;
@@ -3033,27 +3033,27 @@ function costControlActions(analysis) {
     actions.push({
       tone: 'warn',
       label: 'Datos incompletos',
-      detail: 'BingX no ha devuelto todo el historico de costes; usa el ultimo dato disponible.'
+      detail: 'BingX no ha devuelto todo el histórico de costes; usa el último dato disponible.'
     });
   }
   if (analysis.totalCost < 0 && Math.abs(analysis.totalCost) > Math.abs(analysis.grossRealized)) {
     actions.push({
       tone: 'negative',
-      label: 'El bruto no paga las fees',
+      label: 'El bruto no cubre las comisiones',
       detail: 'Aunque las operaciones ganen en bruto, el neto puede quedar rojo si no hay recorrido suficiente.'
     });
   }
   if (analysis.breakEvenMovePercent > 0.12) {
     actions.push({
       tone: 'warn',
-      label: 'Exigir mas recorrido',
+      label: 'Exigir más recorrido',
       detail: `Cada orden necesita aprox. ${formatPercent(analysis.breakEvenMovePercent)} de precio solo para empatar costes.`
     });
   }
   if (analysis.symbolRows.some((row) => row.pnl < 0 && row.closed >= 2)) {
     actions.push({
       tone: 'warn',
-      label: 'Filtrar por simbolo',
+      label: 'Filtrar por símbolo',
       detail: 'Hay activos con muestra negativa neta; conviene comparar BTC/ETH/SOL/SUI antes de real.'
     });
   }
@@ -3061,13 +3061,13 @@ function costControlActions(analysis) {
     actions.push({
       tone: 'neutral',
       label: 'Bloqueo de coste activo',
-      detail: 'Solo bloquea si un TP explicito no cubre el coste estimado; sin objetivo, avisa y conserva la replica.'
+      detail: 'Solo bloquea si un TP explícito no cubre el coste estimado; sin objetivo, avisa y conserva la réplica.'
     });
   } else {
     actions.push({
       tone: 'neutral',
       label: 'Siguiente paso seguro',
-      detail: 'Activar un filtro de coste deberia hacerse con confirmacion explicita porque puede saltarse senales.'
+      detail: 'Activar un filtro de coste debería hacerse con confirmación explícita porque puede omitir señales.'
     });
   }
   return actions.slice(0, 4);
@@ -3078,7 +3078,7 @@ function costPressureLabel(value) {
     return 'coste sin bruto';
   }
   if (value >= 1) {
-    return 'coste critico';
+    return 'coste crítico';
   }
   if (value >= 0.45) {
     return 'coste alto';
@@ -3176,7 +3176,7 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       label: 'Costes',
       value: formatOptionalMoney(costs, asset),
       className: optionalAmountClass(costs),
-      detail: `Fees ${formatOptionalMoney(fees, asset)} / funding ${formatOptionalMoney(funding, asset)}`
+      detail: `Comisiones ${formatOptionalMoney(fees, asset)} / funding ${formatOptionalMoney(funding, asset)}`
     },
     {
       label: source.key === 'vst' ? 'Equity estrategia' : 'Equity cuenta',
@@ -3199,7 +3199,7 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       detail: `Usado ${formatOptionalMoney(balance.usedMargin, asset)}`
     },
     {
-      label: 'Exposicion viva',
+      label: 'Exposición viva',
       value: formatOptionalMoney(source.exposure, asset),
       className: 'amount',
       detail: `${source.openPositions || open.length} abiertas`
@@ -3232,10 +3232,10 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       detail: scenario.stopLossCount ? `${scenario.stopLossCount}/${open.length} con SL` : 'Sin SL cargado'
     },
     {
-      label: 'Liq. mas cercana',
+      label: 'Liq. más cercana',
       value: formatOptionalPercent(scenario.minLiquidationDistancePct),
       className: liquidationClass(scenario.minLiquidationDistancePct),
-      detail: scenario.minLiquidationSymbol || 'Sin dato de liquidacion'
+      detail: scenario.minLiquidationSymbol || 'Sin dato de liquidación'
     }
   ];
 
@@ -3263,7 +3263,7 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
     <section class="performance-position-section">
       <div class="trade-section-header">
         <h3>Posiciones vivas</h3>
-        <span>${escapeHtml(open.length ? 'Estimacion bruta sin comisiones' : 'Sin posiciones abiertas')}</span>
+        <span>${escapeHtml(open.length ? 'Estimación bruta sin comisiones' : 'Sin posiciones abiertas')}</span>
       </div>
       <div class="performance-position-grid">
         ${open.length ? open.map((position) => renderPerformancePositionCard(position, asset)).join('') : '<div class="empty-state compact">No hay posiciones abiertas en esta fuente.</div>'}
@@ -3324,7 +3324,7 @@ function renderPerformancePositionCard(position, asset = positionAsset(position)
           <small>${escapeHtml(distanceLabel(stopLossDistance))}</small>
         </div>
         <div>
-          <span>Liquidacion ${escapeHtml(formatPrice(liquidationPrice))}</span>
+          <span>Liquidación ${escapeHtml(formatPrice(liquidationPrice))}</span>
           <strong class="${liquidationClass(liquidationDistance)}">${escapeHtml(formatOptionalPercent(liquidationDistance))}</strong>
           <small>distancia</small>
         </div>
@@ -3659,12 +3659,12 @@ function pnlSourceText({ hasPaperActivity, hasBingxActivity, hasReference }) {
   }
   const range = appState.pnl?.range?.months || 3;
   if (hasPaperActivity && hasBingxActivity) {
-    return `BingX real + paper local · ultimos ${range} meses`;
+    return `BingX real + paper local · últimos ${range} meses`;
   }
   if (hasPaperActivity) {
     return `Paper trading local · ${formatMonth(currentMonthKey())} con precios de BingX`;
   }
-  return `PnL real de BingX · ultimos ${range} meses`;
+  return `PnL real de BingX · últimos ${range} meses`;
 }
 
 function sourceNoteText(source) {
@@ -3672,7 +3672,7 @@ function sourceNoteText(source) {
     return 'Google Sheet es la referencia externa. No representa necesariamente lo que se ha enviado a BingX desde esta app.';
   }
   if (source.key === 'live') {
-    return 'Futuros reales muestra solo USDT: cuenta real, posiciones reales, fees, funding y senales ejecutadas en real.';
+    return 'Futuros reales muestra solo USDT: cuenta real, posiciones reales, comisiones, funding y señales ejecutadas en real.';
   }
   if (source.key === 'vst') {
     return 'Futuros VST muestra BingX Demo por separado: cuenta demo, posiciones demo y resultado mensual en VST.';
@@ -3688,9 +3688,9 @@ function pnlNoteText({ hasPaperActivity, hasBingxActivity, hasReference }) {
     return 'El neto combina PnL real de BingX y paper trading local. Revisa Paper total para separar la parte simulada.';
   }
   if (hasPaperActivity) {
-    return 'Modo test: el neto superior suma paper local. Las posiciones abiertas se actualizan con el last price de BingX Futuros Perpetuo USDⓈ.';
+    return 'Modo de prueba: el neto superior suma el paper local. Las posiciones abiertas se actualizan con el último precio de BingX Futuros Perpetuo USDⓈ.';
   }
-  return 'El PnL mostrado viene de BingX. En modo test las ordenes nuevas se registran como paper trading local.';
+  return 'El PnL mostrado viene de BingX. En modo de prueba, las órdenes nuevas se registran como paper trading local.';
 }
 
 function friendlyBingxError(message) {
@@ -3747,11 +3747,11 @@ function renderPnlCurve() {
             <strong class="${amountClass(finalValue)}">${escapeHtml(formatMoney(finalValue, source.asset))}</strong>
           </div>
           <div>
-            <span>Maximo</span>
+            <span>Máximo</span>
             <strong class="${amountClass(maxValue)}">${escapeHtml(formatMoney(maxValue, source.asset))}</strong>
           </div>
           <div>
-            <span>Minimo</span>
+            <span>Mínimo</span>
             <strong class="${amountClass(minValue)}">${escapeHtml(formatMoney(minValue, source.asset))}</strong>
           </div>
           <div>
@@ -3786,11 +3786,11 @@ function renderPlotlyPnlCurve(chartId, items, options = {}) {
   }
 
   if (!window.Plotly?.react) {
-    chart.innerHTML = '<div class="pnl-chart-empty">Cargando grafica interactiva...</div>';
+    chart.innerHTML = '<div class="pnl-chart-empty">Cargando gráfica interactiva...</div>';
     loadPlotlyLibrary()
       .then(() => renderPlotlyPnlCurve(chartId, items, options))
       .catch(() => {
-        chart.innerHTML = '<div class="pnl-chart-empty">Plotly no esta disponible. Revisa la conexion y refresca la pagina.</div>';
+        chart.innerHTML = '<div class="pnl-chart-empty">Plotly no está disponible. Revisa la conexión y actualiza la página.</div>';
       });
     return;
   }
@@ -3814,7 +3814,7 @@ function renderPlotlyPnlCurve(chartId, items, options = {}) {
     ]),
     hovertemplate: [
       '<b>%{text}</b>',
-      'Operacion: %{customdata[2]}',
+      'Operación: %{customdata[2]}',
       'PnL: %{customdata[0]}',
       'Acumulado: %{customdata[1]}',
       '<extra></extra>'
@@ -4007,7 +4007,7 @@ function plotlyCurvePoints(items) {
     },
     ...items.map((item, index) => ({
       x: plotlyPointX(item, index, useDates),
-      label: `${index + 1}. ${item.symbol || 'Operacion'}`,
+      label: `${index + 1}. ${item.symbol || 'Operación'}`,
       symbol: item.symbol || '-',
       pnl: Number(item.pnl || 0),
       equity: Number(item.equity || 0)
@@ -4061,7 +4061,7 @@ function renderAccountWaterfall(source) {
       value: hasGross ? grossRealized : realized
     },
     ...(hasGross ? [
-      { key: 'fees', label: 'Fees', value: fees },
+      { key: 'fees', label: 'Comisiones', value: fees },
       { key: 'funding', label: 'Funding', value: funding }
     ] : []),
     { key: 'floating', label: 'Flotante vivo', value: floating }
@@ -4093,7 +4093,7 @@ function renderAccountWaterfall(source) {
           <span>${escapeHtml(formatMoney(accountLine.max, asset))}</span>
           <span>${escapeHtml(formatMoney(accountLine.min, asset))}</span>
         </div>
-        <div class="asset-range-tabs" aria-label="Rango de grafica">
+        <div class="asset-range-tabs" aria-label="Rango de gráfica">
           ${assetRangeOptions().map((option) => `
             <button class="${option.key === selectedRange ? 'active' : ''}" type="button" data-asset-range="${escapeAttribute(option.key)}">
               ${escapeHtml(option.label)}
@@ -4113,7 +4113,7 @@ function renderAccountWaterfall(source) {
           <strong class="${amountClass(floating)}">${escapeHtml(formatMoney(floating, asset))}</strong>
         </div>
         <div>
-          <span>Fees</span>
+          <span>Comisiones</span>
           <strong class="${amountClass(fees)}">${escapeHtml(formatMoney(fees, asset))}</strong>
         </div>
         <div>
@@ -4274,7 +4274,7 @@ function renderPnlChart(rows) {
   elements.pnlChartStatus.textContent = `${orderedRows.length || appState.pnl?.range?.months || 3} meses`;
 
   if (!orderedRows.length) {
-    elements.pnlChart.innerHTML = '<div class="pnl-chart-empty">Sin datos mensuales todavia.</div>';
+    elements.pnlChart.innerHTML = '<div class="pnl-chart-empty">Sin datos mensuales todavía.</div>';
     return;
   }
 
@@ -4341,7 +4341,7 @@ function liveReadiness() {
       key: 'promotion-gate',
       label: promotionGate.label
         ? `Cohorte: ${promotionGate.label}`
-        : 'Cohorte apta para revision humana',
+        : 'Cohorte apta para revisión humana',
       ok: promotionGate.eligibleForReview === true
     },
     {
@@ -4388,9 +4388,9 @@ function renderHealthPanel() {
     ? `${feed.symbols?.length || 0} activos`
     : feed.enabled ? 'reconectando' : 'sin abiertas';
   elements.healthMetrics.innerHTML = [
-    ['Ultima lectura', health.ageSeconds === null || health.ageSeconds === undefined ? '-' : `${health.ageSeconds}s`, health.stale ? 'negative' : ''],
+    ['Última lectura', health.ageSeconds === null || health.ageSeconds === undefined ? '-' : `${health.ageSeconds}s`, health.stale ? 'negative' : ''],
     ['Posts visibles', String(health.visiblePosts ?? appState.state?.visiblePosts ?? 0), health.noVisiblePosts ? 'negative' : ''],
-    ['Lecturas vacias', String(scraper.consecutiveEmptyReads || 0), scraper.consecutiveEmptyReads ? 'warn' : 'positive'],
+    ['Lecturas vacías', String(scraper.consecutiveEmptyReads || 0), scraper.consecutiveEmptyReads ? 'warn' : 'positive'],
     ['Autorecuperaciones', String(scraper.recoveryCount || 0), scraper.recoveryCount ? 'warn' : ''],
     ['WS precios', feedLabel, feed.connected ? 'positive' : feed.enabled ? 'negative' : ''],
     ['Mercado', feed.marketType ? 'Futuros USDⓈ' : '-', '']
@@ -4427,15 +4427,15 @@ function renderGuardDashboard() {
 
   elements.guardStatus.textContent = guardOk
     ? 'Guardia estable'
-    : critical ? `${critical} criticas` : 'Revisar avisos';
+    : critical ? `${critical} críticas` : 'Revisar avisos';
   elements.guardStatus.className = guardOk ? 'amount positive' : critical ? 'amount negative' : 'amount warn';
   elements.guardMetrics.innerHTML = [
     ['Live', liveReady ? 'activo' : 'revisar', liveReady ? 'positive' : 'negative'],
-    ['Telegram Web', telegramReady ? 'gestion ok' : 'revisar', telegramReady ? 'positive' : 'warn'],
+    ['Telegram Web', telegramReady ? 'gestión ok' : 'revisar', telegramReady ? 'positive' : 'warn'],
     ['BingX sync', safety.ageSeconds == null ? '-' : `${safety.ageSeconds}s`, exchangeReady ? 'positive' : 'negative'],
     ['Abiertas real', `${real.openPositions || 0}`, real.missingStopLoss ? 'negative' : 'positive'],
     ['Flotante', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)],
-    ['PnL historico', cooldown ? cooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : 'ok', cooldown ? 'warn' : 'positive'],
+    ['PnL histórico', cooldown ? cooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : 'ok', cooldown ? 'warn' : 'positive'],
     ['Backup redactado', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
     ['Backup cifrado', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
     ['Almacén local', backupStorageCopiesText(secureBackup.storage), backupStorageTone(secureBackup.storage)],
@@ -4443,7 +4443,7 @@ function renderGuardDashboard() {
     ['Perfil Chromium', secureProfileBackupStatusText(secureBackup.profile), secureBackup.profile?.stale ? 'warn' : secureBackup.profile?.available ? 'positive' : 'warn'],
     ['Réplica externa', secureMirrorStatusText(secureBackup.mirror), secureMirrorTone(secureBackup.mirror)],
     ['Clave recuperación', secureKeyRecoveryStatusText(secureBackup.keyRecovery), secureKeyRecoveryTone(secureBackup.keyRecovery)],
-    ['Ultimo evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
+    ['Último evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
   elements.incidentStatus.textContent = activeIncidents.length
@@ -4454,7 +4454,7 @@ function renderGuardDashboard() {
   elements.incidentStatus.className = critical ? 'amount negative' : warns ? 'amount warn' : 'amount positive';
   elements.incidentList.innerHTML = incidentViews.length
     ? incidentViews.slice(0, 8).map(renderIncidentItem).join('')
-    : '<div class="empty-state compact">Sin incidencias relevantes en las ultimas 24h.</div>';
+    : '<div class="empty-state compact">Sin incidencias relevantes en las últimas 24 h.</div>';
 }
 
 function renderIncidentItem(incident = {}) {
@@ -4507,10 +4507,10 @@ function buildClientIncidents() {
         [/No se detectaron mensajes Telegram/i, 'telegram_web_empty', 'Telegram Web sin mensajes visibles'],
         [/No se detectaron posts|YouTube no esta devolviendo posts/i, 'youtube_empty', 'YouTube sin posts visibles'],
         [/BingX PnL no disponible|Rate-limit PnL|frequency limit|100410/i, 'bingx_pnl_rate_limit', 'BingX PnL en rate-limit'],
-        [/BingX sync|BingX safety|BingX posiciones/i, 'bingx_sync', 'Reconciliacion BingX'],
+        [/BingX sync|BingX safety|BingX posiciones/i, 'bingx_sync', 'Reconciliación BingX'],
         [/Health:|Telegram health|Alerta scraper/i, 'monitor_health', 'Salud del monitor'],
         [/Espacio de backups|Almacenamiento backups|Espacio crítico para backups/i, 'backup_storage', 'Almacenamiento de backups'],
-        [/Backup redacted/i, 'backup', 'Backup automatico']
+        [/Backup redacted/i, 'backup', 'Backup automático']
       ];
       const matched = rules.find(([pattern]) => pattern.test(message));
       if (!matched && log.level !== 'error') {
@@ -4700,11 +4700,11 @@ function renderTelegramWatchPanel() {
     ? 'amount'
     : refreshStale || recentMissing ? 'amount warn' : 'amount positive';
   elements.telegramWatchMetrics.innerHTML = [
-    ['Modo', active ? source.executeSignals ? 'Gestion' : 'Solo lectura' : 'off', active ? 'positive' : ''],
+    ['Modo', active ? source.executeSignals ? 'Gestión' : 'Solo lectura' : 'off', active ? 'positive' : ''],
     ['Aperturas', source.executeOpenSignals ? 'habilitadas' : 'bloqueadas', source.executeOpenSignals ? 'warn' : 'positive'],
     ['Lectura', pollSeconds ? `${pollSeconds}s` : '-', active ? 'positive' : ''],
     ['Recarga', refreshSeconds ? `${refreshSeconds}s` : '-', refreshStale ? 'negative' : active ? 'positive' : ''],
-    ['Ultimo refresh', lastRefresh ? humanLogAge(lastRefresh.at) : '-', refreshStale ? 'negative' : lastRefresh ? 'positive' : ''],
+    ['Última actualización', lastRefresh ? humanLogAge(lastRefresh.at) : '-', refreshStale ? 'negative' : lastRefresh ? 'positive' : ''],
     ['Sin mensajes 1h', String(missingLastHour), missingLastHour ? 'warn' : 'positive'],
     ['PnL BingX', pnlCooldown ? pnlCooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600 ? `limit ${humanLogAge(pnlLimit.at)}` : 'ok', pnlCooldown || (pnlLimit && secondsSinceIso(pnlLimit.at) < 6 * 3600) ? 'warn' : 'positive']
   ].map(renderOpsMetric).join('');
@@ -4721,7 +4721,7 @@ function renderTelegramWatchPanel() {
       detail: source.executeSignals ? 'activos' : 'off'
     },
     {
-      label: 'Confirmacion live',
+      label: 'Confirmación live',
       ok: !needsLiveConfirm || Boolean(source.liveConfirmed),
       detail: needsLiveConfirm ? source.liveConfirmed ? 'ok' : 'pendiente' : 'no aplica'
     },
@@ -4772,11 +4772,11 @@ function renderRealModeBanner() {
       <strong>${escapeHtml(formatMoney(monthlyOrderNotional(bingx, 'USDT'), 'USDT'))}</strong>
     </div>
     <div>
-      <span>Ultima ejecucion</span>
+      <span>Última ejecución</span>
       <strong>${escapeHtml(lastLiveEvent ? formatDateTime(lastLiveEvent.at) : '-')}</strong>
     </div>
     <div>
-      <span>Ultimo error</span>
+      <span>Último error</span>
       <strong>${escapeHtml(lastError ? reasonLabel(lastError.reason || lastError.status) : '-')}</strong>
     </div>
     <div>
@@ -4816,20 +4816,20 @@ function renderRiskPanel(openPositions = openPaperPositions(), closedPositions =
 
   elements.riskStatus.textContent = blocked
     ? 'Bloqueo local activo'
-    : missingHardLimits ? 'Limites sin tope duro' : 'Local dentro de limites';
+    : missingHardLimits ? 'Límites sin tope duro' : 'Local dentro de límites';
   elements.riskStatus.className = blocked ? 'amount negative' : missingHardLimits ? 'amount warn' : 'amount positive';
   const dailyText = dailyLimit > 0
     ? `${formatUsdt(risk.dailyPnl)} / -${formatUsdt(dailyLimit)}`
-    : `${formatUsdt(risk.dailyPnl)} / sin limite`;
+    : `${formatUsdt(risk.dailyPnl)} / sin límite`;
   const monthlyText = monthlyLimit > 0
     ? `${formatUsdt(risk.monthlyPnl)} / -${formatUsdt(monthlyLimit)}`
-    : `${formatUsdt(risk.monthlyPnl)} / sin limite`;
+    : `${formatUsdt(risk.monthlyPnl)} / sin límite`;
 
   elements.riskMetrics.innerHTML = [
     ['Abiertas local', `${risk.openPositions}/${maxOpen || '-'}`, maxOpen > 0 && risk.openPositions >= maxOpen ? 'negative' : ''],
-    ['Ordenes dia', `${dailyOrders}/${maxDailyOrders || 'sin limite'}`, maxDailyOrders > 0 && dailyOrders >= maxDailyOrders ? 'negative' : maxDailyOrders > 0 ? 'positive' : 'warn'],
-    ['Exposicion local', formatUsdt(risk.openExposure), ''],
-    ['PnL dia local', dailyText, dailyLimit <= 0 ? 'warn' : risk.dailyPnl < 0 ? 'negative' : 'positive'],
+    ['Órdenes/día', `${dailyOrders}/${maxDailyOrders || 'sin límite'}`, maxDailyOrders > 0 && dailyOrders >= maxDailyOrders ? 'negative' : maxDailyOrders > 0 ? 'positive' : 'warn'],
+    ['Exposición local', formatUsdt(risk.openExposure), ''],
+    ['PnL día local', dailyText, dailyLimit <= 0 ? 'warn' : risk.dailyPnl < 0 ? 'negative' : 'positive'],
     ['PnL mes local', monthlyText, monthlyLimit <= 0 ? 'warn' : risk.monthlyPnl < 0 ? 'negative' : 'positive']
   ].map(renderOpsMetric).join('');
 }
@@ -4875,10 +4875,10 @@ function renderExchangeSafetyPanel() {
     ['Margen libre', balance.availableMargin == null ? '-' : formatMoney(balance.availableMargin, balance.asset || 'USDT'), ''],
     ['Margen usado', balance.usedMargin == null ? '-' : `${formatMoney(balance.usedMargin, balance.asset || 'USDT')} - ${formatPercent(balance.marginUsagePercent)}`, ''],
     ['Real abiertas', String(real.openPositions || 0), missingSl ? 'negative' : ''],
-    ['Exposicion real', formatMoney(real.exposure || 0, real.asset || 'USDT'), ''],
+    ['Exposición real', formatMoney(real.exposure || 0, real.asset || 'USDT'), ''],
     ['Flotante real', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)],
     ['Liq. cercana', liquidation ? `${liquidation.symbol} ${formatPercent(liquidation.distancePercent)}` : '-', liquidation && liquidation.distancePercent < 5 ? 'negative' : ''],
-    ['Pendientes', `${real.openOrders || 0} - huerf. ${real.orphanOrders || 0}`, real.orphanOrders ? 'negative' : '']
+    ['Pendientes', `${real.openOrders || 0} - huérf. ${real.orphanOrders || 0}`, real.orphanOrders ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
   const checks = Array.isArray(safety.checks) ? safety.checks : [];
@@ -4892,7 +4892,7 @@ function renderExchangeSafetyPanel() {
     `).join('')
     : realModeActive
       ? '<div class="exchange-safety-empty">Sin comprobaciones reales disponibles.</div>'
-      : '<div class="exchange-safety-empty">Modo Demo VST: la cuenta real no se esta operando.</div>';
+      : '<div class="exchange-safety-empty">Modo Demo VST: la cuenta real no se está operando.</div>';
 
   if (realModeActive && (missingSl || missingTp)) {
     const missing = [
@@ -4911,7 +4911,7 @@ function renderExchangeSafetyPanel() {
     const managementOnly = appState.bingx?.managementOnly;
     elements.emergencyStatus.textContent = paused
       ? 'Entradas pausadas'
-      : managementOnly ? 'Solo gestion' : 'Listo';
+      : managementOnly ? 'Solo gestión' : 'Listo';
     elements.pauseEntries.classList.toggle('active', Boolean(paused));
     elements.managementOnly.classList.toggle('active', Boolean(managementOnly));
     elements.cancelRealOrders.disabled = !usesLiveMode(appState.bingx?.mode) || !appState.bingx?.liveConfirmed;
@@ -4946,10 +4946,10 @@ function renderDemoSafetyPanel(safety = appState.exchangeSafety || {}) {
     ['Margen libre', balance.availableMargin == null ? '-' : formatMoney(balance.availableMargin, balance.asset || 'VST'), ''],
     ['Margen usado', balance.usedMargin == null ? '-' : `${formatMoney(balance.usedMargin, balance.asset || 'VST')} - ${formatPercent(balance.marginUsagePercent)}`, ''],
     ['Demo abiertas', String(demo.openPositions || 0), missingSl ? 'negative' : ''],
-    ['Exposicion demo', formatMoney(demo.exposure || 0, demo.asset || 'VST'), ''],
+    ['Exposición demo', formatMoney(demo.exposure || 0, demo.asset || 'VST'), ''],
     ['Flotante demo', formatMoney(demo.floatingPnl || 0, demo.asset || 'VST'), amountClass(demo.floatingPnl || 0)],
     ['Liq. cercana', liquidation ? `${liquidation.symbol} ${formatPercent(liquidation.distancePercent)}` : '-', liquidation && liquidation.distancePercent < 5 ? 'negative' : ''],
-    ['Pendientes', `${demo.openOrders || 0} - huerf. ${demo.orphanOrders || 0}`, demo.orphanOrders ? 'negative' : '']
+    ['Pendientes', `${demo.openOrders || 0} - huérf. ${demo.orphanOrders || 0}`, demo.orphanOrders ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
   if (!demoModeActive) {
@@ -4969,7 +4969,7 @@ function renderDemoSafetyPanel(safety = appState.exchangeSafety || {}) {
       tone: missingTp ? 'pending' : 'ok'
     },
     {
-      label: 'Ordenes huerfanas',
+      label: 'Órdenes huérfanas',
       detail: String(demo.orphanOrders || 0),
       tone: Number(demo.orphanOrders || 0) ? 'missing' : 'ok'
     }
@@ -5333,7 +5333,7 @@ function renderHistoricalPnl() {
   const closedCount = positions.filter((position) => position.status === 'closed').length || totals.closedTrades || 0;
   const operationCount = positions.length || totals.testOrders || totals.records || 0;
 
-  elements.historicalPnlTitle.textContent = `Historico ${source.label}: ${monthLabel}`;
+  elements.historicalPnlTitle.textContent = `Histórico ${source.label}: ${monthLabel}`;
   elements.historicalSignalTitle.textContent = `Señales ${source.label}`;
   elements.historicalPnlStatus.textContent = appState.pnlLoading && !activeRows.length ? 'Calculando...' : sourceLabel;
   elements.historicalPnlTotal.textContent = formatMoney(totalValue, asset);
@@ -5518,11 +5518,11 @@ function renderLegacySheetVstAlignment(reference = currentReferenceLedger()) {
   if (!reference?.positions?.length && !pairs.length) {
     elements.alignmentStatus.textContent = 'Esperando hoja y VST';
     elements.alignmentSummary.innerHTML = renderAlignmentMetric('Google Sheet', 'Sin hoja', 'No hay referencia del mes', '')
-      + renderAlignmentMetric('Futuros VST', 'Sin operaciones', 'Aun no hay muestra demo', '');
+      + renderAlignmentMetric('Futuros VST', 'Sin operaciones', 'Aún no hay muestra demo', '');
     if (elements.replicaControl) {
-      elements.replicaControl.innerHTML = '<div class="replica-empty">El control de replica se activara cuando existan datos de hoja y VST del mes.</div>';
+      elements.replicaControl.innerHTML = '<div class="replica-empty">El control de réplica se activará cuando existan datos de la hoja y de VST del mes.</div>';
     }
-    elements.alignmentTable.innerHTML = '<tr><td colspan="6">Cuando haya hoja externa y operaciones VST, aqui veras la comparacion por activo y secuencia.</td></tr>';
+    elements.alignmentTable.innerHTML = '<tr><td colspan="6">Cuando haya hoja externa y operaciones VST, aquí verás la comparación por activo y secuencia.</td></tr>';
     return;
   }
 
@@ -5648,13 +5648,13 @@ function renderReplicaControl(reference, alignment) {
   const divergences = replicaDivergenceRows(alignment, analysis.scaleRatio);
   const statusLabel = analysis.reviewCount
     ? `${analysis.reviewCount} puntos a clavar`
-    : 'Replica alineada';
+    : 'Réplica alineada';
   const statusClass = analysis.reviewCount ? (analysis.criticalCount ? 'negative' : 'warn') : 'positive';
 
   elements.replicaControl.innerHTML = `
     <div class="replica-header">
       <div>
-        <strong>Control de replica</strong>
+        <strong>Control de réplica</strong>
         <span>Compara hoja escalada, VST visible y BingX oficial. No modifica la operativa.</span>
       </div>
       <span class="ledger-status ${escapeAttribute(statusClass)}">${escapeHtml(statusLabel)}</span>
@@ -5667,7 +5667,7 @@ function renderReplicaControl(reference, alignment) {
         amountClass(analysis.sheetScaledPnl)
       )}
       ${renderReplicaMetric(
-        'VST posiciones',
+        'Posiciones VST',
         formatMoney(analysis.vstPositionPnl, 'VST'),
         `${analysis.vstClosedCount} cerradas / ${analysis.vstOpenCount} abiertas`,
         amountClass(analysis.vstPositionPnl)
@@ -5719,7 +5719,7 @@ function renderReplicaControl(reference, alignment) {
       <div class="replica-box wide">
         <div class="replica-box-title">
           <strong>Plan para clavarlo</strong>
-          <span>Sin tocar ejecucion aun</span>
+          <span>Sin tocar la ejecución aún</span>
         </div>
         <div class="replica-action-list">
           ${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join('')}
@@ -6161,10 +6161,10 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
     return `
       <div class="replica-audit">
         <div class="replica-box-title">
-          <strong>Auditoria operacion por operacion</strong>
+          <strong>Auditoría operación por operación</strong>
           <span>Cargando</span>
         </div>
-        <div class="replica-empty">Cargando comparador Hoja / replica teorica / BingX VST...</div>
+        <div class="replica-empty">Cargando comparador Hoja / réplica teórica / BingX VST...</div>
       </div>
     `;
   }
@@ -6173,7 +6173,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
     return `
       <div class="replica-audit">
         <div class="replica-box-title">
-          <strong>Auditoria operacion por operacion</strong>
+          <strong>Auditoría operación por operación</strong>
           <span>No disponible</span>
         </div>
         <div class="replica-empty">${escapeHtml(audit.error)}</div>
@@ -6249,7 +6249,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
       <div class="replica-audit-grid">
         ${renderReplicaMetric('Hoja externa', formatMoney(summary.sheetPnl, 'USDT'), `${summary.sheetRows || 0} filas`, amountClass(summary.sheetPnl))}
         ${renderReplicaMetric('Réplica teórica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
-        ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), `${formatOptionalMoney(summary.replicaEstimatedMarketFees, 'VST')} fees equivalentes`, amountClass(summary.replicaEstimatedMarketNet))}
+        ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), `${formatOptionalMoney(summary.replicaEstimatedMarketFees, 'VST')} en comisiones equivalentes`, amountClass(summary.replicaEstimatedMarketNet))}
         ${renderReplicaMetric('Escenario maker entrada', formatOptionalMoney(summary.replicaEstimatedMakerEntryNet, 'VST'), 'Simulación; cierre taker, sin operar', amountClass(summary.replicaEstimatedMakerEntryNet))}
         ${renderReplicaMetric('BingX bruto', formatMoney(summary.bingxGross, 'VST'), `${summary.vstCloses || 0} cierres`, amountClass(summary.bingxGross))}
         ${renderReplicaMetric('BingX neto', formatMoney(summary.bingxNet, 'VST'), `${formatMoney(bingxFees + bingxFunding, 'VST')} costes`, amountClass(summary.bingxNet))}
@@ -6286,7 +6286,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
               <th>#</th>
               <th>Activo</th>
               <th>Hoja externa</th>
-              <th>Replica teorica</th>
+              <th>Réplica teórica</th>
               <th>BingX VST</th>
               <th>Desvio</th>
               <th>Causa</th>
@@ -6536,7 +6536,7 @@ function renderImprovementCohort(cohort, cohortHistory = [], comparison = null) 
         ${renderReplicaMetric('Aperturas', String(summary.vstOpenings || 0), `${summary.sheetRows || 0} filas en la hoja`, '')}
         ${renderReplicaMetric('Cierres', String(summary.vstCloses || 0), sample.detail || 'Esperando operaciones', '')}
         ${renderReplicaMetric('Bruto', formatMoney(summary.bingxGross, 'VST'), 'Antes de costes', amountClass(summary.bingxGross))}
-        ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), 'Referencia tras fees taker estimadas', amountClass(summary.replicaEstimatedMarketNet))}
+        ${renderReplicaMetric('Réplica neta mercado', formatOptionalMoney(summary.replicaEstimatedMarketNet, 'VST'), 'Referencia tras comisiones taker estimadas', amountClass(summary.replicaEstimatedMarketNet))}
         ${renderReplicaMetric('Comisiones + funding', formatMoney(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0), 'VST'), 'Coste observado', amountClass(Number(summary.bingxFees || 0) + Number(summary.bingxFunding || 0)))}
         ${renderReplicaMetric('Neto', formatMoney(summary.bingxNet, 'VST'), 'Resultado observado', amountClass(summary.bingxNet))}
         ${renderReplicaMetric('Cobertura hoja', `${referenceCoverage.comparableRows || 0} comparables`, cohortCoverageDetail, referenceCoverage.stale || referenceCoverage.provisionalLatestDay ? 'warn' : 'amount positive')}
@@ -7637,7 +7637,7 @@ function countReplicaGroupsBySymbol(groups = []) {
 function renderReplicaCauseRows(analysis) {
   const rows = [
     {
-      label: 'Gap posiciones vs hoja',
+      label: 'Brecha de posiciones vs. hoja',
       value: formatMoney(analysis.positionGap, 'VST'),
       detail: 'Diferencia usando operaciones VST visibles',
       tone: amountTone(analysis.positionGap)
@@ -7645,7 +7645,7 @@ function renderReplicaCauseRows(analysis) {
     {
       label: 'Signo cambiado',
       value: String(analysis.mismatchCount),
-      detail: 'Pares donde hoja gana y VST pierde, o al reves',
+      detail: 'Pares donde la hoja gana y VST pierde, o al revés',
       tone: analysis.mismatchCount ? 'warn' : 'positive'
     },
     {
@@ -7655,7 +7655,7 @@ function renderReplicaCauseRows(analysis) {
       tone: analysis.missingVstCount ? 'negative' : 'positive'
     },
     {
-      label: 'Cierres sin posicion',
+      label: 'Cierres sin posición',
       value: String(analysis.closeNoPositionOnlyCount),
       detail: replicaSymbolSummary(analysis.closeNoPositionSymbols) || 'Sin cierres perdidos',
       tone: analysis.closeNoPositionOnlyCount ? 'negative' : 'positive'
@@ -7723,10 +7723,10 @@ function replicaRecommendedActions(analysis) {
     actions.push('Priorizar cola de reintento para entradas bloqueadas por precio/stop invalido.');
   }
   if (analysis.closeNoPositionOnlyCount) {
-    actions.push('Auditar cierres sin posicion: suelen explicar por que la hoja cierra algo que VST ya no tiene abierto.');
+    actions.push('Auditar cierres sin posición: suelen explicar por qué la hoja cierra algo que VST ya no tiene abierto.');
   }
   if (analysis.mismatchCount) {
-    actions.push('Revisar primero las filas con signo cambiado; son las que mas rompen la replica.');
+    actions.push('Revisar primero las filas con signo cambiado; son las que más rompen la réplica.');
   }
   if (Math.abs(analysis.feesFunding) > 0.01) {
     actions.push('Separar rendimiento bruto y neto para no confundir estrategia con coste de BingX.');
@@ -7735,7 +7735,7 @@ function replicaRecommendedActions(analysis) {
     actions.push('Comparar secuencia por activo y post para detectar scraping incompleto o duplicado.');
   }
   if (!actions.length) {
-    actions.push('La muestra visible esta alineada; mantener monitorizacion y ampliar historico.');
+    actions.push('La muestra visible está alineada; conviene mantener la monitorización y ampliar el histórico.');
   }
   return actions.slice(0, 5);
 }
@@ -7832,13 +7832,13 @@ function renderAlignmentPositionCell(position, asset, outcome = alignmentOutcome
 
 function renderAlignmentReading(pair, sheetOutcome, vstOutcome) {
   if (pair.sheet && !pair.vst) {
-    return '<strong>Operacion de la hoja sin ejecucion VST</strong><span>Revisar bloqueo, precio o scraping.</span>';
+    return '<strong>Operación de la hoja sin ejecución VST</strong><span>Revisar bloqueo, precio o captura.</span>';
   }
   if (pair.vst && !pair.sheet) {
-    return '<strong>Operacion VST extra</strong><span>No aparece en la referencia externa.</span>';
+    return '<strong>Operación VST extra</strong><span>No aparece en la referencia externa.</span>';
   }
   if (sheetOutcome === vstOutcome) {
-    return '<strong>Resultado alineado</strong><span>La direccion del resultado coincide.</span>';
+    return '<strong>Resultado alineado</strong><span>La dirección del resultado coincide.</span>';
   }
   return `<strong>Resultado distinto</strong><span>Sheet ${escapeHtml(alignmentOutcomeLabel(sheetOutcome))} / VST ${escapeHtml(alignmentOutcomeLabel(vstOutcome))}</span>`;
 }
@@ -8168,7 +8168,7 @@ function renderOpenPositionCard(position) {
         ${quantityText ? `<span>${escapeHtml(quantityText)}</span>` : ''}
         <span>${escapeHtml(formatLeverage(position.leverage))}</span>
         <span>Margen ${escapeHtml(formatPositionMoney(position.notional, position))}</span>
-        <span>Exposicion ${escapeHtml(formatPositionMoney(position.exposure || position.notional, position))}</span>
+        <span>Exposición ${escapeHtml(formatPositionMoney(position.exposure || position.notional, position))}</span>
         <span>${escapeHtml(stopSummary)}</span>
         <span class="${escapeAttribute(stopProtected ? 'positive' : 'negative')}">${escapeHtml(stopProtected ? 'SL confirmado' : 'SL pendiente')}</span>
         <span class="${escapeAttribute(takeProfitProtected ? 'positive' : 'warn')}">${escapeHtml(takeProfitProtected ? 'TP confirmado' : 'TP pendiente')}</span>
@@ -8401,7 +8401,7 @@ function renderSimulation() {
   if (!positions.length) {
     const pendingCount = source.positions.filter((position) => positionPnlValue(position) === null).length;
     elements.pnlSimList.innerHTML = `<div class="simulation-empty">${escapeHtml(pendingCount
-      ? `${pendingCount} operaciones siguen pendientes de PnL y todavia no se pueden simular.`
+      ? `${pendingCount} operaciones siguen pendientes de PnL y todavía no se pueden simular.`
       : 'Sin operaciones para simular.')}</div>`;
     return;
   }
@@ -8618,7 +8618,7 @@ function renderRealAuditTable() {
     .slice(0, 20);
   elements.realAuditTable.innerHTML = events.length
     ? events.map(renderRealAuditRow).join('')
-    : '<tr><td colspan="9">Sin eventos reales auditables todavia.</td></tr>';
+    : '<tr><td colspan="9">Sin eventos reales auditables todavía.</td></tr>';
 }
 
 function renderMyLedger() {
@@ -8787,10 +8787,10 @@ function renderMyLedgerSummary(rows = []) {
       label: 'Abiertas',
       value: String(open.length),
       className: open.length ? 'warn' : 'positive',
-      detail: open.map((row) => row.symbol.replace('-USDT', '')).slice(0, 4).join(' / ') || 'Sin exposicion'
+      detail: open.map((row) => row.symbol.replace('-USDT', '')).slice(0, 4).join(' / ') || 'Sin exposición'
     },
     {
-      label: 'Mejor operacion',
+      label: 'Mejor operación',
       value: best ? formatMoney(best.pnl, best.asset) : '-',
       className: best ? amountClass(best.pnl) : '',
       detail: best ? `${best.symbol.replace('-USDT', '')} ${formatOptionalPercent(best.roi)}` : 'Sin dato'
@@ -8851,7 +8851,7 @@ function positionToMyLedgerRow(position = {}) {
     openedAt: position.openedAt,
     sourceKey: account,
     sourceLabel: ledgerSourceLabel(account),
-    action: status === 'closed' ? 'Cierre' : 'Posicion',
+    action: status === 'closed' ? 'Cierre' : 'Posición',
     symbol: normalizeTradeSymbol(position.symbol || ''),
     direction: position.direction || '',
     status: status === 'closed' ? closeReasonLabel(position.closeReason) : 'Abierta',
@@ -9315,11 +9315,11 @@ function renderRealLifecycle() {
     .slice(0, 6);
 
   elements.realLifecycleStatus.textContent = groups.length
-    ? `${groups.length} senales recientes`
-    : '0 senales';
+    ? `${groups.length} señales recientes`
+    : '0 señales';
   elements.realLifecycleList.innerHTML = groups.length
     ? groups.map(renderRealLifecycleGroup).join('')
-    : '<div class="empty-state compact">Sin senales reales auditables todavia.</div>';
+    : '<div class="empty-state compact">Sin señales reales auditables todavía.</div>';
 }
 
 function renderStrategyStudy() {
@@ -9354,9 +9354,9 @@ function renderStrategyStudy() {
     ['Win rate', formatPercent(perf.winRate), amountClass(Number(perf.winRate || 0) - 50)],
     ['Profit factor', formatRatio(perf.profitFactor), Number(perf.profitFactor || 0) >= 1 ? 'positive' : 'negative'],
     ['Neto cerrado', formatMoney(perf.netPnl || 0, 'USDT'), amountClass(perf.netPnl || 0)],
-    ['Senales parseadas', String(sample.parsedSignals || signal.total || 0), ''],
-    ['Gestion vs aperturas', `${signal.managementCount || 0}/${signal.openCount || 0}`, signal.managementCount ? 'positive' : 'warn'],
-    ['Fuente historico', quality.orderHistoryAvailable ? 'BingX ok' : 'fallback local', quality.orderHistoryAvailable ? 'positive' : 'warn'],
+    ['Señales parseadas', String(sample.parsedSignals || signal.total || 0), ''],
+    ['Gestión vs aperturas', `${signal.managementCount || 0}/${signal.openCount || 0}`, signal.managementCount ? 'positive' : 'warn'],
+    ['Fuente histórica', quality.orderHistoryAvailable ? 'BingX ok' : 'respaldo local', quality.orderHistoryAvailable ? 'positive' : 'warn'],
     ['Comisiones', formatMoney(perf.commission || 0, 'USDT'), amountClass(perf.commission || 0)]
   ].map(renderOpsMetric).join('');
 
@@ -9373,18 +9373,18 @@ function renderStrategyStudy() {
   elements.strategyStudyInsights.innerHTML = `
     <div>
       <strong>Estado estadistico</strong>
-      <span>${escapeHtml(study.statisticalStatus || 'Sin conclusion todavia.')}</span>
+      <span>${escapeHtml(study.statisticalStatus || 'Sin conclusión todavía.')}</span>
     </div>
     <div>
       <strong>Resultados</strong>
       <span>${escapeHtml(outcomes)}</span>
     </div>
     <div>
-      <strong>Simbolos mas usados</strong>
+      <strong>Símbolos más usados</strong>
       <span>${escapeHtml(symbols)}</span>
     </div>
     <div>
-      <strong>Gestion detectada</strong>
+      <strong>Gestión detectada</strong>
       <span>${escapeHtml(management)}</span>
     </div>
   `;
@@ -9726,7 +9726,7 @@ function renderTradeHistoryItem(item) {
     <article class="trade-history-item">
       <div class="trade-history-main">
         <div>
-          <strong>${escapeHtml(item.symbol || 'Senal')}</strong>
+          <strong>${escapeHtml(item.symbol || 'Señal')}</strong>
           <span>${escapeHtml(`${item.direction || '-'} · ${item.statusLabel}`)}</span>
         </div>
         <span class="${amountClass(item.pnl)}">${escapeHtml(formatMoney(item.pnl, item.asset || 'USDT'))}</span>
@@ -9799,7 +9799,7 @@ function renderTelegramSource(telegramSource = appState.telegramSource, message 
 
   const active = telegramSource.enabled && telegramSource.url;
   const trading = telegramSource.executeSignals
-    ? telegramSource.executeOpenSignals ? 'Gestion + aperturas' : 'Gestion de posiciones'
+    ? telegramSource.executeOpenSignals ? 'Gestión + aperturas' : 'Gestión de posiciones'
     : 'Solo lectura';
   const pollLabel = telegramSource.pollSeconds ? ` · lectura ${telegramSource.pollSeconds}s` : '';
   const refreshLabel = telegramSource.refreshSeconds ? ` · recarga ${telegramSource.refreshSeconds}s` : '';
@@ -10434,38 +10434,38 @@ function tradeStatusLabel(value) {
     demo_order_sent: 'demo VST enviada',
     demo_close_sent: 'cierre demo VST',
     demo_close_all_sent: 'cierre total demo VST',
-    demo_close_all_no_position: 'demo sin posicion',
-    demo_close_no_position: 'demo sin posicion',
+    demo_close_all_no_position: 'demo sin posición',
+    demo_close_no_position: 'demo sin posición',
     demo_tp_sent: 'TP demo VST enviado',
-    demo_tp_no_position: 'TP demo sin posicion',
+    demo_tp_no_position: 'TP demo sin posición',
     demo_tp_blocked: 'TP demo bloqueado',
     demo_sl_sent: 'SL demo VST enviado',
-    demo_sl_no_position: 'SL demo sin posicion',
+    demo_sl_no_position: 'SL demo sin posición',
     demo_sl_blocked: 'SL demo bloqueado',
     demo_sl_be_detected: 'SL BE demo detectado',
     test_order_sent: 'test enviada',
     live_order_sent: 'live enviada',
     live_close_sent: 'cierre live enviado',
     live_close_all_sent: 'cierre total live',
-    live_close_all_no_position: 'live sin posicion',
-    live_close_no_position: 'live sin posicion',
+    live_close_all_no_position: 'live sin posición',
+    live_close_no_position: 'live sin posición',
     live_tp_sent: 'TP live enviado',
-    live_tp_no_position: 'TP live sin posicion',
+    live_tp_no_position: 'TP live sin posición',
     live_tp_blocked: 'TP live bloqueado',
     live_sl_sent: 'SL live enviado',
-    live_sl_no_position: 'SL live sin posicion',
+    live_sl_no_position: 'SL live sin posición',
     live_sl_blocked: 'SL live bloqueado',
     live_sl_be_detected: 'SL BE live detectado',
     exchange_stop_closed: 'stop BingX cerrado',
     exchange_signal_closed: 'cierre BingX ejecutado',
-    exchange_position_closed: 'posicion BingX cerrada',
+    exchange_position_closed: 'posición BingX cerrada',
     paper_close_sent: 'cierre paper',
     paper_close_all_sent: 'cierre total paper',
-    paper_close_all_no_position: 'paper sin posicion',
+    paper_close_all_no_position: 'paper sin posición',
     paper_tp_sent: 'TP paper',
-    paper_tp_no_position: 'TP paper sin posicion',
+    paper_tp_no_position: 'TP paper sin posición',
     paper_sl_sent: 'SL paper',
-    paper_sl_no_position: 'SL paper sin posicion',
+    paper_sl_no_position: 'SL paper sin posición',
     paper_price_close: 'cierre por precio',
     paper_sl_be_sent: 'SL a BE paper',
     close_signal_detected: 'cierre detectado',
@@ -10996,7 +10996,7 @@ async function fetchJson(url, options = {}) {
 
 function phaseLabel(phase) {
   return {
-    backfill: 'Leyendo historico',
+    backfill: 'Leyendo histórico',
     live: 'Monitor activo',
     idle: 'Inactivo'
   }[phase] || phase;

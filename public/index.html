@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/styles.css?v=52">
     <link rel="stylesheet" href="/polish.css?v=10">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=114" defer></script>
+    <script src="/app.js?v=115" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -61,16 +61,16 @@
       </div>
 
       <main class="layout" id="workspace" tabindex="-1">
-        <section class="tool-panel" id="tool-panel" aria-label="Configuracion de scrapeo">
+        <section class="tool-panel" id="tool-panel" aria-label="Configuración operativa">
           <div class="field">
-            <label for="channel-url">Canal o pestana de publicaciones</label>
+            <label for="channel-url">Canal o pestaña de publicaciones</label>
             <input id="channel-url" type="url" placeholder="https://www.youtube.com/@canal/posts">
           </div>
 
           <div class="button-row">
             <button id="open-browser" class="button secondary" type="button">
               <i data-lucide="log-in"></i>
-              <span>Abrir sesion</span>
+              <span>Abrir sesión</span>
             </button>
             <button id="start-scrape" class="button primary" type="button">
               <i data-lucide="play"></i>
@@ -110,7 +110,7 @@
           </div>
 
           <p class="notice">
-            La sesion vive en Chromium local. Usa esta herramienta solo con canales a los que tu cuenta tenga acceso.
+            La sesión vive en Chromium local. Usa esta herramienta solo con canales a los que tu cuenta tenga acceso.
           </p>
 
           <details class="panel-section compact-fold" aria-label="Fuente Telegram Web" open>
@@ -187,7 +187,7 @@
             </div>
             <label class="check-option">
               <input id="telegram-backfill" type="checkbox">
-              <span>Incluir historico</span>
+              <span>Incluir histórico</span>
             </label>
             <label class="check-option">
               <input id="telegram-health" type="checkbox" checked>
@@ -223,7 +223,7 @@
             <div class="fold-body">
             <label class="check-option">
               <input id="bingx-enabled" type="checkbox">
-              <span>Auto-operar senales</span>
+              <span>Autooperar señales</span>
             </label>
             <div class="range-grid">
               <label for="bingx-mode">
@@ -274,7 +274,7 @@
                 <input id="bingx-monthly-initial-usdt" type="number" min="1" step="1" value="300">
               </label>
               <label for="bingx-monthly-order-percent">
-                <span>% fijo por senal</span>
+                <span>% fijo por señal</span>
                 <input id="bingx-monthly-order-percent" type="number" min="1" max="100" step="1" value="10">
               </label>
             </div>
@@ -327,11 +327,11 @@
 	            </div>
 	            <div class="range-grid">
 	              <label for="bingx-max-daily-orders">
-	                <span>Max ordenes dia</span>
+	                <span>Máx. órdenes/día</span>
 	                <input id="bingx-max-daily-orders" type="number" min="0" max="500" step="1" value="0">
 	              </label>
 	              <label for="bingx-max-signal-age">
-	                <span>Edad max senal min</span>
+	                <span>Edad máx. señal (min)</span>
 	                <input id="bingx-max-signal-age" type="number" min="0" max="1440" step="1" value="5">
 	              </label>
 	            </div>
@@ -341,7 +341,7 @@
 	                <input id="bingx-max-entry-deviation" type="number" min="0" max="50" step="0.01" value="0.15">
 	              </label>
 	              <label for="bingx-max-stop-distance">
-	                <span>Distancia maxima SL %</span>
+	                <span>Distancia máxima SL (%)</span>
 	                <input id="bingx-max-stop-distance" type="number" min="0" max="50" step="0.1" value="5">
 	              </label>
 	            </div>
@@ -358,7 +358,7 @@
                 </select>
               </label>
               <label for="bingx-cost-guard-buffer">
-                <span>Colchon fees x</span>
+                <span>Colchón de comisiones ×</span>
                 <input id="bingx-cost-guard-buffer" type="number" min="1" max="10" step="0.25" value="2">
               </label>
             </div>
@@ -368,11 +368,11 @@
                 <input id="bingx-cost-guard-max-margin" type="number" min="0" max="100" step="0.1" value="3">
               </label>
               <label for="bingx-estimated-fee-rebate">
-                <span>Devolucion fees estimada %</span>
+                <span>Reembolso estimado de comisiones (%)</span>
                 <input id="bingx-estimated-fee-rebate" type="number" min="0" max="100" step="0.1" value="22">
               </label>
             </div>
-            <div class="field-hint">El coste alto genera aviso. Solo se bloquea cuando hay un TP explicito y ni siquiera cubre la ida y vuelta estimada.</div>
+            <div class="field-hint">El coste alto genera un aviso. Solo se bloquea cuando hay un TP explícito que ni siquiera cubre la ida y vuelta estimada.</div>
             <label class="check-option">
               <input id="bingx-net-entry-filter-enabled" type="checkbox" checked>
               <span>Filtro neto en sombra</span>
@@ -396,11 +396,11 @@
                 <input id="bingx-net-entry-filter-max-be" type="number" min="0" max="100" step="0.1" value="3">
               </label>
               <label for="bingx-net-entry-filter-min-rr">
-                <span>R/R minimo</span>
+                <span>R/R mínimo</span>
                 <input id="bingx-net-entry-filter-min-rr" type="number" min="0" max="10" step="0.1" value="0.9">
               </label>
             </div>
-            <div class="field-hint">En sombra registra si una entrada no compensa por coste, riesgo o recompensa esperada, pero no corta la ejecucion.</div>
+            <div class="field-hint">En sombra registra si una entrada no compensa por coste, riesgo o recompensa esperada, pero no corta la ejecución.</div>
 	            <div class="range-grid">
 	              <label for="bingx-vst-base-capital">
 	                <span>Capital mes VST</span>
@@ -428,7 +428,7 @@
             </label>
             <label class="check-option live-confirm hidden" id="bingx-live-confirm-row">
               <input id="bingx-live-confirm" type="checkbox">
-              <span>Entiendo que Live envia ordenes reales</span>
+              <span>Entiendo que Live envía órdenes reales</span>
             </label>
             <div class="telegram-actions">
               <button id="save-bingx" class="button secondary" type="button">
@@ -490,7 +490,7 @@
 	                </button>
 	              </div>
 	            </div>
-	            <textarea id="bingx-parser-text" class="parser-box" rows="4" placeholder="Pega aqui una senal para probar el parser"></textarea>
+	            <textarea id="bingx-parser-text" class="parser-box" rows="4" placeholder="Pega aquí una señal para probar el parser"></textarea>
             <p class="status-line" id="bingx-status">Test order desactivado</p>
             </div>
           </details>
@@ -516,7 +516,7 @@
             <div class="metric-card metric-card-freshness">
               <span class="metric-icon" aria-hidden="true"><i data-lucide="activity"></i></span>
               <div>
-                <span class="metric-label">Ultima lectura</span>
+                <span class="metric-label">Última lectura</span>
                 <strong id="metric-last">-</strong>
               </div>
             </div>
@@ -558,7 +558,7 @@
 
           <div id="posts-view" class="view" role="tabpanel" aria-labelledby="posts-tab" tabindex="0">
             <div id="empty-posts" class="empty-state">
-              Pega la URL del canal, abre sesion y lanza el scrapeo.
+              Pega la URL del canal, abre sesión e inicia el monitor.
             </div>
             <div id="posts-list" class="posts-list"></div>
             <div id="posts-pagination" class="list-pagination hidden">
@@ -716,7 +716,7 @@
                 <strong id="pnl-paper-month">0.00 USDT</strong>
               </div>
               <div class="pnl-card">
-                <span>Exposicion abierta</span>
+                <span>Exposición abierta</span>
                 <strong id="pnl-open-exposure">0.00 USDT</strong>
               </div>
               <div class="pnl-card secondary-metric">
@@ -738,7 +738,7 @@
             </div>
 
             <p class="pnl-note" id="pnl-note">
-              Modo test: el neto superior suma paper local. Las posiciones abiertas se actualizan con BingX Futuros Perpetuo USDⓈ.
+              Modo de prueba: el neto superior suma el paper local. Las posiciones abiertas se actualizan con el último precio de BingX Futuros Perpetuo USDⓈ.
             </p>
 
             <div class="real-mode-banner" id="real-mode-banner"></div>
@@ -821,7 +821,7 @@
               <div class="ops-panel emergency-panel" id="emergency-panel">
                 <div class="trade-section-header">
                   <h3>Emergencia real</h3>
-                  <span id="emergency-status">Armado con confirmacion</span>
+                  <span id="emergency-status">Armado con confirmación</span>
                 </div>
                 <div class="emergency-actions">
                   <button id="pause-entries" class="button secondary" type="button">
@@ -830,7 +830,7 @@
                   </button>
                   <button id="management-only" class="button secondary" type="button">
                     <i data-lucide="shield"></i>
-                    <span>Solo gestion</span>
+                    <span>Solo gestión</span>
                   </button>
                   <button id="cancel-real-orders" class="button danger" type="button">
                     <i data-lucide="ban"></i>
@@ -861,7 +861,7 @@
 
               <div class="trade-section strategy-study-section">
                 <div class="trade-section-header">
-                  <h3>Estudio estrategico</h3>
+                  <h3>Estudio estratégico</h3>
                   <span id="strategy-study-status">Sin informe</span>
                 </div>
                 <div class="audit-actions">
@@ -880,8 +880,8 @@
 
               <div class="trade-section real-lifecycle-section">
                 <div class="trade-section-header">
-                  <h3>Linea de vida real</h3>
-                  <span id="real-lifecycle-status">0 senales</span>
+                  <h3>Línea de vida real</h3>
+                  <span id="real-lifecycle-status">0 señales</span>
                 </div>
                 <div class="real-lifecycle-list" id="real-lifecycle-list"></div>
               </div>
@@ -912,7 +912,7 @@
                   <button type="button" data-ledger-filter="live">Real</button>
                 </div>
                 <div id="my-ledger-empty" class="empty-state compact hidden">
-                  Todavia no hay operaciones propias para mostrar.
+                  Todavía no hay operaciones propias para mostrar.
                 </div>
                 <div class="trade-table-wrap my-ledger-wrap">
                   <table class="trade-table my-ledger-table">
@@ -1029,13 +1029,13 @@
                     <i data-lucide="download"></i>
                     <span>Trades CSV</span>
                   </a>
-                  <a class="icon-link" href="/api/audit" title="Ver auditoria JSON" target="_blank" rel="noreferrer">
+                  <a class="icon-link" href="/api/audit" title="Ver auditoría JSON" target="_blank" rel="noreferrer">
                     <i data-lucide="shield-check"></i>
-                    <span>Auditoria</span>
+                    <span>Auditoría</span>
                   </a>
                 </div>
                 <div id="trade-history-empty" class="empty-state compact hidden">
-                  Todavia no hay señales operadas.
+                  Todavía no hay señales operadas.
                 </div>
                 <div class="trade-history" id="trade-history-list"></div>
                 <div class="trade-table-wrap real-audit-wrap">
@@ -1043,7 +1043,7 @@
                     <thead>
                       <tr>
                         <th>Fecha</th>
-                        <th>Senal</th>
+                        <th>Señal</th>
                         <th>Estado</th>
                         <th>Orden</th>
                         <th>Respuesta</th>
@@ -1078,7 +1078,7 @@
 
               <div class="simulation-panel">
                 <div class="trade-section-header">
-                  <h3>Simulacion</h3>
+                  <h3>Simulación</h3>
                   <span id="pnl-sim-source">Mayo 2026</span>
                 </div>
                 <label class="simulation-control" for="pnl-sim-notional">
@@ -1138,7 +1138,7 @@
                     <strong id="pnl-sim-floating">0.00 USDT</strong>
                   </div>
                   <div>
-                    <span>Exposicion</span>
+                    <span>Exposición</span>
                     <strong id="pnl-sim-exposure">0.00 USDT</strong>
                   </div>
                 </div>
@@ -1149,7 +1149,7 @@
 
             <div class="pnl-chart-section">
               <div class="trade-section-header">
-                <h3>Evolucion mensual</h3>
+                <h3>Evolución mensual</h3>
                 <span id="pnl-chart-status">3 meses</span>
               </div>
               <div class="pnl-chart" id="pnl-chart"></div>
@@ -1174,12 +1174,12 @@
 
             <div class="historical-panel">
               <div class="trade-section-header">
-                <h3 id="historical-pnl-title">Historico: mayo 2026</h3>
+                <h3 id="historical-pnl-title">Histórico: mayo de 2026</h3>
                 <span id="historical-pnl-status">Calculando...</span>
               </div>
               <div class="historical-summary">
                 <div>
-                  <span>Total historico</span>
+                  <span>Total histórico</span>
                   <strong id="historical-pnl-total">0.00 USDT</strong>
                 </div>
                 <div>
