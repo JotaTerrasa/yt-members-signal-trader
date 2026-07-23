@@ -76,6 +76,44 @@ test('conserva las filas abiertas sin PnL y trata el segundo precio como stop', 
   }
 });
 
+test('conserva la ultima hoja valida cuando Google falla al refrescar', async () => {
+  const originalFetch = globalThis.fetch;
+  let shouldFail = false;
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    if (shouldFail) {
+      throw new Error('Google temporalmente no disponible');
+    }
+    return new Response(gvizPayload(18), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+
+  try {
+    clearReferenceLedgerCache();
+    const first = await loadReferenceLedger({ month: '2026-07', portfolioUrl: spreadsheetUrl });
+    shouldFail = true;
+    const stale = await loadReferenceLedger({
+      month: '2026-07',
+      portfolioUrl: spreadsheetUrl,
+      forceRefresh: true
+    });
+    const cachedStale = await loadReferenceLedger({ month: '2026-07', portfolioUrl: spreadsheetUrl });
+
+    assert.equal(first.row.paperPnl, 18);
+    assert.equal(stale.row.paperPnl, 18);
+    assert.equal(stale.stale, true);
+    assert.match(stale.warning, /Google temporalmente no disponible/);
+    assert.equal(cachedStale.row.paperPnl, 18);
+    assert.equal(fetchCount, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearReferenceLedgerCache();
+  }
+});
+
 function gvizPayload(pnl) {
   const rows = [
     sheetRow([null, null, null, null, null, null, null, null, null, null, 10_000 + pnl]),

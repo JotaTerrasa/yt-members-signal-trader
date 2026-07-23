@@ -1180,10 +1180,14 @@ try {
   const outcomeImpactErrors = [];
   const outcomeImpactFixture = economicImpactAuditFixture(fixtureMonth);
   let delayedPlotlyRequests = 0;
+  let releaseDelayedPlotly;
+  const delayedPlotlyGate = new Promise((resolve) => {
+    releaseDelayedPlotly = resolve;
+  });
   outcomeImpactPage.on('pageerror', (error) => outcomeImpactErrors.push(error.message));
   await outcomeImpactPage.route('**/vendor/plotly.min.js*', async (route) => {
     delayedPlotlyRequests += 1;
-    await delay(1200);
+    await delayedPlotlyGate;
     await route.continue();
   });
   await outcomeImpactPage.route('**/api/bingx', async (route) => {
@@ -1263,6 +1267,7 @@ try {
       }))
     };
   });
+  releaseDelayedPlotly();
   if (cohortScopeState.activeEconomicScope !== 'cohort'
     || cohortScopeState.rowCount !== 3
     || !cohortScopeState.rowLabel.includes('Cohorte vigente · 3 filas')
@@ -1681,6 +1686,11 @@ try {
     pnl: []
   };
   let manualRefreshDelayMs = 0;
+  let manualAuditDelayMs = 0;
+  let manualAuditCompleted = false;
+  let resolveManualAudit = null;
+  let manualAuditDone = Promise.resolve();
+  let manualRefreshUseFixture = false;
   manualRefreshPage.on('pageerror', (error) => manualRefreshErrors.push(error.message));
   await manualRefreshPage.route('**/api/bingx', async (route) => {
     await route.fulfill({
@@ -1709,19 +1719,21 @@ try {
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({
-        historical: {
-          source: {
-            alignedMonth: fixtureMonth,
-            referenceLedger: {
-              label: 'HOJA REFRESCO QA',
-              url: 'https://docs.google.com/spreadsheets/d/qa-refresh/edit'
+      body: JSON.stringify(manualRefreshUseFixture
+        ? nativeSheetFixturePayload(fixtureMonth, fixtureAt, fixtureOpenAt)
+        : {
+            historical: {
+              source: {
+                alignedMonth: fixtureMonth,
+                referenceLedger: {
+                  label: 'HOJA REFRESCO QA',
+                  url: 'https://docs.google.com/spreadsheets/d/qa-refresh/edit'
+                }
+              },
+              months: [],
+              positions: []
             }
-          },
-          months: [],
-          positions: []
-        }
-      })
+          })
     });
   });
   await manualRefreshPage.route('**/api/bingx/pnl-sources**', async (route) => {
@@ -1734,11 +1746,16 @@ try {
   });
   await manualRefreshPage.route('**/api/replica-audit**', async (route) => {
     manualRefreshRequests.audit.push(route.request().url());
+    if (manualAuditDelayMs > 0) {
+      await delay(manualAuditDelayMs);
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
       body: JSON.stringify({ ok: true, audit: { month: fixtureMonth, summary: {}, rows: [] } })
     });
+    manualAuditCompleted = true;
+    resolveManualAudit?.();
   });
   await manualRefreshPage.route('**/api/bingx/pnl?**', async (route) => {
     manualRefreshRequests.pnl.push(route.request().url());
@@ -1778,7 +1795,13 @@ try {
   }
 
   Object.values(manualRefreshRequests).forEach((requests) => requests.splice(0));
+  manualRefreshUseFixture = true;
   manualRefreshDelayMs = 350;
+  manualAuditDelayMs = 4_000;
+  manualAuditCompleted = false;
+  manualAuditDone = new Promise((resolve) => {
+    resolveManualAudit = resolve;
+  });
   await manualRefreshPage.locator('#external-sheet-retry').click();
   await manualRefreshPage.waitForFunction(() => {
     const button = document.querySelector('#external-sheet-retry');
@@ -1786,6 +1809,14 @@ try {
       && button.getAttribute('aria-label') === 'Actualizando hoja externa'
       && document.querySelector('#external-sheet-panel')?.getAttribute('aria-busy') === 'true';
   }, null, { timeout: 2_000 });
+  await manualRefreshPage.waitForFunction(() => (
+    document.querySelector('#external-sheet-panel')?.dataset.sheetState === 'ready'
+    && document.querySelectorAll('#external-sheet-body tr').length === 2
+  ), null, { timeout: 2_000 });
+  if (manualAuditCompleted) {
+    throw new Error('La hoja local espero a la auditoria antes de mostrarse.');
+  }
+  await manualAuditDone;
   await manualRefreshPage.waitForFunction(() => {
     const button = document.querySelector('#external-sheet-retry');
     return button
@@ -1793,11 +1824,18 @@ try {
       && button.getAttribute('aria-label') === 'Actualizar hoja externa'
       && document.querySelector('#external-sheet-panel')?.getAttribute('aria-busy') === 'false';
   }, null, { timeout: 20_000 });
-  const missingLocalForcedRefresh = Object.entries(manualRefreshRequests)
-    .filter(([, requests]) => !requests.some((url) => new URL(url).searchParams.get('refresh') === '1'))
-    .map(([key]) => key);
-  if (missingLocalForcedRefresh.length) {
-    throw new Error(`El refresco local de la hoja no forzo estas fuentes: ${missingLocalForcedRefresh.join(', ')}.`);
+  const localUnexpectedSources = ['sources', 'pnl']
+    .filter((key) => manualRefreshRequests[key].length);
+  const localForcedSources = ['historical', 'audit']
+    .filter((key) => manualRefreshRequests[key]
+      .some((url) => new URL(url).searchParams.get('refresh') === '1'));
+  const localMissingSources = ['historical', 'audit']
+    .filter((key) => !manualRefreshRequests[key].length);
+  if (localUnexpectedSources.length || localForcedSources.length || localMissingSources.length) {
+    throw new Error(
+      `El refresco local no quedo aislado: inesperadas=${localUnexpectedSources.join(',') || '-'} `
+      + `forzadas=${localForcedSources.join(',') || '-'} faltantes=${localMissingSources.join(',') || '-'}.`
+    );
   }
   if (manualRefreshErrors.length) {
     throw new Error(`Errores JavaScript en el refresco manual: ${manualRefreshErrors.join(' | ')}`);

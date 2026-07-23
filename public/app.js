@@ -293,6 +293,7 @@ const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
 const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
 const REFERENCE_WARM_RETRY_DELAY_MS = 1000;
+const REFERENCE_WARM_RETRY_MAX_DELAY_MS = 30 * 1000;
 const PNL_REQUEST_TIMEOUT_MS = 30 * 1000;
 const PNL_HASH_LAYOUT_MIN_WATCH_MS = 1800;
 const PNL_HASH_LAYOUT_QUIET_MS = 900;
@@ -665,7 +666,7 @@ function bindEvents() {
   });
   elements.postsTab.closest('[role="tablist"]')?.addEventListener('keydown', handleViewTabsKeydown);
   elements.refreshPnl.addEventListener('click', refreshPnlNow);
-  elements.externalSheetRetry?.addEventListener('click', refreshPnlNow);
+  elements.externalSheetRetry?.addEventListener('click', refreshExternalSheetNow);
   elements.monthReset.addEventListener('click', async () => {
     await runAction(async () => {
       const confirmed = confirm('¿Reiniciar el mes de rendimiento VST y real desde este momento? No toca órdenes abiertas ni la lógica de señales.');
@@ -1181,6 +1182,12 @@ async function refreshPnlNow() {
   });
 }
 
+async function refreshExternalSheetNow() {
+  await runAction(async () => {
+    await refreshReferenceData();
+  });
+}
+
 function readRefreshUrl(url, force = false) {
   if (!force) {
     return url;
@@ -1209,6 +1216,11 @@ function scheduleReferenceWarmRetry() {
   if (referenceWarmRetryTimer !== null) {
     return;
   }
+  const failures = Math.max(0, Number(appState.referenceRefreshFailures || 0));
+  const delay = Math.min(
+    REFERENCE_WARM_RETRY_DELAY_MS * (2 ** Math.max(0, failures - 1)),
+    REFERENCE_WARM_RETRY_MAX_DELAY_MS
+  );
   referenceWarmRetryTimer = window.setTimeout(() => {
     referenceWarmRetryTimer = null;
     if (appState.pnlLoading || appState.referenceRefreshLoading) {
@@ -1216,7 +1228,7 @@ function scheduleReferenceWarmRetry() {
       return;
     }
     refreshReferenceData().catch(() => {});
-  }, REFERENCE_WARM_RETRY_DELAY_MS);
+  }, delay);
 }
 
 async function maybeRefreshReferenceData(now = Date.now()) {
@@ -1249,7 +1261,7 @@ function referenceRefreshIsDue(now = Date.now()) {
   return now - anchor >= backoff;
 }
 
-async function refreshReferenceData() {
+async function refreshReferenceData({ force = false } = {}) {
   if (appState.referenceRefreshPromise) {
     return appState.referenceRefreshPromise;
   }
@@ -1265,10 +1277,9 @@ async function refreshReferenceData() {
     markReferenceRefreshAttempt();
     renderExternalSheetEmbed();
 
-    const [historicalResult, replicaAuditResult] = await Promise.allSettled([
-      fetchReferenceJson('/api/historical-pnl?months=72'),
-      fetchReferenceJson('/api/replica-audit')
-    ]);
+    const historicalPromise = fetchReferenceJson(readRefreshUrl('/api/historical-pnl?months=72', force));
+    const replicaAuditPromise = fetchReferenceJson(readRefreshUrl('/api/replica-audit', force));
+    const [historicalResult] = await Promise.allSettled([historicalPromise]);
     const errors = [];
 
     if (historicalResult.status === 'fulfilled' && historicalResult.value?.historical) {
@@ -1286,6 +1297,14 @@ async function refreshReferenceData() {
       errors.push(appState.externalSheetError);
     }
 
+    appState.externalSheetLoading = false;
+    if (viewIsVisible(elements.pnlView)) {
+      renderPnl();
+    } else {
+      renderExternalSheetEmbed();
+    }
+
+    const [replicaAuditResult] = await Promise.allSettled([replicaAuditPromise]);
     if (replicaAuditResult.status === 'fulfilled' && replicaAuditResult.value?.audit) {
       appState.replicaAudit = replicaAuditResult.value.audit;
     } else {
@@ -1311,6 +1330,9 @@ async function refreshReferenceData() {
     appState.externalSheetLoading = false;
     if (viewIsVisible(elements.pnlView)) {
       renderPnl();
+    }
+    if (appState.externalSheetError && !currentReferenceLedger()) {
+      scheduleReferenceWarmRetry();
     }
   }
 }
@@ -5364,7 +5386,10 @@ function currentReferenceLedger() {
     label: source.referenceLedger.label || formatMonth(month),
     url: source.referenceLedger.url || '',
     startingCapital: source.referenceLedger.startingCapital ?? null,
-    equity: source.referenceLedger.equity ?? null
+    equity: source.referenceLedger.equity ?? null,
+    fetchedAt: source.referenceLedger.fetchedAt || null,
+    stale: Boolean(source.referenceLedger.stale),
+    warning: source.referenceLedger.warning || ''
   };
 }
 
@@ -9117,7 +9142,7 @@ function renderExternalSheetEmbed() {
     : appState.externalSheetLoading
       ? 'loading'
       : positions.length
-        ? (freshness.stale ? 'stale' : 'ready')
+        ? (freshness.stale || reference?.stale ? 'stale' : 'ready')
         : 'empty';
   const updatedLabel = appState.externalSheetLoadedAt
     ? formatShortDateTime(appState.externalSheetLoadedAt)
@@ -9134,6 +9159,7 @@ function renderExternalSheetEmbed() {
   }
   elements.externalSheetStatus.title = [
     appState.referenceRefreshWarning ? friendlyBingxError(appState.referenceRefreshWarning) : '',
+    reference?.warning ? friendlyBingxError(reference.warning) : '',
     freshness.latestAt ? `Última operación de la hoja: ${formatDateTime(freshness.latestAt)}` : '',
     updatedLabel ? `Última lectura local: ${updatedLabel}` : ''
   ].filter(Boolean).join(' · ');
@@ -9142,7 +9168,7 @@ function renderExternalSheetEmbed() {
       ? `${positions.length} filas · fallo al actualizar`
       : appState.externalSheetLoading
         ? `${positions.length} filas · actualizando...`
-        : `${positions.length} filas · ${externalSheetFreshnessLabel(freshness, updatedLabel)}`
+        : `${positions.length} filas · ${externalSheetFreshnessLabel(freshness, updatedLabel)}${reference?.stale ? ' · última copia válida' : ''}`
     : appState.externalSheetLoading
       ? 'Cargando hoja...'
       : appState.externalSheetError

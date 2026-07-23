@@ -1,5 +1,6 @@
 const fallbackPortfolioUrl = 'https://4tfs.short.gy/14may';
 const cacheMs = 5 * 60 * 1000;
+const fetchTimeoutMs = 15 * 1000;
 const cache = new Map();
 const sourceCache = new Map();
 const sheetNamesCache = new Map();
@@ -44,7 +45,7 @@ export async function resolvePortfolioSource(portfolioUrl = fallbackPortfolioUrl
     return direct;
   }
 
-  const response = await fetch(requestedUrl, {
+  const response = await fetchWithTimeout(requestedUrl, {
     redirect: 'follow',
     headers: {
       'user-agent': 'Mozilla/5.0 YouTubePostsScraper/1.0'
@@ -119,12 +120,26 @@ export async function loadReferenceLedger({ month = currentMonthKey(), portfolio
     return pending;
   }
 
-  const load = fetchReferenceLedger({ month, source, forceRefresh });
+  const load = fetchReferenceLedger({ month, source, forceRefresh })
+    .then((value) => {
+      cache.set(cacheKey, { at: Date.now(), value });
+      return value;
+    })
+    .catch((error) => {
+      if (cached?.value) {
+        const stale = {
+          ...cached.value,
+          stale: true,
+          warning: `No se pudo actualizar Google Sheet: ${error.message}`
+        };
+        cache.set(cacheKey, { at: Date.now(), value: stale });
+        return stale;
+      }
+      throw error;
+    });
   pendingLedgerLoads.set(cacheKey, load);
   try {
-    const value = await load;
-    cache.set(cacheKey, { at: Date.now(), value });
-    return value;
+    return await load;
   } finally {
     pendingLedgerLoads.delete(cacheKey);
   }
@@ -212,7 +227,10 @@ export async function applyReferenceLedger(historical, { month = currentMonthKey
       referenceLedger: {
         ...reference.source,
         startingCapital: reference.startingCapital,
-        equity: reference.equity
+        equity: reference.equity,
+        fetchedAt: reference.fetchedAt,
+        stale: Boolean(reference.stale),
+        warning: reference.warning || ''
       },
       alignedMonth: month
     },
@@ -225,7 +243,7 @@ export async function applyReferenceLedger(historical, { month = currentMonthKey
 
 async function fetchSheetRows(spreadsheetId, sheetName, { forceRefresh = false } = {}) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
-  const response = await fetch(url, forceRefresh ? {
+  const response = await fetchWithTimeout(url, forceRefresh ? {
     headers: {
       'cache-control': 'no-cache',
       pragma: 'no-cache'
@@ -275,7 +293,7 @@ async function listSpreadsheetSheetNames(spreadsheetId, { forceRefresh = false }
     return cached.value;
   }
 
-  const response = await fetch(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?usp=sharing`, {
+  const response = await fetchWithTimeout(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?usp=sharing`, {
     headers: {
       'user-agent': 'Mozilla/5.0 YouTubePostsScraper/1.0'
     }
@@ -289,6 +307,24 @@ async function listSpreadsheetSheetNames(spreadsheetId, { forceRefresh = false }
     .map((match) => match[0].replace(/\\"$/, '').trim()))];
   sheetNamesCache.set(spreadsheetId, { at: Date.now(), value: names });
   return names;
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), fetchTimeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('La lectura de Google Sheet superó 15 segundos.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeSheetName(value) {

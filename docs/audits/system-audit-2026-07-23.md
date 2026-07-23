@@ -1,8 +1,8 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-23T03:14:36.560Z
+Generada: 2026-07-23T08:57:39.720Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T08:57:40.377Z
 
 ## Resumen ejecutivo
 
@@ -24,8 +24,9 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - **HIGH · post_correction_miss:** 1 apertura faltó tras procesar una versión anterior del post. La cohorte conserva el fallo histórico; las correcciones recientes ya se recuperan por la ruta idempotente.
 - **INFO · cohort_reliability_improved:** La cohorte actual reduce las incidencias técnicas observadas de 4 a 0 operaciones.
 - **HIGH · cohort_entry_execution_worse:** La ejecución de entrada empeora frente a la cohorte anterior: 61,4% superan el 0,15% adverso.
-- **HIGH · cohort_net_per_close_negative:** La economía de la cohorte actual sigue siendo negativa: -2,141 VST netos por cierre; contraste inconcluso.
-- **INFO · cohort_effect_inconclusive:** El intervalo exploratorio del cambio neto va de -4.4039 a 4.2543 VST por cierre y cruza cero.
+- **HIGH · cohort_net_per_close_negative:** La economía de la cohorte actual sigue siendo negativa: -2,4212 VST netos por cierre; contraste inconcluso.
+- **INFO · cohort_reference_partial:** 35/44 cierres actuales tienen referencia en la hoja.
+- **INFO · cohort_effect_inconclusive:** El intervalo exploratorio del cambio neto va de -4.8008 a 4.0177 VST por cierre y cruza cero.
 - **INFO · entry_execution_attribution:** El mayor arrastre aparece entre la cotización y el fill. SUI-USDT registra la media actual más alta entre los activos con al menos tres aperturas: 0,2279%. El deterioro comparable más claro está en SOL-USDT: 55,6% → 86,7% sobre el umbral. La primera apertura del paquete promedia 0,0531%; las posteriores, 0,189%. El tiempo medio desde detección hasta el primer intento pasa de 0,02 s a 2,91 s, mientras que inicio→fill ronda 1,95 s. El cambio de mezcla por posición explica descriptivamente 66% del aumento medio observado. 24/27 entradas sobre el umbral se ejecutaron sin espera de reintento; 3/27, tras reintento.
 - **INFO · rebate_not_detected:** BingX no acredita ninguna devolución de comisiones en el histórico consultado.
 
@@ -53,20 +54,20 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - Filas de la hoja: 180
 - Aperturas VST: 170
 - Réplica teórica escalada: 540.1042 VST
-- PnL bruto BingX: -78.8946 VST
-- Comisiones: -177.2317 VST
-- Funding: -4.8178 VST
-- Neto observado: -260.9440 VST
+- PnL bruto BingX: -91.0997 VST
+- Comisiones: -181.1558 VST
+- Funding: -4.8444 VST
+- Neto observado: -277.1000 VST
 - Devolución acreditada por BingX: 0.0000 VST (no detectada)
 - Tarifa taker observada: 0.05%
 - Tarifa maker observada: 0.02%
-- Devolución estimada (22%): 38.9910 VST
-- Neto hipotético tras devolución estimada: -221.9531 VST
+- Devolución estimada (22%): 39.8543 VST
+- Neto hipotético tras devolución estimada: -237.2457 VST
 - Ciclos con entradas agregadas: 10 (16 filas)
 - Histórico exacto de órdenes: disponible
-- Órdenes históricas leídas: 465
-- Cierres con fill exacto: 169 de 169
-- Órdenes de cierre / posiciones reconstruidas: 165 / 160
+- Órdenes históricas leídas: 466
+- Cierres con fill exacto: 170 de 170
+- Órdenes de cierre / posiciones reconstruidas: 166 / 161
 - Aperturas recuperadas desde BingX: 3
 - Cobertura de eventos locales: 98.24%
 - Cierres sin apertura enlazada: 0
@@ -104,9 +105,9 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - Ejecuciones de entrada > 0,15%: 82 de 170
 - Ejecuciones de salida > 0,15%: 52 de 113
 - Fuentes de entrada: {"exchange_fill":170,"unavailable":18}
-- Fuentes de salida: {"exchange_order_history":169,"unavailable":19}
+- Fuentes de salida: {"exchange_order_history":170,"unavailable":18}
 - Stops comparables alineados / divergentes / con deslizamiento: 33 / 8 / 6
-- Stops observados sin hoja comparable: 2
+- Stops observados sin hoja comparable: 3
 - Stops divergentes precedidos por cierres fallidos: 3
 - Stops divergentes por el fallo histórico del guard: 3
 - Stops divergentes tras un cierre no procesado: 3
@@ -119,12 +120,12 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - Emparejadas vs hoja (159 operaciones): -558.1973 VST
 - No ejecutadas (18 operaciones): -52.5824 VST
 - Resultado pendiente en hoja (3 operaciones): 14.4952 VST
-- Posteriores sin hoja (3 operaciones): -28.2720 VST
+- Posteriores sin hoja (3 operaciones): -40.4772 VST
 - Extras en cobertura (5 operaciones): 5.5578 VST
-- Comisiones: -177.2317 VST
-- Funding: -4.8178 VST
-- Bruto BingX reconstruido: -78.8946 VST
-- Neto BingX reconstruido: -260.9440 VST
+- Comisiones: -181.1558 VST
+- Funding: -4.8444 VST
+- Bruto BingX reconstruido: -91.0997 VST
+- Neto BingX reconstruido: -277.1000 VST
 - Residual: 0.0000 VST (reconciliado)
 
 ## Desglose del gap emparejado
@@ -186,13 +187,13 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 ## Cohorte posterior a las mejoras
 
 - Inicio: 2026-07-15T07:05:17.987Z
-- Muestra: Muestra preliminar (43 cierres)
-- Aperturas / cierres: 44 / 43
+- Muestra: Muestra preliminar (44 cierres)
+- Aperturas / cierres: 44 / 44
 - Filas comparables / VST posteriores sin referencia: 41 / 3
 - Última operación disponible en la hoja: 2026-07-22T12:00:00.000Z
 - Última jornada provisional / filas abiertas: sí / 3
-- Neto observado: -92.0633 VST
-- Comisiones: -47.2171 VST
+- Neto observado: -106.5330 VST
+- Comisiones: -49.4550 VST
 - Paquetes completos: 15 de 16
 - Aperturas esperadas / ejecutadas / faltantes: 48 / 47 / 1
 - Faltantes con corrección posterior demostrada: 1
@@ -227,16 +228,16 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 
 ## Contraste antes y después
 
-- Estado: Muestra preliminar. 43/100 cierres para una comparación contrastable.
+- Estado: Cobertura parcial. 35/44 cierres actuales tienen referencia en la hoja.
 - Antes: 34 cierres; 34/34 con referencia; 100.00% con precio ejecutado exacto.
-- Ahora: 43 cierres; 35/43 con referencia; 100.00% con precio ejecutado exacto.
+- Ahora: 44 cierres; 35/44 con referencia; 100.00% con precio ejecutado exacto.
 - Veredicto global: Mejora técnica; rentabilidad no demostrada. Fiabilidad: mejora observada; entradas: empeoramiento observado; cierres: mejora observada. El intervalo del cambio neto cruza cero.
 - Lecturas por ámbito:
 - Fiabilidad: mejora. 0 incidencias técnicas y 0 cierres sin enlazar en la cohorte actual.
 - Entradas: empeora. 61,4% superan el 0,15% adverso.
 - Cierres: mejora. Media adversa 0,118%; p95 2,36 s.
-- Economía: negativo. -2,141 VST netos por cierre; contraste inconcluso.
-- Alineación: mixto. 35/43 cierres comparables con la hoja.
+- Economía: negativo. -2,4212 VST netos por cierre; contraste inconcluso.
+- Alineación: cobertura parcial. 35/44 cierres comparables con la hoja.
 - Métricas normalizadas:
 - Incidencias técnicas: antes 11.76%; ahora 0.00%; cambio -11.76 pp; mejora.
 - Cobertura de precios exactos: antes 100.00%; ahora 100.00%; cambio 0.00 pp; estable.
@@ -245,13 +246,13 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - Cierres sobre 0,15%: antes 57.14%; ahora 32.26%; cambio -24.88 pp; mejora.
 - Desviación media de cierre: antes 0.17%; ahora 0.12%; cambio -0.06 pp; mejora.
 - Latencia de cierre p95: antes 3.45 s; ahora 2.36 s; cambio -1.10 s; mejora.
-- Coste por cierre: antes 1.1878 VST; ahora 1.1227 VST; cambio -0.0651 VST; mejora.
-- Bruto por cierre: antes -0.8608 VST; ahora -1.0183 VST; cambio -0.1576 VST; empeora.
-- Neto por cierre: antes -2.0485 VST; ahora -2.1410 VST; cambio -0.0925 VST; empeora.
-- Cobertura de la hoja: antes 100.00%; ahora 81.40%; cambio -18.60 pp; empeora.
-- Gap por operación comparable: antes -4.9771 VST; ahora -2.0499 VST; cambio +2.9272 VST; mejora.
-- Impacto de entrada por comparable: antes -1.4257 VST; ahora -2.2731 VST; cambio -0.8474 VST; empeora.
-- Impacto de salida por comparable: antes -3.5547 VST; ahora 0.2254 VST; cambio +3.7801 VST; mejora.
+- Coste por cierre: antes 1.1878 VST; ahora 1.1486 VST; cambio -0.0391 VST; mejora.
+- Bruto por cierre: antes -0.8608 VST; ahora -1.2726 VST; cambio -0.4118 VST; empeora.
+- Neto por cierre: antes -2.0485 VST; ahora -2.4212 VST; cambio -0.3727 VST; empeora.
+- Cobertura de la hoja: antes 100.00%; ahora 79.55%; cambio -20.45 pp; cobertura parcial.
+- Gap por operación comparable: antes -4.9771 VST; ahora -2.0499 VST; cambio +2.9272 VST; cobertura parcial.
+- Impacto de entrada por comparable: antes -1.4257 VST; ahora -2.2731 VST; cambio -0.8474 VST; cobertura parcial.
+- Impacto de salida por comparable: antes -3.5547 VST; ahora 0.2254 VST; cambio +3.7801 VST; cobertura parcial.
 - Diagnóstico de entrada: El mayor arrastre aparece entre la cotización y el fill. SUI-USDT registra la media actual más alta entre los activos con al menos tres aperturas: 0,2279%. El deterioro comparable más claro está en SOL-USDT: 55,6% → 86,7% sobre el umbral. La primera apertura del paquete promedia 0,0531%; las posteriores, 0,189%. El tiempo medio desde detección hasta el primer intento pasa de 0,02 s a 2,91 s, mientras que inicio→fill ronda 1,95 s. El cambio de mezcla por posición explica descriptivamente 66% del aumento medio observado. 24/27 entradas sobre el umbral se ejecutaron sin espera de reintento; 3/27, tras reintento.
 - Descomposición por fase:
 - Fase Señal a cotización: antes 0.05%; ahora 0.07%; cambio +0.0112 pp; empeora.
@@ -290,8 +291,8 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - BTC-USDT: 1/11 cierres medidos; ejecutable a fill 0.00%; 0 sobre 0,15%.
 - SOL-USDT: 1/10 cierres medidos; ejecutable a fill 0.11%; 0 sobre 0,15%.
 - ETH-USDT: 1/8 cierres medidos; ejecutable a fill 0.11%; 0 sobre 0,15%.
-- Media neta enlazada: antes -2.0307 VST; ahora -2.1410 VST; diferencia -0.1103 VST por cierre.
-- Bootstrap determinista (4000 iteraciones): intervalo del 95% -4.4039 a 4.2543 VST; probabilidad exploratoria de mejora 48.85%; lectura inconclusa.
+- Media neta enlazada: antes -2.0307 VST; ahora -2.4212 VST; diferencia -0.3905 VST por cierre.
+- Bootstrap determinista (4000 iteraciones): intervalo del 95% -4.8008 a 4.0177 VST; probabilidad exploratoria de mejora 43.55%; lectura inconclusa.
 - Límite: el contraste describe esta muestra. La cobertura parcial y un intervalo que cruce cero impiden afirmar una mejora económica o garantizar rentabilidad futura.
 
 ## Puerta de promoción
@@ -302,7 +303,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 - Promoción automática: no.
 - Muestra: recogiendo muestra. 16/50 paquetes.
 - Fiabilidad: no cumple. 47/48 aperturas · 1 fallo por corrección posterior.
-- Rentabilidad: no cumple. -92,0633 VST · -2,141 VST/cierre · 43 cierres.
+- Rentabilidad: no cumple. -106,533 VST · -2,4212 VST/cierre · 44 cierres.
 - Colas: verificado. 0 aperturas · 0 reintentos.
 - Seguridad: verificado. 0 posiciones sin SL · 0 órdenes huérfanas.
 - Criterios pendientes: Muestra de paquetes, Cobertura de aperturas, Paquetes completos, Aperturas perdidas, Neto tras costes.
@@ -311,16 +312,16 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 
 - Monitor: ok
 - Fase: live
-- Posiciones abiertas: 1
+- Posiciones abiertas: 0
 - PnL diario: 0.0000
-- PnL mensual: 293.1206
+- PnL mensual: 271.1051
 - Modo: demo
 - Desviación adversa máxima: 0.15%
 - Antigüedad máxima de apertura: 5 min
 - Distancia máxima del stop: 5.00%
 - Lectura Telegram: 5 s
 - Recarga Telegram: 30 s
-- Reloj REST BingX: +850 ms de offset; RTT 184 ms; antigüedad 62.2 s; warn; solo observación
+- Reloj REST BingX: +998 ms de offset; RTT 200 ms; antigüedad 215.0 s; warn; solo observación
 
 ## Interpretación
 
