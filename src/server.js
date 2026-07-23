@@ -29,6 +29,7 @@ import { applyPnlSourcesFallback, PnlSnapshotStore } from './pnlSnapshotStore.js
 import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
 import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomeImpact, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
+import { groupOperationalIncidents, summarizeOperationalIncidents } from './operationalIncidents.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { formatSseEvent, formatSseRetry } from './sseTransport.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
@@ -2810,23 +2811,15 @@ function statisticalStatusLabel(closedTrades) {
 function buildIncidentSnapshot(secureBackup = {}) {
   const logs = state.logs || [];
   const storageIncident = buildBackupStorageIncident(secureBackup.storage);
-  const incidents = [
+  const groupedIncidents = groupOperationalIncidents([
     ...(storageIncident ? [storageIncident] : []),
     ...logs
     .map(classifyIncidentLog)
     .filter(Boolean)
-  ].slice(0, 30);
-  const counts = incidents.reduce((summary, incident) => {
-    summary.total += 1;
-    summary[incident.level] = (summary[incident.level] || 0) + 1;
-    summary.byType[incident.type] = (summary.byType[incident.type] || 0) + 1;
-    return summary;
-  }, {
-    total: 0,
-    warn: 0,
-    error: 0,
-    info: 0,
-    byType: {}
+  ]);
+  const incidents = groupedIncidents.slice(0, 30);
+  const counts = summarizeOperationalIncidents(groupedIncidents, {
+    displayed: incidents.length
   });
 
   return {

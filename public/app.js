@@ -292,6 +292,7 @@ const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
 const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
+const REFERENCE_WARM_RETRY_DELAY_MS = 1000;
 const PNL_REQUEST_TIMEOUT_MS = 30 * 1000;
 const PNL_HASH_LAYOUT_MIN_WATCH_MS = 1800;
 const PNL_HASH_LAYOUT_QUIET_MS = 900;
@@ -308,6 +309,7 @@ const PNL_SECTION_TARGET_IDS = Object.freeze([
 ]);
 const CLIENT_ERROR_PRIORITIES = Object.freeze({ bootstrap: 1, realtime: 2, action: 3 });
 let referenceRefreshTimer = null;
+let referenceWarmRetryTimer = null;
 let pnlRealtimeRenderTimer = null;
 let pnlRealtimeRenderFrame = null;
 let pnlDeferredFullRenderTimer = null;
@@ -1153,6 +1155,10 @@ async function loadPnl({ force = false } = {}) {
     appState.externalSheetLoading = false;
     renderPnl();
   }
+
+  if (appState.externalSheetError) {
+    scheduleReferenceWarmRetry();
+  }
 }
 
 async function refreshPnlNow() {
@@ -1183,6 +1189,20 @@ function startReferenceRefreshLoop() {
     }
   });
   check();
+}
+
+function scheduleReferenceWarmRetry() {
+  if (referenceWarmRetryTimer !== null) {
+    return;
+  }
+  referenceWarmRetryTimer = window.setTimeout(() => {
+    referenceWarmRetryTimer = null;
+    if (appState.pnlLoading || appState.referenceRefreshLoading) {
+      scheduleReferenceWarmRetry();
+      return;
+    }
+    refreshReferenceData().catch(() => {});
+  }, REFERENCE_WARM_RETRY_DELAY_MS);
 }
 
 async function maybeRefreshReferenceData(now = Date.now()) {
@@ -1286,6 +1306,10 @@ function markReferenceRefreshAttempt() {
 }
 
 function markReferenceRefreshSuccess() {
+  if (referenceWarmRetryTimer !== null) {
+    window.clearTimeout(referenceWarmRetryTimer);
+    referenceWarmRetryTimer = null;
+  }
   appState.referenceRefreshLastSuccessAt = Date.now();
   appState.referenceRefreshFailures = 0;
   appState.referenceRefreshWarning = '';

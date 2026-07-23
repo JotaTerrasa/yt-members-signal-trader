@@ -764,6 +764,7 @@ try {
 
   const nativeSheetPage = await browser.newPage();
   const nativeSheetErrors = [];
+  let nativeSheetRequests = 0;
   const fixtureMonth = localMonthKey();
   const fixtureAt = new Date();
   fixtureAt.setDate(1);
@@ -771,6 +772,15 @@ try {
   const fixtureOpenAt = new Date();
   nativeSheetPage.on('pageerror', (error) => nativeSheetErrors.push(error.message));
   await nativeSheetPage.route('**/api/historical-pnl?**', async (route) => {
+    nativeSheetRequests += 1;
+    if (nativeSheetRequests === 1) {
+      await route.fulfill({
+        status: 504,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: 'Carga fria simulada en QA' })
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
@@ -822,6 +832,9 @@ try {
     || !nativeSheetState.firstRow.includes('SL 195')
     || !nativeSheetState.firstRow.includes('ABIERTA')) {
     throw new Error(`La hoja externa no uso la tabla nativa: ${JSON.stringify(nativeSheetState)}.`);
+  }
+  if (nativeSheetRequests < 2) {
+    throw new Error(`La hoja externa no reintento la carga fria: ${nativeSheetRequests}.`);
   }
   if (nativeSheetErrors.length) {
     throw new Error(`Errores JavaScript en la hoja nativa: ${nativeSheetErrors.join(' | ')}`);
