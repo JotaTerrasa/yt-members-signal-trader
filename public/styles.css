@@ -1448,6 +1448,13 @@ summary.dashboard-section-title {
   border-color: rgba(36, 91, 155, 0.18);
 }
 
+.cost-control-panel:focus-visible,
+.alignment-panel:focus-visible,
+.replica-gap-panel:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .demo-safety-panel {
   border-color: rgba(15, 118, 110, 0.22);
 }

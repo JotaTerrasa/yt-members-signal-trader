@@ -298,6 +298,7 @@ let pnlRealtimeRenderTimer = null;
 let pnlRealtimeRenderFrame = null;
 let pnlDeferredFullRenderTimer = null;
 let pnlHashLayoutObserver = null;
+let pnlHashDomObserver = null;
 let pnlHashLayoutQuietTimer = null;
 let pnlHashLayoutDeadlineTimer = null;
 let pnlHashLayoutTargetId = '';
@@ -344,6 +345,7 @@ const appState = {
   economicDiagnosisScope: 'cohort',
   pnlHashAnchorRequested: '',
   pnlHashAnchorSettled: '',
+  pnlHashAnchorFocusRequested: '',
   externalSheetRenderKey: '',
   externalSheetLoading: false,
   externalSheetError: '',
@@ -449,6 +451,8 @@ function scheduleBootstrapRetry(tasks, attempt = 0) {
 }
 
 function bindEvents() {
+  document.addEventListener('focusin', handlePnlHashFocusChange);
+
   elements.frontendUpdateAction?.addEventListener('click', () => {
     reloadFrontendDocument();
   });
@@ -564,7 +568,9 @@ function bindEvents() {
         }
         appState.pnlHashAnchorRequested = targetId;
         appState.pnlHashAnchorSettled = '';
+        appState.pnlHashAnchorFocusRequested = targetId;
         scrollPnlHashAnchorNow(targetId);
+        focusPnlHashTarget(targetId, { force: true });
       }
       return;
     }
@@ -5762,7 +5768,7 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
   };
 
   return `
-    <section class="replica-gap-panel" id="replica-gap-bridge" aria-labelledby="replica-gap-title">
+    <section class="replica-gap-panel" id="replica-gap-bridge" tabindex="-1" aria-labelledby="replica-gap-title">
       <div class="replica-gap-heading">
         <div>
           <span>Puente contable</span>
@@ -5819,7 +5825,7 @@ function renderMatchedGapAttribution(attribution) {
   `).join('');
 
   return `
-    <section class="replica-gap-panel replica-matched-gap-panel" id="replica-matched-gap-panel" aria-labelledby="replica-matched-gap-title">
+    <section class="replica-gap-panel replica-matched-gap-panel" id="replica-matched-gap-panel" tabindex="-1" aria-labelledby="replica-matched-gap-title">
       <div class="replica-gap-heading">
         <div>
           <span>Diagnóstico de ejecución</span>
@@ -10602,7 +10608,12 @@ function applyHashNavigation() {
     stopPnlHashLayoutObserver();
     appState.pnlHashAnchorRequested = '';
     appState.pnlHashAnchorSettled = '';
+    appState.pnlHashAnchorFocusRequested = '';
     return;
+  }
+  if (appState.pnlHashAnchorFocusRequested
+    && appState.pnlHashAnchorFocusRequested !== target.id) {
+    appState.pnlHashAnchorFocusRequested = '';
   }
 
   if (appState.pnlHashAnchorRequested !== target.id) {
@@ -10628,8 +10639,11 @@ function settlePnlHashAnchor() {
   const target = pnlHashTarget();
   if (!target
     || appState.pnlLoading
-    || !appState.pnl
-    || appState.pnlHashAnchorSettled === target.id) {
+    || !appState.pnl) {
+    return;
+  }
+  if (appState.pnlHashAnchorSettled === target.id) {
+    focusPnlHashTarget(target.id);
     return;
   }
 
@@ -10653,6 +10667,7 @@ function scrollPnlHashAnchorNow(targetId) {
   }
   currentTarget.scrollIntoView({ block: 'start' });
   appState.pnlHashAnchorSettled = targetId;
+  focusPnlHashTarget(targetId);
   const pendingChart = currentTarget.querySelector('.replica-gap-chart[data-plotly-layout-stable="false"]');
   if (pendingChart && pendingChart.dataset.anchorResettleFor !== targetId) {
     pendingChart.dataset.anchorResettleFor = targetId;
@@ -10667,14 +10682,16 @@ function scrollPnlHashAnchorNow(targetId) {
 }
 
 function startPnlHashLayoutObserver(targetId) {
-  if (typeof ResizeObserver !== 'function'
-    || (pnlHashLayoutObserver && pnlHashLayoutTargetId === targetId)) {
+  if ((pnlHashLayoutObserver || pnlHashDomObserver) && pnlHashLayoutTargetId === targetId) {
+    return;
+  }
+  if (typeof ResizeObserver !== 'function' && typeof MutationObserver !== 'function') {
     return;
   }
   stopPnlHashLayoutObserver();
   pnlHashLayoutTargetId = targetId;
   pnlHashLayoutStartedAt = performance.now();
-  pnlHashLayoutObserver = new ResizeObserver(() => {
+  const resettleTarget = () => {
     if (window.location.hash !== `#${targetId}` || appState.pnlHashAnchorRequested !== targetId) {
       stopPnlHashLayoutObserver();
       return;
@@ -10684,6 +10701,7 @@ function startPnlHashLayoutObserver(targetId) {
       if (currentTarget?.id === targetId) {
         currentTarget.scrollIntoView({ block: 'start' });
         appState.pnlHashAnchorSettled = targetId;
+        focusPnlHashTarget(targetId);
       }
     });
     window.clearTimeout(pnlHashLayoutQuietTimer);
@@ -10692,8 +10710,23 @@ function startPnlHashLayoutObserver(targetId) {
       stopPnlHashLayoutObserver,
       Math.max(PNL_HASH_LAYOUT_QUIET_MS, PNL_HASH_LAYOUT_MIN_WATCH_MS - elapsed)
     );
-  });
-  pnlHashLayoutObserver.observe(elements.pnlView);
+  };
+  if (typeof ResizeObserver === 'function') {
+    pnlHashLayoutObserver = new ResizeObserver(resettleTarget);
+    pnlHashLayoutObserver.observe(elements.pnlView);
+  }
+  if (typeof MutationObserver === 'function') {
+    let observedTarget = document.getElementById(targetId);
+    pnlHashDomObserver = new MutationObserver(() => {
+      const currentTarget = document.getElementById(targetId);
+      if (!currentTarget || currentTarget === observedTarget) {
+        return;
+      }
+      observedTarget = currentTarget;
+      resettleTarget();
+    });
+    pnlHashDomObserver.observe(elements.pnlView, { childList: true, subtree: true });
+  }
   pnlHashLayoutDeadlineTimer = window.setTimeout(
     stopPnlHashLayoutObserver,
     PNL_HASH_LAYOUT_MAX_WATCH_MS
@@ -10703,12 +10736,35 @@ function startPnlHashLayoutObserver(targetId) {
 function stopPnlHashLayoutObserver() {
   pnlHashLayoutObserver?.disconnect();
   pnlHashLayoutObserver = null;
+  pnlHashDomObserver?.disconnect();
+  pnlHashDomObserver = null;
   window.clearTimeout(pnlHashLayoutQuietTimer);
   window.clearTimeout(pnlHashLayoutDeadlineTimer);
   pnlHashLayoutQuietTimer = null;
   pnlHashLayoutDeadlineTimer = null;
   pnlHashLayoutTargetId = '';
   pnlHashLayoutStartedAt = 0;
+}
+
+function handlePnlHashFocusChange(event) {
+  const targetId = appState.pnlHashAnchorFocusRequested;
+  if (!targetId || event.target?.id === targetId) {
+    return;
+  }
+  appState.pnlHashAnchorFocusRequested = '';
+}
+
+function focusPnlHashTarget(targetId, { force = false } = {}) {
+  if (appState.pnlHashAnchorFocusRequested !== targetId) {
+    return;
+  }
+  const target = document.getElementById(targetId);
+  const active = document.activeElement;
+  const focusWasLost = !active || active === document.body || active === document.documentElement;
+  if (!target || (!force && !focusWasLost && active !== target)) {
+    return;
+  }
+  target.focus({ preventScroll: true });
 }
 
 function pnlHashTarget() {

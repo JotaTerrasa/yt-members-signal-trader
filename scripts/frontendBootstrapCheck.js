@@ -1060,18 +1060,21 @@ try {
     throw new Error(`La cohorte no gobernó toda la auditoría visible: ${JSON.stringify(cohortScopeState)}.`);
   }
 
-  await outcomeImpactPage.click('[data-economic-drilldown="execution"]');
+  await outcomeImpactPage.focus('[data-economic-drilldown="execution"]');
+  await outcomeImpactPage.keyboard.press('Enter');
   await outcomeImpactPage.waitForFunction(() => {
     const top = document.querySelector('#replica-matched-gap-panel')?.getBoundingClientRect().top;
     const chart = document.querySelector('#replica-matched-gap-waterfall');
     return Number.isFinite(top)
       && top >= 80
       && top <= 130
-      && chart?.dataset.plotlyLayoutStable === 'true';
+      && chart?.dataset.plotlyLayoutStable === 'true'
+      && document.activeElement?.id === 'replica-matched-gap-panel';
   }, null, { timeout: 6_000 });
   const executionDrilldownState = await outcomeImpactPage.evaluate(() => ({
     hash: window.location.hash,
     top: document.querySelector('#replica-matched-gap-panel')?.getBoundingClientRect().top,
+    focusedId: document.activeElement?.id || '',
     layoutStable: document.querySelector('#replica-matched-gap-waterfall')?.dataset.plotlyLayoutStable || '',
     text: document.querySelector('#replica-matched-gap-panel')?.textContent.replace(/\s+/g, ' ').trim() || ''
   }));
@@ -1079,31 +1082,58 @@ try {
     || !Number.isFinite(executionDrilldownState.top)
     || executionDrilldownState.top < 80
     || executionDrilldownState.top > 130
+    || executionDrilldownState.focusedId !== 'replica-matched-gap-panel'
     || executionDrilldownState.layoutStable !== 'true'
     || delayedPlotlyRequests !== 1
     || !executionDrilldownState.text.includes('-10,00 VST')) {
     throw new Error(`El acceso a la evidencia de ejecución no quedó alineado: ${JSON.stringify(executionDrilldownState)}.`);
   }
 
+  await outcomeImpactPage.evaluate(() => {
+    const target = document.querySelector('#replica-matched-gap-panel');
+    target?.replaceWith(target.cloneNode(true));
+  });
+  await outcomeImpactPage.waitForFunction(() => (
+    document.activeElement?.id === 'replica-matched-gap-panel'
+      && document.querySelector('#replica-matched-gap-panel')?.getBoundingClientRect().top >= 80
+      && document.querySelector('#replica-matched-gap-panel')?.getBoundingClientRect().top <= 130
+  ), null, { timeout: 3_000 });
+  await outcomeImpactPage.evaluate(() => {
+    stopPnlHashLayoutObserver();
+    const target = document.querySelector('#replica-matched-gap-panel');
+    target?.replaceWith(target.cloneNode(true));
+    settlePnlHashAnchor();
+  });
+  await outcomeImpactPage.waitForFunction(() => (
+    document.activeElement?.id === 'replica-matched-gap-panel'
+  ), null, { timeout: 3_000 });
+
   const economicDrilldownTargets = [
     ['costs', 'cost-control-panel', 'Coste operativo'],
     ['coverage', 'replica-gap-bridge', 'Puente contable']
   ];
   for (const [key, targetId, expectedText] of economicDrilldownTargets) {
-    await outcomeImpactPage.click(`[data-economic-drilldown="${key}"]`);
+    await outcomeImpactPage.focus(`[data-economic-drilldown="${key}"]`);
+    await outcomeImpactPage.keyboard.press('Enter');
     await outcomeImpactPage.waitForFunction((id) => {
       const top = document.getElementById(id)?.getBoundingClientRect().top;
-      return window.location.hash === `#${id}` && Number.isFinite(top) && top >= 80 && top <= 130;
+      return window.location.hash === `#${id}`
+        && Number.isFinite(top)
+        && top >= 80
+        && top <= 130
+        && document.activeElement?.id === id;
     }, targetId, { timeout: 3_000 });
     const state = await outcomeImpactPage.evaluate((id) => ({
       hash: window.location.hash,
       top: document.getElementById(id)?.getBoundingClientRect().top,
+      focusedId: document.activeElement?.id || '',
       text: document.getElementById(id)?.textContent.replace(/\s+/g, ' ').trim() || ''
     }), targetId);
     if (state.hash !== `#${targetId}`
       || !Number.isFinite(state.top)
       || state.top < 80
       || state.top > 130
+      || state.focusedId !== targetId
       || !state.text.includes(expectedText)) {
       throw new Error(`El acceso ${key} no alcanzó su evidencia: ${JSON.stringify(state)}.`);
     }
