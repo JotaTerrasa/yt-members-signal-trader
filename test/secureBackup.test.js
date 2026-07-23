@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
-import { configureBackupMirror, createBackup, createBackupCommand, drillBackup, mirrorBackupIfConfigured, validateBackupEntries, verifyBackup } from '../scripts/secureBackup.js';
+import { configureBackupMirror, createBackup, createBackupCommand, disableBackupMirror, drillBackup, loadBackupMirrorConfig, mirrorBackupIfConfigured, validateBackupEntries, verifyBackup } from '../scripts/secureBackup.js';
 
 async function backupFixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'futures-magician-backup-test-'));
@@ -240,6 +240,56 @@ test('un fallo exclusivo de réplica no marca como fallido el backup local resta
   assert.equal(status.mirror.ok, false);
   assert.ok(status.mirror.lastError);
   assert.equal((await verifyBackup({ input: output, keyFile: fixture.keyFile }, { silent: true })).ok, true);
+});
+
+test('desactiva la réplica sin borrar su configuración ni las copias existentes', async (t) => {
+  const fixture = await backupFixture(t);
+  const output = join(fixture.backupDir, 'mirror-before-disable.fmbak');
+  const mirrorDir = join(fixture.root, 'mirror-before-disable-target');
+  const configFile = join(fixture.root, 'private', 'disable-backup-mirror.json');
+  await createBackup({ output, keyFile: fixture.keyFile }, {
+    root: fixture.root,
+    silent: true
+  });
+  await configureBackupMirror({ target: mirrorDir, allowSameVolume: true }, {
+    configFile,
+    localBackupDir: fixture.backupDir,
+    silent: true
+  });
+  const mirrored = await mirrorBackupIfConfigured(output, {
+    keyFile: fixture.keyFile,
+    configFile,
+    localBackupDir: fixture.backupDir
+  });
+  assert.equal(mirrored.ok, true);
+
+  const disabled = await disableBackupMirror({ configFile }, {
+    root: fixture.root,
+    silent: true
+  });
+  const disabledAgain = await disableBackupMirror({ configFile }, {
+    root: fixture.root,
+    silent: true
+  });
+  const storedConfig = JSON.parse(await readFile(configFile, 'utf8'));
+  const status = JSON.parse(await readFile(join(fixture.backupDir, 'status.json'), 'utf8'));
+  const skipped = await mirrorBackupIfConfigured(output, {
+    keyFile: fixture.keyFile,
+    configFile,
+    localBackupDir: fixture.backupDir
+  });
+
+  assert.equal(disabled.changed, true);
+  assert.equal(disabled.preservedConfig, true);
+  assert.equal(disabled.preservedBackups, true);
+  assert.equal(disabledAgain.changed, false);
+  assert.equal(storedConfig.enabled, false);
+  assert.ok(storedConfig.disabledAt);
+  assert.equal(await loadBackupMirrorConfig({ configFile }), null);
+  assert.equal(skipped.configured, false);
+  assert.equal(status.mirror.configured, false);
+  assert.ok((await stat(output)).isFile());
+  assert.ok((await stat(join(mirrorDir, basename(output)))).isFile());
 });
 
 test('no sustituye una copia que ya existe', async (t) => {

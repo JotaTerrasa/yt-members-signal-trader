@@ -30,6 +30,8 @@ async function main(values) {
     await initializeKey(args.keyFile);
   } else if (command === 'configure-mirror') {
     await configureBackupMirror(args);
+  } else if (command === 'disable-mirror') {
+    await disableBackupMirror(args);
   } else if (command === 'mirror-status') {
     await printBackupMirrorStatus(args);
   } else if (command === 'create') {
@@ -41,7 +43,7 @@ async function main(values) {
   } else if (command === 'restore') {
     await restoreBackup(args);
   } else {
-    fail('Uso: secureBackup.js init-key|configure-mirror|mirror-status|create|verify|drill|restore [opciones]');
+    fail('Uso: secureBackup.js init-key|configure-mirror|disable-mirror|mirror-status|create|verify|drill|restore [opciones]');
   }
 }
 
@@ -220,14 +222,7 @@ export async function configureBackupMirror(options = {}, {
     allowSameVolume,
     configuredAt: new Date().toISOString()
   };
-  const partialPath = `${configPath}.${process.pid}-${Date.now()}.partial`;
-  try {
-    await writeFile(partialPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    await rename(partialPath, configPath);
-    await hardenPrivateFilePermissions(configPath);
-  } finally {
-    await rm(partialPath, { force: true });
-  }
+  await writePrivateJsonFile(configPath, config);
 
   const result = {
     ok: true,
@@ -245,13 +240,60 @@ export async function configureBackupMirror(options = {}, {
   return result;
 }
 
+export async function disableBackupMirror(options = {}, {
+  configFile,
+  root = projectRoot,
+  silent = false
+} = {}) {
+  const configPath = resolveMirrorConfigFile(options.configFile || configFile);
+  const current = await readBackupMirrorConfigRecord({ configFile: configPath });
+  const changed = Boolean(current?.enabled);
+  if (current && changed) {
+    await writePrivateJsonFile(configPath, {
+      ...current,
+      enabled: false,
+      disabledAt: new Date().toISOString()
+    });
+  } else if (current) {
+    await hardenPrivateFilePermissions(configPath);
+  }
+  await updateSecureBackupStatus({
+    mirror: statusMirrorResult({ configured: false, ok: true })
+  }, { root });
+
+  const result = {
+    ok: true,
+    configured: false,
+    enabled: false,
+    changed,
+    configFile: configPath,
+    preservedConfig: Boolean(current),
+    preservedBackups: true,
+    targetLabel: current?.targetDir ? mirrorTargetLabel(current.targetDir) : null
+  };
+  if (!silent) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+  return result;
+}
+
 async function printBackupMirrorStatus(options = {}) {
   const configFile = resolveMirrorConfigFile(options.configFile);
-  const config = await loadBackupMirrorConfig({ configFile });
-  if (!config) {
-    console.log(JSON.stringify({ ok: true, configured: false, configFile }, null, 2));
+  const record = await readBackupMirrorConfigRecord({ configFile });
+  if (!record || !record.enabled) {
+    console.log(JSON.stringify({
+      ok: true,
+      configured: false,
+      enabled: false,
+      configFile,
+      preservedConfig: Boolean(record),
+      targetDir: record?.targetDir || null,
+      targetLabel: record?.targetDir ? mirrorTargetLabel(record.targetDir) : null,
+      disabledAt: validBackupTimestamp(record?.disabledAt)
+    }, null, 2));
     return;
   }
+  const config = await loadBackupMirrorConfig({ configFile });
   const localBackupDir = join(projectRoot, '.data', 'backups', 'secure');
   await mkdir(localBackupDir, { recursive: true });
   const [targetInfo, localInfo] = await Promise.all([
@@ -262,6 +304,7 @@ async function printBackupMirrorStatus(options = {}) {
   console.log(JSON.stringify({
     ok: Boolean(targetInfo?.isDirectory()),
     configured: true,
+    enabled: true,
     configFile,
     targetDir: config.targetDir,
     targetLabel: mirrorTargetLabel(config.targetDir),
@@ -383,6 +426,20 @@ export async function mirrorBackupIfConfigured(inputValue, {
 }
 
 export async function loadBackupMirrorConfig({ configFile } = {}) {
+  const config = await readBackupMirrorConfigRecord({ configFile });
+  if (!config || !config.enabled) {
+    return null;
+  }
+  return {
+    version: 1,
+    enabled: true,
+    targetDir: config.targetDir,
+    allowSameVolume: config.allowSameVolume,
+    configuredAt: config.configuredAt
+  };
+}
+
+async function readBackupMirrorConfigRecord({ configFile } = {}) {
   const configPath = resolveMirrorConfigFile(configFile);
   const raw = await readFile(configPath, 'utf8').catch((error) => {
     if (error?.code === 'ENOENT') {
@@ -394,16 +451,31 @@ export async function loadBackupMirrorConfig({ configFile } = {}) {
     return null;
   }
   const config = JSON.parse(raw);
-  if (config?.version !== 1 || config.enabled !== true || !String(config.targetDir || '').trim()) {
+  if (config?.version !== 1
+    || typeof config.enabled !== 'boolean'
+    || !String(config.targetDir || '').trim()) {
     fail('La configuración de la réplica externa no es válida.');
   }
   return {
     version: 1,
-    enabled: true,
+    enabled: config.enabled,
     targetDir: resolve(config.targetDir),
     allowSameVolume: Boolean(config.allowSameVolume),
-    configuredAt: validBackupTimestamp(config.configuredAt)
+    configuredAt: validBackupTimestamp(config.configuredAt),
+    disabledAt: validBackupTimestamp(config.disabledAt)
   };
+}
+
+async function writePrivateJsonFile(filePath, value) {
+  const partialPath = `${filePath}.${process.pid}-${Date.now()}.partial`;
+  await mkdir(dirname(filePath), { recursive: true });
+  try {
+    await writeFile(partialPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await rename(partialPath, filePath);
+    await hardenPrivateFilePermissions(filePath);
+  } finally {
+    await rm(partialPath, { force: true }).catch(() => {});
+  }
 }
 
 export async function createBackup(options, { root = projectRoot, silent = false } = {}) {

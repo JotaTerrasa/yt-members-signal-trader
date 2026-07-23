@@ -165,7 +165,7 @@ npm run windows:tasks
 
 El registro crea tres tareas: restauración de PM2 al iniciar sesión, backup cifrado diario a las 03:15 y backup semanal del perfil Chromium los domingos a las 04:00. Ambas tareas de backup descifran y extraen cada copia en un directorio temporal para demostrar que es restaurable; el estado saneado aparece en la guardia nocturna. El arranque ejecuta `pm2 resurrect`, reaplica siempre `ecosystem.config.cjs` con `startOrReload --update-env` y guarda de nuevo el estado. El ecosistema descarta el entorno heredado y repone solo rutas del sistema y variables explícitas de la app, evitando que credenciales de otras herramientas queden en el proceso o en `dump.pm2`. `FuturesMagicianPM2Startup` debe ser la única vía de autoarranque en Windows; el registro elimina el acceso directo heredado `yt-members-signal-trader-pm2-resurrect.lnk` y el script serializa invocaciones simultáneas para evitar carreras y errores `EADDRINUSE`.
 
-Si existe `~/.futures-magician/backup-mirror.json`, las mismas tareas publican además una copia verificada en el destino configurado. La aplicación no crea esa configuración por sí sola: usa `npm run backup:secure:mirror:configure -- --target "RUTA"` después de decidir dónde almacenar el contenedor cifrado.
+Si existe `~/.futures-magician/backup-mirror.json` y está habilitado, las mismas tareas publican además una copia verificada en el destino configurado. La aplicación no crea esa configuración por sí sola: usa `npm run backup:secure:mirror:configure -- --target "RUTA"` después de decidir dónde almacenar el contenedor cifrado. `npm run backup:secure:mirror:disable` detiene futuras réplicas sin borrar la configuración ni las copias existentes.
 
 ## 7. Verificación
 

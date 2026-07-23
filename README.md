@@ -485,9 +485,10 @@ Para añadir una segunda copia en otra unidad o recurso montado, configura el de
 ```powershell
 npm run backup:secure:mirror:configure -- --target "E:\FuturesMagicianBackups"
 npm run backup:secure:mirror:status
+npm run backup:secure:mirror:disable
 ```
 
-La configuración privada se guarda en `~/.futures-magician/backup-mirror.json`. Desde ese momento, cada backup se copia mediante un archivo parcial, se verifica de nuevo en el destino y solo entonces se publica. Un fallo de réplica no elimina ni invalida la copia local restaurada, pero hace fallar la tarea y deja el destino externo en rojo para que quede visible. Una ruta del mismo disco se rechaza por defecto; `--allow-same-volume` permite usar deliberadamente una carpeta sincronizada, aunque la UI seguirá indicando que la resiliencia externa no se puede demostrar. Configurar OneDrive, Dropbox o una ruta de red transmite el contenedor cifrado a ese proveedor y debe ser una decisión explícita del operador.
+La configuración privada se guarda en `~/.futures-magician/backup-mirror.json`. Desde ese momento, cada backup se copia mediante un archivo parcial, se verifica de nuevo en el destino y solo entonces se publica. Un fallo de réplica no elimina ni invalida la copia local restaurada, pero hace fallar la tarea y deja el destino externo en rojo para que quede visible. `backup:secure:mirror:disable` conserva el archivo de configuración y todas las copias locales y externas; solo impide nuevas réplicas hasta que se vuelva a ejecutar `backup:secure:mirror:configure`. Una ruta del mismo disco se rechaza por defecto; `--allow-same-volume` permite usar deliberadamente una carpeta sincronizada, aunque la UI seguirá indicando que la resiliencia externa no se puede demostrar. Configurar OneDrive, Dropbox o una ruta de red transmite el contenedor cifrado a ese proveedor y debe ser una decisión explícita del operador.
 
 La restauración, por defecto, se extrae en `.data/restore-tests/` y nunca pisa los datos activos:
 

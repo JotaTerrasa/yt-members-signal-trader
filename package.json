@@ -26,6 +26,7 @@
     "backup:secure:profile": "node scripts/secureBackup.js create --include-profile --drill",
     "backup:secure:profile:maintenance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profileBackup.ps1",
     "backup:secure:mirror:configure": "node scripts/secureBackup.js configure-mirror",
+    "backup:secure:mirror:disable": "node scripts/secureBackup.js disable-mirror",
     "backup:secure:mirror:status": "node scripts/secureBackup.js mirror-status",
     "security:acl:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hardenLocalSecrets.ps1 -Mode Check",
     "security:pm2:check": "node scripts/checkPm2Environment.js",

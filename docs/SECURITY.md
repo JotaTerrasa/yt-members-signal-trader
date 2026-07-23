@@ -138,6 +138,7 @@ Reglas:
 - vuelve a ejecutar `verify` después de copiar el backup a otro soporte;
 - usa `drill` para demostrar que una copia transportada se puede extraer realmente;
 - configura una réplica externa solo mediante `configure-mirror --target`; nunca elijas automáticamente una carpeta de nube;
+- desactívala con `disable-mirror`: conserva la configuración y todos los contenedores existentes;
 - la réplica se copia a un archivo parcial, se verifica con la misma clave y se renombra al final;
 - una carpeta del mismo sistema de archivos no cuenta como resiliente, aunque se permita expresamente para un cliente de sincronización;
 - restaura primero en `.data/restore-tests/`;
