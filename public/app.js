@@ -4387,6 +4387,8 @@ function renderGuardDashboard() {
     ['PnL historico', cooldown ? cooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : 'ok', cooldown ? 'warn' : 'positive'],
     ['Backup redactado', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
     ['Backup cifrado', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
+    ['Almacén local', backupStorageCopiesText(secureBackup.storage), backupStorageTone(secureBackup.storage)],
+    ['Disco libre', backupStorageFreeText(secureBackup.storage), backupStorageTone(secureBackup.storage)],
     ['Perfil Chromium', secureProfileBackupStatusText(secureBackup.profile), secureBackup.profile?.stale ? 'warn' : secureBackup.profile?.available ? 'positive' : 'warn'],
     ['Réplica externa', secureMirrorStatusText(secureBackup.mirror), secureMirrorTone(secureBackup.mirror)],
     ['Clave recuperación', secureKeyRecoveryStatusText(secureBackup.keyRecovery), secureKeyRecoveryTone(secureBackup.keyRecovery)],
@@ -4435,7 +4437,8 @@ function incidentLifecycle(incident = {}, status = {}) {
       && !health.noVisiblePosts
       && Number(health.visiblePosts || 0) > 0,
     monitor_health: health.level === 'ok' && !health.stale,
-    auto_resume: Boolean(health.running && health.phase === 'live')
+    auto_resume: Boolean(health.running && health.phase === 'live'),
+    backup_storage: status.secureBackup?.storage?.level === 'ok'
   };
 
   return recoveredByType[type] === true
@@ -4455,6 +4458,7 @@ function buildClientIncidents() {
         [/BingX PnL no disponible|Rate-limit PnL|frequency limit|100410/i, 'bingx_pnl_rate_limit', 'BingX PnL en rate-limit'],
         [/BingX sync|BingX safety|BingX posiciones/i, 'bingx_sync', 'Reconciliacion BingX'],
         [/Health:|Telegram health|Alerta scraper/i, 'monitor_health', 'Salud del monitor'],
+        [/Espacio de backups|Almacenamiento backups|Espacio crítico para backups/i, 'backup_storage', 'Almacenamiento de backups'],
         [/Backup redacted/i, 'backup', 'Backup automatico']
       ];
       const matched = rules.find(([pattern]) => pattern.test(message));
@@ -4563,6 +4567,53 @@ function secureKeyRecoveryTone(keyRecovery = {}) {
     return 'warn';
   }
   return 'positive';
+}
+
+function backupStorageCopiesText(storage = {}) {
+  if (!storage.available) {
+    return 'sin medición';
+  }
+  const stale = Number(storage.stalePartialFiles || 0);
+  return `${Number(storage.backupFiles || 0)} copias · ${formatStorageBytes(storage.backupBytes)}${stale ? ` · ${stale} parcial${stale === 1 ? '' : 'es'}` : ''}`;
+}
+
+function backupStorageFreeText(storage = {}) {
+  if (!storage.available) {
+    return 'sin medición';
+  }
+  const percent = Number(storage.freePercent);
+  const percentText = Number.isFinite(percent)
+    ? `${percent.toLocaleString('es-ES', { maximumFractionDigits: 1 })}%`
+    : '-';
+  return `${formatStorageBytes(storage.freeBytes)} · ${percentText}`;
+}
+
+function backupStorageTone(storage = {}) {
+  if (storage.level === 'critical') {
+    return 'negative';
+  }
+  if (storage.level === 'warn' || storage.level === 'unavailable' || !storage.available) {
+    return 'warn';
+  }
+  return 'positive';
+}
+
+function formatStorageBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return '-';
+  }
+  const units = [
+    ['TB', 1024 ** 4],
+    ['GB', 1024 ** 3],
+    ['MB', 1024 ** 2],
+    ['KB', 1024]
+  ];
+  const selected = units.find(([, divisor]) => bytes >= divisor);
+  if (!selected) {
+    return `${Math.round(bytes)} B`;
+  }
+  return `${(bytes / selected[1]).toLocaleString('es-ES', { maximumFractionDigits: 1 })} ${selected[0]}`;
 }
 
 function renderTelegramWatchPanel() {

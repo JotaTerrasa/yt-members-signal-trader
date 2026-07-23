@@ -14,6 +14,7 @@ import { BingXClient } from './bingxClient.js';
 import { estimateBingXClockSample } from './bingxClock.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
 import { buildSecureBackupStatus } from './backupContinuity.js';
+import { backupStorageAlertAction, inspectBackupStorage } from './backupStorage.js';
 import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
 import { ExecutionRetryStore } from './executionRetryStore.js';
 import { exchangeProtectionGaps, hasStopLossProtection } from './exchangeProtection.js';
@@ -47,7 +48,8 @@ const vendorAssets = new Map([
 ]);
 const dataDir = join(rootDir, '.data');
 const backupDir = join(dataDir, 'backups');
-const secureBackupStatusFile = join(backupDir, 'secure', 'status.json');
+const secureBackupDir = join(backupDir, 'secure');
+const secureBackupStatusFile = join(secureBackupDir, 'status.json');
 const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
 const httpSecurity = buildHttpSecurity();
@@ -72,6 +74,9 @@ const ORDER_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1000;
 const PNL_BACKOFF_DEFAULT_MS = 5 * 60 * 1000;
 const PNL_BACKOFF_MAX_MS = 15 * 60 * 1000;
 const REDACTED_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const BACKUP_STORAGE_CHECK_MS = 15 * 60 * 1000;
+const BACKUP_STORAGE_CACHE_MS = 60 * 1000;
+const BACKUP_STORAGE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const BACKEND_RESTART_CONFIRMATION = 'REINICIAR_BACKEND';
 const STOP_LOSS_RETRY_FIRST_DELAY_MS = 10_000;
 const STOP_LOSS_RETRY_INTERVAL_MS = 15_000;
@@ -154,6 +159,17 @@ let pnlSourcesLastGood = pnlSnapshotStore.getSources(currentMonthKey());
 let pnlBackoffUntil = 0;
 let pnlBackoffReason = '';
 let backupTimer = null;
+let backupStorageTimer = null;
+let backupStorageCheckInFlight = null;
+let backupStorageStatus = {
+  available: false,
+  checkedAt: null,
+  level: 'unavailable',
+  reason: 'inspection_unavailable',
+  lastError: null
+};
+let backupStorageLastAlertAt = 0;
+let backupStorageLastAlertLevel = null;
 let signalCoverageTimer = null;
 let bingxClockTimer = null;
 let bingxClockInFlight = null;
@@ -1999,7 +2015,7 @@ const server = createServer(async (request, response) => {
         generatedAt: new Date().toISOString(),
         health: buildHealth(),
         exchangeSafety: buildExchangeSafety(),
-        incidents: buildIncidentSnapshot(),
+        incidents: buildIncidentSnapshot(secureBackup),
         backup: lastBackupStatus,
         secureBackup,
         pnlBackoff: pnlBackoffInfo(),
@@ -2109,6 +2125,9 @@ server.listen(port, host, () => {
     pushLog({ level: 'error', message: `Auto-resume monitor: ${error.message}`, at: new Date().toISOString() });
   });
   scheduleAutomaticRedactedBackup();
+  refreshBackupStorage({ notify: true, force: true }).catch((error) => {
+    pushLog({ level: 'warn', message: `Almacenamiento backups: ${error.message}`, at: new Date().toISOString() });
+  });
   refreshSignalCoverage({ notify: false, rememberExisting: true, recover: true }).catch((error) => {
     pushLog({ level: 'warn', message: `Cobertura de señales: ${error.message}`, at: new Date().toISOString() });
   });
@@ -2143,6 +2162,13 @@ signalCoverageTimer = setInterval(() => {
   });
 }, SIGNAL_COVERAGE_CHECK_MS);
 signalCoverageTimer.unref();
+
+backupStorageTimer = setInterval(() => {
+  refreshBackupStorage({ notify: true, force: true }).catch((error) => {
+    pushLog({ level: 'warn', message: `Almacenamiento backups: ${error.message}`, at: new Date().toISOString() });
+  });
+}, BACKUP_STORAGE_CHECK_MS);
+backupStorageTimer.unref();
 
 const sseHeartbeatTimer = setInterval(() => {
   broadcast('heartbeat', { at: new Date().toISOString() });
@@ -2781,12 +2807,15 @@ function statisticalStatusLabel(closedTrades) {
   return `Muestra suficiente para empezar a contrastar hipotesis (${closedTrades} cierres), con validacion fuera de muestra.`;
 }
 
-function buildIncidentSnapshot() {
+function buildIncidentSnapshot(secureBackup = {}) {
   const logs = state.logs || [];
-  const incidents = logs
+  const storageIncident = buildBackupStorageIncident(secureBackup.storage);
+  const incidents = [
+    ...(storageIncident ? [storageIncident] : []),
+    ...logs
     .map(classifyIncidentLog)
     .filter(Boolean)
-    .slice(0, 30);
+  ].slice(0, 30);
   const counts = incidents.reduce((summary, incident) => {
     summary.total += 1;
     summary[incident.level] = (summary[incident.level] || 0) + 1;
@@ -2897,11 +2926,130 @@ async function writeAutomaticRedactedBackup(reason = 'scheduled') {
   return lastBackupStatus;
 }
 
+function buildBackupStorageIncident(storage = {}) {
+  if (!['warn', 'critical', 'unavailable'].includes(storage.level)) {
+    return null;
+  }
+  return {
+    at: storage.checkedAt || new Date().toISOString(),
+    level: storage.level === 'critical' ? 'error' : 'warn',
+    type: 'backup_storage',
+    title: storage.level === 'critical' ? 'Espacio de backup crítico' : 'Revisar almacenamiento de backups',
+    message: backupStorageSummary(storage)
+  };
+}
+
 async function loadSecureBackupStatus() {
-  const record = await readFile(secureBackupStatusFile, 'utf8')
-    .then((value) => JSON.parse(value))
-    .catch(() => ({}));
-  return buildSecureBackupStatus(record);
+  const [record, storage] = await Promise.all([
+    readFile(secureBackupStatusFile, 'utf8')
+      .then((value) => JSON.parse(value))
+      .catch(() => ({})),
+    refreshBackupStorage({ notify: false })
+  ]);
+  return buildSecureBackupStatus({ ...record, storage });
+}
+
+async function refreshBackupStorage({ notify = false, force = false } = {}) {
+  const checkedAt = Date.parse(String(backupStorageStatus.checkedAt || ''));
+  if (!force && Number.isFinite(checkedAt) && Date.now() - checkedAt < BACKUP_STORAGE_CACHE_MS) {
+    return backupStorageStatus;
+  }
+  if (backupStorageCheckInFlight) {
+    const current = await backupStorageCheckInFlight;
+    if (notify) {
+      await notifyBackupStorageStatus(current);
+    }
+    return current;
+  }
+
+  backupStorageCheckInFlight = (async () => {
+    const current = await inspectBackupStorage(secureBackupDir, { filesystemPath: dataDir });
+    backupStorageStatus = current;
+    if (notify) {
+      await notifyBackupStorageStatus(current);
+    }
+    return current;
+  })();
+  try {
+    return await backupStorageCheckInFlight;
+  } finally {
+    backupStorageCheckInFlight = null;
+  }
+}
+
+async function notifyBackupStorageStatus(storage = {}) {
+  const level = String(storage.level || 'unavailable');
+  const action = backupStorageAlertAction({
+    previousLevel: backupStorageLastAlertLevel,
+    currentLevel: level,
+    lastAlertAt: backupStorageLastAlertAt,
+    now: Date.now(),
+    cooldownMs: BACKUP_STORAGE_ALERT_COOLDOWN_MS
+  });
+  if (action === 'recovered') {
+    const message = `Almacenamiento recuperado. ${backupStorageSummary(storage)}`;
+    pushLog({ level: 'info', message, at: new Date().toISOString() });
+    await telegramNotifier.sendAlert('Almacenamiento de backups recuperado', message).catch((error) => {
+      pushLog({ level: 'warn', message: `Telegram storage recovery: ${error.message}`, at: new Date().toISOString() });
+    });
+    backupStorageLastAlertAt = Date.now();
+    backupStorageLastAlertLevel = level;
+    return;
+  }
+  if (action === 'none') {
+    backupStorageLastAlertLevel = level;
+    return;
+  }
+  backupStorageLastAlertLevel = level;
+  backupStorageLastAlertAt = Date.now();
+  const title = level === 'critical'
+    ? 'Espacio crítico para backups'
+    : level === 'unavailable'
+      ? 'No se puede medir el almacenamiento'
+      : 'Espacio de backups bajo';
+  const message = `${backupStorageSummary(storage)} No se ha borrado ningún archivo.`;
+  pushLog({
+    level: level === 'critical' ? 'error' : 'warn',
+    message: `${title}: ${message}`,
+    at: new Date().toISOString()
+  });
+  await telegramNotifier.sendAlert(title, message).catch((error) => {
+    pushLog({ level: 'warn', message: `Telegram storage alert: ${error.message}`, at: new Date().toISOString() });
+  });
+}
+
+function backupStorageSummary(storage = {}) {
+  if (!storage.available) {
+    return 'La aplicación no pudo medir el almacenamiento local de backups.';
+  }
+  const free = formatStorageBytes(storage.freeBytes);
+  const freePercent = Number.isFinite(Number(storage.freePercent))
+    ? `${Number(storage.freePercent).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%`
+    : '-';
+  const backupSize = formatStorageBytes(storage.backupBytes);
+  const stale = Number(storage.stalePartialFiles || 0);
+  const partialText = stale > 0
+    ? ` Hay ${stale} parcial${stale === 1 ? '' : 'es'} abandonado${stale === 1 ? '' : 's'}.`
+    : '';
+  return `Libres ${free} (${freePercent}); ${Number(storage.backupFiles || 0)} copias ocupan ${backupSize}.${partialText}`;
+}
+
+function formatStorageBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return '-';
+  }
+  const units = [
+    ['TB', 1024 ** 4],
+    ['GB', 1024 ** 3],
+    ['MB', 1024 ** 2],
+    ['KB', 1024]
+  ];
+  const selected = units.find(([, divisor]) => bytes >= divisor);
+  if (!selected) {
+    return `${Math.round(bytes)} B`;
+  }
+  return `${(bytes / selected[1]).toLocaleString('es-ES', { maximumFractionDigits: 1 })} ${selected[0]}`;
 }
 
 function syncPriceSubscriptions(exchangePositionsOrSymbols) {
@@ -5874,6 +6022,10 @@ async function performShutdown() {
   }
   if (backupTimer) {
     clearInterval(backupTimer);
+  }
+  if (backupStorageTimer) {
+    clearInterval(backupStorageTimer);
+    backupStorageTimer = null;
   }
   if (signalCoverageTimer) {
     clearInterval(signalCoverageTimer);

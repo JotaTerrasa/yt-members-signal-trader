@@ -489,6 +489,8 @@ node scripts/secureBackup.js drill --input ".data/backups/secure/ARCHIVO.fmbak"
 
 El resultado se guarda sin secretos en `.data/backups/secure/status.json`. La guardia nocturna distingue en pantalla el backup redactado, el backup cifrado restaurado, la antigüedad de la última copia del perfil Chromium y si existe una clave de recuperación verificada en otro volumen. Solo publica una huella corta y una etiqueta saneada, nunca la clave ni su ruta completa. La tarea diaria de las 03:15 y la semanal del perfil ejecutan el simulacro automáticamente. No se elimina ninguna copia histórica.
 
+La aplicación mide cada quince minutos el número y tamaño de los `.fmbak`, los parciales abandonados y el espacio libre del volumen. Avisa cuando quedan 10 GiB o menos, o un 5% o menos del volumen; pasa a crítico con 2 GiB o menos, o un 2% o menos. La lectura aparece como `Almacén local` y `Disco libre` en Guardia nocturna; si las alertas de salud de Telegram están activas, un cambio de nivel se notifica con un intervalo mínimo de seis horas. Esta vigilancia nunca borra, rota ni mueve archivos.
+
 Para añadir una segunda copia en otra unidad o recurso montado, configura el destino de forma explícita:
 
 ```powershell
@@ -579,7 +581,7 @@ Endpoints:
 | `GET /api/health` | Salud del monitor. |
 | `GET /api/state` | Estado completo de app y monitor. |
 | `GET /api/audit` | Snapshot auditable. |
-| `GET /api/operational-status` | Guardia, incidencias, backups redactado/cifrado y cooldown PnL. |
+| `GET /api/operational-status` | Guardia, incidencias, backups, capacidad local saneada y cooldown PnL. |
 | `GET /api/price-feed` | Estado WebSocket, cotizaciones y diagnóstico pasivo del reloj de BingX. |
 | `GET /api/execution-packages` | Paquetes detectados, reintentos persistentes y estado de promoción. |
 | `GET /api/promotion-gate` | Criterios objetivos de muestra, cobertura, seguridad y resultado neto. |
@@ -610,6 +612,7 @@ src/
   editedSignalRecovery.js Correcciones recientes de aperturas editadas en Demo
   pnlSnapshotStore.js    Última lectura PnL válida y fallback por fuente
   promotionGate.js       Criterios de promoción sin activación automática
+  backupStorage.js       Capacidad local y parciales abandonados, solo observación
   httpSecurity.js        Autenticación opcional y protecciones HTTP
   bingxClient.js         Cliente REST BingX
   bingxClock.js          Desfase pasivo del reloj REST de BingX

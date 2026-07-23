@@ -87,6 +87,28 @@ export function buildSecureBackupStatus(record = {}, now = Date.now()) {
       resilient: Boolean(record.keyRecovery?.resilient && record.keyRecovery?.sameVolume === false),
       lastFailureAt: validIso(record.keyRecovery?.lastFailureAt),
       lastError: safeText(record.keyRecovery?.lastError)
+    },
+    storage: {
+      available: Boolean(record.storage?.available),
+      checkedAt: validIso(record.storage?.checkedAt),
+      level: allowedStorageLevel(record.storage?.level),
+      reason: allowedStorageReason(record.storage?.reason),
+      totalBytes: positiveNumber(record.storage?.totalBytes),
+      freeBytes: positiveNumber(record.storage?.freeBytes),
+      freePercent: boundedPercent(record.storage?.freePercent),
+      backupFiles: nonNegativeInteger(record.storage?.backupFiles),
+      backupBytes: positiveNumber(record.storage?.backupBytes),
+      backupSharePercent: boundedPercent(record.storage?.backupSharePercent),
+      partialFiles: nonNegativeInteger(record.storage?.partialFiles),
+      partialBytes: positiveNumber(record.storage?.partialBytes),
+      stalePartialFiles: nonNegativeInteger(record.storage?.stalePartialFiles),
+      oldestBackupAt: validIso(record.storage?.oldestBackupAt),
+      newestBackupAt: validIso(record.storage?.newestBackupAt),
+      warningThresholdBytes: positiveNumber(record.storage?.warningThresholdBytes),
+      criticalThresholdBytes: positiveNumber(record.storage?.criticalThresholdBytes),
+      warningThresholdPercent: boundedPercent(record.storage?.warningThresholdPercent),
+      criticalThresholdPercent: boundedPercent(record.storage?.criticalThresholdPercent),
+      lastError: safeStorageError(record.storage?.lastError)
     }
   };
 }
@@ -124,6 +146,30 @@ function safeFingerprint(value) {
 function positiveNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function nonNegativeInteger(value) {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : 0;
+}
+
+function boundedPercent(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
+}
+
+function allowedStorageLevel(value) {
+  return ['ok', 'warn', 'critical', 'unavailable'].includes(value) ? value : 'unavailable';
+}
+
+function allowedStorageReason(value) {
+  const allowed = ['ok', 'low_free_space', 'critical_free_space', 'stale_partial_files', 'inspection_unavailable'];
+  return allowed.includes(value) ? value : 'inspection_unavailable';
+}
+
+function safeStorageError(value) {
+  const match = String(value || '').match(/^storage_[A-Z0-9_-]+/i);
+  return match ? match[0].slice(0, 60) : null;
 }
 
 function allowedRoots(value) {

@@ -147,7 +147,7 @@ Reglas:
 - para respaldar `.yt-profile/`, detén Chromium/PM2 mediante `scripts/profileBackup.ps1` para que Cookies no quede bloqueado;
 - no excluyas Cookies del backup del perfil: contiene la sesión que permite recuperar el acceso web.
 
-La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro, raíces permitidas, salud de la réplica y verificación de la clave de recuperación. De esta última solo expone una huella SHA-256 truncada, una etiqueta saneada y si está en otro volumen. No publica la clave, la ruta completa del destino, la contraseña derivada ni el contenido del backup. La configuración privada vive en `~/.futures-magician/backup-mirror.json` con permisos restringidos al usuario.
+La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro, raíces permitidas, salud de la réplica y verificación de la clave de recuperación. De esta última solo expone una huella SHA-256 truncada, una etiqueta saneada y si está en otro volumen. La inspección de capacidad publica únicamente contadores, bytes, porcentajes y nivel; nunca rutas ni nombres individuales. No publica la clave, la ruta completa del destino, la contraseña derivada ni el contenido del backup. La configuración privada vive en `~/.futures-magician/backup-mirror.json` con permisos restringidos al usuario.
 
 ## UI expuesta
 

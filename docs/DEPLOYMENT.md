@@ -169,6 +169,8 @@ Si existe `~/.futures-magician/backup-mirror.json` y está habilitado, las misma
 
 La clave debe sobrevivir a la pérdida del equipo, pero no debe viajar junto a esos contenedores. Expórtala una sola vez a otro soporte con `npm run backup:secure:key:export -- --target "RUTA_ARCHIVO"` y revísala con `npm run backup:secure:key:verify -- --input "RUTA_ARCHIVO"`. Ambos comandos son manuales; las tareas programadas nunca copian la clave.
 
+La guardia comprueba el espacio de backups cada quince minutos. Mantén más de 10 GiB y más de un 5% del volumen libres para evitar avisos; con 2 GiB o menos, o un 2% o menos, el estado es crítico. La aplicación informa, pero no elimina ni rota copias automáticamente.
+
 ## 7. Verificación
 
 Health:

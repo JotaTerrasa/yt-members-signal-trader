@@ -199,6 +199,17 @@ try {
           sameVolume: false,
           resilient: true,
           lastError: null
+        },
+        storage: {
+          available: true,
+          checkedAt: new Date().toISOString(),
+          level: 'ok',
+          reason: 'ok',
+          freeBytes: 50 * (1024 ** 3),
+          freePercent: 50,
+          backupFiles: 12,
+          backupBytes: 2 * (1024 ** 3),
+          stalePartialFiles: 0
         }
       }
     };
@@ -211,6 +222,10 @@ try {
   if (!backupContinuityPanel.includes('Backup redactado')
     || !backupContinuityPanel.includes('Backup cifrado')
     || !backupContinuityPanel.includes('restaurado')
+    || !backupContinuityPanel.includes('Almacén local')
+    || !backupContinuityPanel.includes('12 copias')
+    || !backupContinuityPanel.includes('Disco libre')
+    || !backupContinuityPanel.includes('50 GB')
     || !backupContinuityPanel.includes('Perfil Chromium')
     || !backupContinuityPanel.includes('guardado')
     || !backupContinuityPanel.includes('Réplica externa')

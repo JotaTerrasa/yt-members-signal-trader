@@ -389,6 +389,8 @@ npm run backup:secure:key:verify -- --input "E:\FuturesMagicianRecovery\backup.k
 
 La exportación exige una ruta explícita, no sobrescribe, verifica la copia y rechaza el proyecto y todo el sistema de archivos que contenga la réplica cifrada. Guarda la clave y los `.fmbak` en soportes separados. La guardia muestra `Clave recuperación` en verde solo cuando la última comprobación corresponde a otro volumen; una copia en el mismo disco permanece como advertencia.
 
+La misma guardia muestra `Almacén local` y `Disco libre`. El nivel cambia a aviso cuando quedan 10 GiB o menos, o un 5% o menos del volumen; pasa a crítico con 2 GiB o menos, o un 2% o menos. También avisa si un archivo parcial lleva más de una hora abandonado. La aplicación nunca limpia esos archivos. La resolución queda en manos del operador: amplía el volumen o archiva copias únicamente después de verificarlas, sin borrar `.data/` ni `.yt-profile/`.
+
 Backup de datos y perfil Chromium, deteniendo PM2 durante la captura:
 
 ```powershell

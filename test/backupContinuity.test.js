@@ -44,6 +44,21 @@ test('publica una copia reciente y restaurada sin exponer campos desconocidos', 
       sameVolume: false,
       resilient: true
     },
+    storage: {
+      available: true,
+      checkedAt: '2026-07-23T11:04:00.000Z',
+      level: 'ok',
+      reason: 'ok',
+      totalBytes: 100000,
+      freeBytes: 60000,
+      freePercent: 60,
+      backupFiles: 14,
+      backupBytes: 4000,
+      backupSharePercent: 4,
+      partialFiles: 0,
+      partialBytes: 0,
+      stalePartialFiles: 0
+    },
     secretField: 'no-publicar'
   }, now);
 
@@ -61,6 +76,9 @@ test('publica una copia reciente y restaurada sin exponer campos desconocidos', 
   assert.equal(status.keyRecovery.stale, false);
   assert.equal(status.keyRecovery.resilient, true);
   assert.equal(status.keyRecovery.fingerprint, '0123456789abcdef');
+  assert.equal(status.storage.level, 'ok');
+  assert.equal(status.storage.freePercent, 60);
+  assert.equal(status.storage.backupFiles, 14);
   assert.equal(Object.hasOwn(status, 'secretField'), false);
 });
 
@@ -103,6 +121,14 @@ test('sanea nombres, errores y fechas antes de enviarlos al navegador', () => {
       targetLabel: '../USB\\privado',
       fingerprint: 'no-es-una-huella',
       lastError: 'fallo\nclave'
+    },
+    storage: {
+      available: true,
+      level: 'inventado',
+      reason: 'C:\\ruta\\privada',
+      freePercent: 900,
+      backupFiles: -5,
+      lastError: 'storage_EACCES\nC:\\ruta\\privada'
     }
   }, now);
 
@@ -116,4 +142,9 @@ test('sanea nombres, errores y fechas antes de enviarlos al navegador', () => {
   assert.equal(status.keyRecovery.fingerprint, null);
   assert.equal(status.keyRecovery.lastError, 'fallo clave');
   assert.equal(status.keyRecovery.stale, true);
+  assert.equal(status.storage.level, 'unavailable');
+  assert.equal(status.storage.reason, 'inspection_unavailable');
+  assert.equal(status.storage.freePercent, null);
+  assert.equal(status.storage.backupFiles, 0);
+  assert.equal(status.storage.lastError, 'storage_EACCES');
 });

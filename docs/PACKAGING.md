@@ -210,7 +210,7 @@ npm run backup:secure
 node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
 ```
 
-La creación es transaccional: cifra en un archivo parcial ubicado junto al destino, lo descifra para validar su autenticidad y contenido y lo renombra al nombre final únicamente cuando la comprobación termina. Las copias anteriores no se sustituyen ni se eliminan.
+La creación es transaccional: cifra en un archivo parcial ubicado junto al destino, lo descifra para validar su autenticidad y contenido y lo renombra al nombre final únicamente cuando la comprobación termina. Las copias anteriores no se sustituyen ni se eliminan. La aplicación mide el espacio libre y los parciales abandonados, pero la gestión de capacidad permanece deliberadamente manual.
 
 Para mover la instalación a otra máquina, conserva el `.fmbak` y la clave en canales separados, instala el proyecto y restaura primero en un directorio aislado. La exportación de la clave no sobrescribe destinos y solo se considera resiliente cuando el soporte pertenece a otro volumen. El backup del perfil requiere una ventana de mantenimiento con PM2 detenido.
 
