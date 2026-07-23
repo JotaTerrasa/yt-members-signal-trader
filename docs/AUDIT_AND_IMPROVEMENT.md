@@ -247,6 +247,8 @@ El corte de referencia del 22 de julio de 2026 contiene 34 cierres en la cohorte
 
 El panel y el informe expresan por ello el veredicto `Mejora técnica; rentabilidad no demostrada`. El bootstrap usa una semilla fija y 4.000 remuestreos para que dos auditorías sobre la misma evidencia produzcan exactamente la misma salida. Es una medida descriptiva de incertidumbre, no una predicción ni una garantía de beneficio.
 
+En la interfaz, `Cohorte vigente` y `Mes completo` son ámbitos completos, no simples etiquetas del resumen superior. Al alternarlos cambian conjuntamente las métricas, los puentes de reconciliación, las atribuciones, las tablas de impacto, los filtros y las filas auditadas. El cambio reinicia cualquier filtro anterior para evitar una comparación accidental entre subconjuntos distintos. Los accesos de ejecución, costes y cobertura desplazan la vista hasta la evidencia correspondiente. Esta navegación es exclusivamente analítica y no altera señales, órdenes ni parámetros de riesgo.
+
 ### Diagnóstico del deterioro de entrada
 
 El diagnóstico añadido al corte del 22 de julio atribuye la desviación adversa sin modificar la operativa. En la cohorte actual hay 38 aperturas medibles y 23 superan el 0,15%. El tramo `señal → cotización previa` pasa del 0,0546% al 0,0643% de media adversa, mientras que `cotización previa → fill` pasa del 0,0718% al 0,0808%. Ambos tramos empeoran y el segundo sigue siendo el de mayor magnitud observada.

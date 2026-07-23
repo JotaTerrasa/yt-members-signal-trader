@@ -544,12 +544,31 @@ function bindEvents() {
   });
   const alignmentPanel = document.querySelector('#sheet-vst-alignment');
   alignmentPanel?.addEventListener('click', async (event) => {
+    const drilldownLink = event.target.closest('[data-economic-drilldown]');
+    if (drilldownLink) {
+      const targetId = String(drilldownLink.getAttribute('href') || '').replace(/^#/, '');
+      const target = document.getElementById(targetId);
+      if (target && elements.pnlView?.contains(target)) {
+        event.preventDefault();
+        const nextHash = `#${targetId}`;
+        if (window.location.hash !== nextHash) {
+          window.history.pushState(null, '', nextHash);
+        }
+        appState.pnlHashAnchorRequested = targetId;
+        appState.pnlHashAnchorSettled = '';
+        scrollPnlHashAnchorNow(targetId);
+      }
+      return;
+    }
     const economicScopeButton = event.target.closest('[data-economic-diagnosis-scope]');
     if (economicScopeButton) {
       const scope = economicScopeButton.dataset.economicDiagnosisScope;
       if ((scope === 'cohort' || scope === 'month') && scope !== appState.economicDiagnosisScope) {
         appState.economicDiagnosisScope = scope;
-        renderReplicaControlPreservingScroll(appState.replicaAudit);
+        appState.replicaAuditFilter = 'all';
+        appState.replicaAuditVisibleLimit = REPLICA_AUDIT_PAGE_SIZE;
+        renderReplicaControlPreservingScroll(appState.replicaAudit, { resetScroll: true });
+        window.lucide?.createIcons();
         window.requestAnimationFrame(() => {
           document.querySelector(`[data-economic-diagnosis-scope="${scope}"]`)?.focus();
         });
@@ -5443,10 +5462,12 @@ function renderReplicaControlPreservingScroll(audit, { resetScroll = false } = {
     left: previous.scrollLeft
   } : null;
   elements.replicaControl.innerHTML = renderReplicaAudit(audit);
+  const scopeContext = replicaAuditScopeContext(audit);
+  const scopeSummary = scopeContext.summary;
   requestAnimationFrame(() => {
-    renderReplicaGapWaterfall('replica-gap-waterfall', audit?.summary?.gapBridge);
-    renderMatchedGapWaterfall('replica-matched-gap-waterfall', audit?.summary?.matchedGapAttribution);
-    renderExecutionPriceChainWaterfall('execution-price-chain-waterfall', audit?.summary?.executionPriceChain);
+    renderReplicaGapWaterfall('replica-gap-waterfall', scopeSummary?.gapBridge);
+    renderMatchedGapWaterfall('replica-matched-gap-waterfall', scopeSummary?.matchedGapAttribution);
+    renderExecutionPriceChainWaterfall('execution-price-chain-waterfall', scopeSummary?.executionPriceChain);
   });
   if (!scroll) {
     return;
@@ -5733,7 +5754,7 @@ function renderReplicaGapBridge(bridge, referenceCoverage = {}) {
   };
 
   return `
-    <section class="replica-gap-panel" aria-labelledby="replica-gap-title">
+    <section class="replica-gap-panel" id="replica-gap-bridge" aria-labelledby="replica-gap-title">
       <div class="replica-gap-heading">
         <div>
           <span>Puente contable</span>
@@ -5790,7 +5811,7 @@ function renderMatchedGapAttribution(attribution) {
   `).join('');
 
   return `
-    <section class="replica-gap-panel replica-matched-gap-panel" aria-labelledby="replica-matched-gap-title">
+    <section class="replica-gap-panel replica-matched-gap-panel" id="replica-matched-gap-panel" aria-labelledby="replica-matched-gap-title">
       <div class="replica-gap-heading">
         <div>
           <span>Diagnóstico de ejecución</span>
@@ -5859,7 +5880,7 @@ function renderExecutionRouteAnalysis(analysis) {
     : `Residual ${formatMoney(analysis.residual, 'VST')}`;
 
   return `
-    <section class="replica-gap-panel execution-route-panel" aria-labelledby="execution-route-title">
+    <section class="replica-gap-panel execution-route-panel" id="execution-route-panel" aria-labelledby="execution-route-title">
       <div class="replica-gap-heading">
         <div>
           <span>Ruta causal de salida</span>
@@ -5964,7 +5985,7 @@ function renderExecutionPriceChain(chain, latency, orderHistoryEvidence, orderHi
   };
 
   return `
-    <section class="replica-gap-panel execution-price-chain-panel" aria-labelledby="execution-price-chain-title">
+    <section class="replica-gap-panel execution-price-chain-panel" id="execution-price-chain-panel" aria-labelledby="execution-price-chain-title">
       <div class="replica-gap-heading">
         <div>
           <span>Raíz de la ejecución</span>
@@ -6125,8 +6146,9 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
     `;
   }
 
-  const summary = audit.summary || {};
-  const rows = audit.rows || [];
+  const scopeContext = replicaAuditScopeContext(audit);
+  const summary = scopeContext.summary;
+  const rows = scopeContext.rows;
   const filteredRows = filterReplicaAuditRows(rows, appState.replicaAuditFilter);
   const visibleRows = filteredRows.slice(0, appState.replicaAuditVisibleLimit);
   const criticalRows = filteredRows.filter((row) => row.severity === 'negative').length;
@@ -6174,9 +6196,10 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
     ? `${referenceCoverage.openReferenceRows || 0} filas abiertas · ${referenceCoverage.outsideCoverageRows || 0} VST pendientes`
     : `${referenceCoverage.outsideCoverageRows || 0} VST posteriores`;
   const filterIsActive = appState.replicaAuditFilter !== 'all';
+  const scopeLabel = scopeContext.scope === 'cohort' ? 'Cohorte vigente' : 'Mes completo';
   const rowCountLabel = filterIsActive
-    ? `${filteredRows.length} filtradas de ${rows.length} - ${criticalRows} críticas - ${warningRows} por revisar`
-    : `${rows.length} filas - ${criticalRows} críticas - ${warningRows} por revisar`;
+    ? `${scopeLabel} · ${filteredRows.length} filtradas de ${rows.length} - ${criticalRows} críticas - ${warningRows} por revisar`
+    : `${scopeLabel} · ${rows.length} filas - ${criticalRows} críticas - ${warningRows} por revisar`;
 
   return `
     <div class="replica-audit">
@@ -6253,11 +6276,13 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
 }
 
 function renderEconomicDiagnosis(audit = {}) {
-  const cohort = audit.cohort || null;
-  const cohortSummary = cohort?.summary;
-  const hasCohort = Boolean(cohortSummary?.gapBridge && cohortSummary?.matchedGapAttribution);
-  const scope = appState.economicDiagnosisScope === 'month' || !hasCohort ? 'month' : 'cohort';
-  const summary = scope === 'cohort' ? cohortSummary : (audit.summary || {});
+  const scopeContext = replicaAuditScopeContext(audit);
+  const {
+    cohort,
+    hasCohort,
+    scope,
+    summary
+  } = scopeContext;
   const bridge = summary.gapBridge;
   const attribution = summary.matchedGapAttribution;
   if (!bridge || !Array.isArray(bridge.steps) || !attribution || !Array.isArray(attribution.steps)) {
@@ -6278,19 +6303,25 @@ function renderEconomicDiagnosis(audit = {}) {
       key: 'execution',
       label: 'Ejecución emparejada',
       value: executionGap,
-      detail: 'Entrada y salida frente a la hoja'
+      detail: 'Entrada y salida frente a la hoja',
+      target: 'replica-matched-gap-panel',
+      action: 'Ver desglose de ejecución'
     },
     {
       key: 'costs',
       label: 'Comisiones y funding',
       value: costsGap,
-      detail: 'Costes acreditados por BingX'
+      detail: 'Costes acreditados por BingX',
+      target: 'cost-control-panel',
+      action: 'Ver control de costes'
     },
     {
       key: 'coverage',
       label: 'Cobertura y ausencias',
       value: coverageGap,
-      detail: 'No ejecutadas, extras y filas pendientes'
+      detail: 'No ejecutadas, extras y filas pendientes',
+      target: 'replica-gap-bridge',
+      action: 'Ver puente contable'
     }
   ];
   const totalDrag = causes.reduce((total, cause) => total + Math.abs(Math.min(0, cause.value)), 0);
@@ -6337,7 +6368,7 @@ function renderEconomicDiagnosis(audit = {}) {
       ? `${historicalDefectRows} incidencia${historicalDefectRows === 1 ? '' : 's'} histórica${historicalDefectRows === 1 ? '' : 's'} separada${historicalDefectRows === 1 ? '' : 's'}`
       : 'Sin incidencias históricas en la muestra'
   ].filter(Boolean).join(' · ');
-  const scopeContext = scope === 'cohort'
+  const scopeDescription = scope === 'cohort'
     ? `${cohort?.sampleStatus?.label || 'Cohorte vigente'} desde ${formatDateTime(cohort?.startedAt)}`
     : `${formatMonth(audit.month)} completo`;
   const scopeNote = scope === 'cohort'
@@ -6375,6 +6406,10 @@ function renderEconomicDiagnosis(audit = {}) {
       <span class="${escapeAttribute(cause.key)}">${escapeHtml(cause.label)}</span>
       <strong class="${amountClass(cause.value)}">${escapeHtml(formatMoney(cause.value, 'VST'))}</strong>
       <small>${escapeHtml(`${formatPercent(cause.share)} del arrastre · ${cause.detail}`)}</small>
+      <a class="economic-diagnosis-link" href="#${escapeAttribute(cause.target)}" data-economic-drilldown="${escapeAttribute(cause.key)}">
+        <span>${escapeHtml(cause.action)}</span>
+        <i data-lucide="arrow-down"></i>
+      </a>
     </div>
   `).join('');
 
@@ -6384,7 +6419,7 @@ function renderEconomicDiagnosis(audit = {}) {
         <div>
           <span>Diagnóstico económico</span>
           <strong id="economic-diagnosis-title">Por qué la réplica se separa de la hoja</strong>
-          <small>${escapeHtml(scopeContext)}</small>
+          <small>${escapeHtml(scopeDescription)}</small>
         </div>
         <div class="economic-diagnosis-toolbar">
           ${scopeControls}
@@ -6420,6 +6455,23 @@ function renderEconomicDiagnosis(audit = {}) {
       <p class="economic-diagnosis-evidence">${escapeHtml(`${evidence}. ${scopeNote}`)}</p>
     </section>
   `;
+}
+
+function replicaAuditScopeContext(audit = {}) {
+  const safeAudit = audit && typeof audit === 'object' ? audit : {};
+  const cohort = safeAudit.cohort || null;
+  const cohortSummary = cohort?.summary;
+  const hasCohort = Boolean(cohortSummary?.gapBridge && cohortSummary?.matchedGapAttribution);
+  const scope = appState.economicDiagnosisScope === 'month' || !hasCohort ? 'month' : 'cohort';
+  return {
+    cohort,
+    hasCohort,
+    scope,
+    summary: scope === 'cohort' ? cohortSummary : (safeAudit.summary || {}),
+    rows: scope === 'cohort'
+      ? (Array.isArray(cohort?.rows) ? cohort.rows : [])
+      : (Array.isArray(safeAudit.rows) ? safeAudit.rows : [])
+  };
 }
 
 function renderImprovementCohort(cohort, cohortHistory = [], comparison = null) {
@@ -10556,11 +10608,26 @@ function settlePnlHashAnchor() {
     return;
   }
 
-  appState.pnlHashAnchorRequested = target.id;
-  appState.pnlHashAnchorSettled = target.id;
+  const targetId = target.id;
+  appState.pnlHashAnchorRequested = targetId;
+  schedulePnlHashAnchorScroll(targetId);
+}
+
+function schedulePnlHashAnchorScroll(targetId) {
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => target.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    requestAnimationFrame(() => {
+      scrollPnlHashAnchorNow(targetId);
+    });
   });
+}
+
+function scrollPnlHashAnchorNow(targetId) {
+  const currentTarget = pnlHashTarget();
+  if (!currentTarget || currentTarget.id !== targetId) {
+    return;
+  }
+  currentTarget.scrollIntoView({ block: 'start' });
+  appState.pnlHashAnchorSettled = targetId;
 }
 
 function pnlHashTarget() {
