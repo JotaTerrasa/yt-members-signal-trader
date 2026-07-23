@@ -1,8 +1,8 @@
 # Auditoría integral del sistema
 
-Generada: 2026-07-23T01:12:52.062Z
+Generada: 2026-07-23T03:14:36.560Z
 Mes auditado: 2026-07
-Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T01:12:52.553Z
+Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T03:14:36.941Z
 
 ## Resumen ejecutivo
 
@@ -320,7 +320,7 @@ Ventana: 2026-07-01T10:55:57.218Z a 2026-07-23T01:12:52.553Z
 - Distancia máxima del stop: 5.00%
 - Lectura Telegram: 5 s
 - Recarga Telegram: 30 s
-- Reloj REST BingX: +800 ms de offset; RTT 188 ms; antigüedad 248.1 s; warn; solo observación
+- Reloj REST BingX: +850 ms de offset; RTT 184 ms; antigüedad 62.2 s; warn; solo observación
 
 ## Interpretación
 

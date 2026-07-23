@@ -6174,6 +6174,7 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         </div>
         <button class="button secondary replica-cohort-button" type="button" data-start-improvement-cohort>Nueva cohorte</button>
       </div>
+      ${renderEconomicDiagnosis(audit)}
       <div class="replica-audit-grid">
         ${renderReplicaMetric('Hoja externa', formatMoney(summary.sheetPnl, 'USDT'), `${summary.sheetRows || 0} filas`, amountClass(summary.sheetPnl))}
         ${renderReplicaMetric('Réplica teórica', formatMoney(summary.replicaPnl, 'VST'), `${formatMoney(summary.defaultNotionalVST, 'VST')} por orden`, amountClass(summary.replicaPnl))}
@@ -6235,6 +6236,138 @@ function renderReplicaAudit(audit = appState.replicaAudit) {
         </div>
       ` : ''}
     </div>
+  `;
+}
+
+function renderEconomicDiagnosis(audit = {}) {
+  const summary = audit.summary || {};
+  const bridge = summary.gapBridge;
+  const attribution = summary.matchedGapAttribution;
+  if (!bridge || !Array.isArray(bridge.steps) || !attribution || !Array.isArray(attribution.steps)) {
+    return '';
+  }
+
+  const bridgeSteps = Object.fromEntries(bridge.steps.map((step) => [step.key, step]));
+  const attributionSteps = Object.fromEntries(attribution.steps.map((step) => [step.key, step]));
+  const stepValue = (steps, key) => Number(steps[key]?.value || 0);
+  const replicaPnl = Number(bridge.replicaPnl || 0);
+  const bingxNet = Number(bridge.bingxNet || 0);
+  const totalGap = bingxNet - replicaPnl;
+  const executionGap = stepValue(bridgeSteps, 'matched_gap');
+  const costsGap = stepValue(bridgeSteps, 'fees') + stepValue(bridgeSteps, 'funding');
+  const coverageGap = totalGap - executionGap - costsGap;
+  const causes = [
+    {
+      key: 'execution',
+      label: 'Ejecución emparejada',
+      value: executionGap,
+      detail: 'Entrada y salida frente a la hoja'
+    },
+    {
+      key: 'costs',
+      label: 'Comisiones y funding',
+      value: costsGap,
+      detail: 'Costes acreditados por BingX'
+    },
+    {
+      key: 'coverage',
+      label: 'Cobertura y ausencias',
+      value: coverageGap,
+      detail: 'No ejecutadas, extras y filas pendientes'
+    }
+  ];
+  const totalDrag = causes.reduce((total, cause) => total + Math.abs(Math.min(0, cause.value)), 0);
+  const causesWithShare = causes.map((cause) => ({
+    ...cause,
+    share: totalDrag > 0 ? (Math.abs(Math.min(0, cause.value)) / totalDrag) * 100 : 0
+  }));
+  const dominantCause = totalDrag > 0
+    ? [...causesWithShare]
+      .sort((left, right) => Math.abs(Math.min(0, right.value)) - Math.abs(Math.min(0, left.value)))[0]
+    : null;
+  const entryImpact = stepValue(attributionSteps, 'entry_execution');
+  const exitImpact = stepValue(attributionSteps, 'exit_execution');
+  const executionDrag = Math.abs(Math.min(0, entryImpact)) + Math.abs(Math.min(0, exitImpact));
+  const exitShare = executionDrag > 0
+    ? (Math.abs(Math.min(0, exitImpact)) / executionDrag) * 100
+    : 0;
+  const mainDrag = [...(summary.executionPriceChain?.mainDrags || [])]
+    .sort((left, right) => Math.abs(Number(right.value || 0)) - Math.abs(Number(left.value || 0)))[0];
+  const comparableRows = Number(bridge.counts?.matched || summary.pairedOutcomeAnalysis?.rows || 0);
+  const exactCoverage = Number(summary.orderHistoryEvidence?.exactCloseCoveragePercent);
+  const historicalDefectRows = Number(
+    (summary.executionRouteAnalysis?.families || [])
+      .find((family) => family.key === 'historical_defect')?.rows || 0
+  );
+  const reconciled = Boolean(bridge.reconciled && attribution.reconciled);
+  const diagnosis = !dominantCause
+    ? 'No hay contribuciones negativas que explicar en esta muestra.'
+    : dominantCause.key === 'execution'
+      ? `La ejecución de precios es el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas. La salida concentra ${formatPercent(exitShare)} del deterioro de ejecución emparejado.`
+      : dominantCause.key === 'costs'
+        ? `Los costes de BingX son el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas.`
+        : `Las operaciones no comparables o ausentes son el mayor arrastre: ${formatPercent(dominantCause.share)} de las contribuciones negativas.`;
+  const evidence = [
+    `${comparableRows} operaciones emparejadas`,
+    Number.isFinite(exactCoverage) ? `${formatPercent(exactCoverage)} de cierres con fill exacto` : '',
+    historicalDefectRows
+      ? `${historicalDefectRows} incidencia${historicalDefectRows === 1 ? '' : 's'} histórica${historicalDefectRows === 1 ? '' : 's'} separada${historicalDefectRows === 1 ? '' : 's'}`
+      : 'Sin incidencias históricas en la muestra'
+  ].filter(Boolean).join(' · ');
+  const segments = causesWithShare
+    .filter((cause) => cause.share > 0)
+    .map((cause) => `
+      <span
+        class="economic-diagnosis-segment ${escapeAttribute(cause.key)}"
+        style="--economic-share:${Math.min(100, Math.max(0, cause.share)).toFixed(4)}%"
+        title="${escapeAttribute(`${cause.label}: ${formatMoney(cause.value, 'VST')} (${formatPercent(cause.share)})`)}"
+      ></span>
+    `).join('');
+  const legend = causesWithShare.map((cause) => `
+    <div class="economic-diagnosis-cause">
+      <span class="${escapeAttribute(cause.key)}">${escapeHtml(cause.label)}</span>
+      <strong class="${amountClass(cause.value)}">${escapeHtml(formatMoney(cause.value, 'VST'))}</strong>
+      <small>${escapeHtml(`${formatPercent(cause.share)} del arrastre · ${cause.detail}`)}</small>
+    </div>
+  `).join('');
+
+  return `
+    <section class="economic-diagnosis" id="economic-diagnosis" aria-labelledby="economic-diagnosis-title">
+      <div class="economic-diagnosis-heading">
+        <div>
+          <span>Diagnóstico económico</span>
+          <strong id="economic-diagnosis-title">Por qué la réplica se separa de la hoja</strong>
+        </div>
+        <span class="ledger-status ${escapeAttribute(reconciled ? 'positive' : 'warn')}">${escapeHtml(reconciled ? 'Reconciliado' : 'Datos parciales')}</span>
+      </div>
+      <div class="economic-diagnosis-flow" aria-label="Resultado teórico, resultado BingX y brecha total">
+        <div>
+          <span>Réplica teórica</span>
+          <strong class="${amountClass(replicaPnl)}">${escapeHtml(formatMoney(replicaPnl, 'VST'))}</strong>
+        </div>
+        <div>
+          <span>BingX neto</span>
+          <strong class="${amountClass(bingxNet)}">${escapeHtml(formatMoney(bingxNet, 'VST'))}</strong>
+        </div>
+        <div>
+          <span>Brecha total</span>
+          <strong class="${amountClass(totalGap)}">${escapeHtml(formatMoney(totalGap, 'VST'))}</strong>
+        </div>
+      </div>
+      <div
+        class="economic-diagnosis-track"
+        role="img"
+        aria-label="${escapeAttribute(causesWithShare.map((cause) => `${cause.label} ${formatPercent(cause.share)}`).join(', '))}"
+      >${segments}</div>
+      <div class="economic-diagnosis-causes">${legend}</div>
+      <div class="economic-diagnosis-conclusion${dominantCause ? ' negative' : ''}">
+        <strong>${escapeHtml(diagnosis)}</strong>
+        <span>${escapeHtml(mainDrag
+          ? `Mayor tramo individual: ${mainDrag.label}, ${formatMoney(mainDrag.value, 'VST')}.`
+          : 'Todavía no hay un tramo individual atribuible.')}</span>
+      </div>
+      <p class="economic-diagnosis-evidence">${escapeHtml(`${evidence}. La lectura mensual incluye el histórico completo; la cohorte vigente se evalúa por separado más abajo.`)}</p>
+    </section>
   `;
 }
 

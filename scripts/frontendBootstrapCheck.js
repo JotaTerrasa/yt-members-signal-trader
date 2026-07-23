@@ -1002,17 +1002,22 @@ try {
     document.querySelectorAll('.replica-impact-table:not(.symbol) tbody tr').length === 3
       && document.querySelectorAll('.replica-impact-table.symbol tbody tr').length === 4
       && document.querySelectorAll('.replica-audit-table tbody tr').length === 6
+      && document.querySelector('#economic-diagnosis')
   ), null, { timeout: 20_000 });
 
   const outcomeImpactState = await outcomeImpactPage.evaluate(() => {
     const categoryRows = [...document.querySelectorAll('.replica-impact-table:not(.symbol) tbody tr')];
     const symbolRows = [...document.querySelectorAll('.replica-impact-table.symbol tbody tr')];
     const wraps = [...document.querySelectorAll('.replica-impact-table-wrap')];
+    const economicDiagnosis = document.querySelector('#economic-diagnosis');
     wraps[0]?.scrollTo({ left: wraps[0].scrollWidth, behavior: 'instant' });
     return {
       total: document.querySelector('.replica-outcome-impact-total strong')?.textContent || '',
       categories: categoryRows.map((row) => row.textContent.replace(/\s+/g, ' ').trim()),
       symbols: symbolRows.map((row) => row.textContent.replace(/\s+/g, ' ').trim()),
+      economicDiagnosis: economicDiagnosis?.textContent.replace(/\s+/g, ' ').trim() || '',
+      economicSegments: [...document.querySelectorAll('.economic-diagnosis-segment')]
+        .map((segment) => segment.style.getPropertyValue('--economic-share')),
       horizontalRange: wraps[0] ? wraps[0].scrollWidth - wraps[0].clientWidth : 0,
       horizontalPosition: wraps[0]?.scrollLeft || 0
     };
@@ -1022,6 +1027,16 @@ try {
     || !outcomeImpactState.categories.some((row) => row.includes('Ganancia absorbida por costes') && row.includes('1'))
     || !outcomeImpactState.categories.some((row) => row.includes('Mismo signo neto') && row.includes('3'))
     || !outcomeImpactState.symbols.some((row) => row.includes('SOL-USDT') && row.includes('-13') && row.includes('13,3%') && row.includes('-15'))
+    || !outcomeImpactState.economicDiagnosis.includes('Réplica teórica 55,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('BingX neto 16,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('Brecha total -39,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('Ejecución emparejada -32,00 VST 82,1%')
+    || !outcomeImpactState.economicDiagnosis.includes('Comisiones y funding -7,00 VST 17,9%')
+    || !outcomeImpactState.economicDiagnosis.includes('La ejecución de precios es el mayor arrastre')
+    || !outcomeImpactState.economicDiagnosis.includes('Mayor tramo individual: Cotización a fill de salida, -11,00 VST')
+    || !outcomeImpactState.economicDiagnosis.includes('100% de cierres con fill exacto')
+    || !outcomeImpactState.economicDiagnosis.includes('1 incidencia histórica separada')
+    || outcomeImpactState.economicSegments.length !== 2
     || outcomeImpactState.horizontalRange <= 0
     || outcomeImpactState.horizontalPosition <= 0) {
     throw new Error(`El impacto económico no se representó correctamente: ${JSON.stringify(outcomeImpactState)}.`);
@@ -1053,6 +1068,35 @@ try {
     document.querySelectorAll('.replica-audit-table tbody tr').length === 6
       && document.querySelector('.replica-outcome-filter.active')?.dataset.replicaFilter === 'all'
   ));
+  await outcomeImpactPage.locator('#economic-diagnosis').evaluate((element) => {
+    element.scrollIntoView({ behavior: 'instant', block: 'start' });
+  });
+  await outcomeImpactPage.waitForTimeout(50);
+  const economicDiagnosisAnchorTop = await outcomeImpactPage.locator('#economic-diagnosis').evaluate((element) => (
+    element.getBoundingClientRect().top
+  ));
+  if (economicDiagnosisAnchorTop < 80 || economicDiagnosisAnchorTop > 130) {
+    throw new Error(`El ancla del diagnóstico económico quedó tapada: top=${economicDiagnosisAnchorTop}.`);
+  }
+  await outcomeImpactPage.setViewportSize({ width: 390, height: 844 });
+  const economicDiagnosisMobile = await outcomeImpactPage.evaluate(() => {
+    const flow = document.querySelector('.economic-diagnosis-flow');
+    const causes = document.querySelector('.economic-diagnosis-causes');
+    return {
+      viewportWidth: innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      flowColumns: flow ? getComputedStyle(flow).gridTemplateColumns.split(' ').length : 0,
+      causeColumns: causes ? getComputedStyle(causes).gridTemplateColumns.split(' ').length : 0,
+      diagnosisWidth: document.querySelector('#economic-diagnosis')?.getBoundingClientRect().width || 0
+    };
+  });
+  if (economicDiagnosisMobile.documentScrollWidth > economicDiagnosisMobile.viewportWidth
+    || economicDiagnosisMobile.flowColumns !== 1
+    || economicDiagnosisMobile.causeColumns !== 1
+    || economicDiagnosisMobile.diagnosisWidth <= 0
+    || economicDiagnosisMobile.diagnosisWidth > economicDiagnosisMobile.viewportWidth) {
+    throw new Error(`El diagnóstico económico no respondió bien en móvil: ${JSON.stringify(economicDiagnosisMobile)}.`);
+  }
   if (outcomeImpactErrors.length) {
     throw new Error(`Errores JavaScript en el impacto económico: ${outcomeImpactErrors.join(' | ')}`);
   }
@@ -1172,6 +1216,7 @@ try {
     mobileReliabilityResponsivePassed: true,
     tabletSheetResponsivePassed: true,
     tabletReliabilityResponsivePassed: true,
+    economicDiagnosisPanelPassed: true,
     outcomeImpactPanelPassed: true,
     manualPnlRefreshPassed: true
   }));
@@ -1373,6 +1418,70 @@ function economicImpactAuditFixture(month) {
             { key: 'ETH-USDT', label: 'ETH-USDT', rows: 2, netMismatch: 1, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 1, grossGapVsReplica: -6, costs: -3, costShareOfGapPercent: 33.33333333, gapVsReplica: -9 },
             { key: 'BTC-USDT', label: 'BTC-USDT', rows: 1, netMismatch: 0, marketDrivenNetMismatch: 0, costDrivenNetMismatch: 0, grossGapVsReplica: -1, costs: -1, costShareOfGapPercent: 50, gapVsReplica: -2 }
           ]
+        },
+        gapBridge: {
+          replicaPnl: 55,
+          bingxFees: -6.5,
+          bingxFunding: -0.5,
+          bingxNet: 16,
+          residual: 0,
+          reconciled: true,
+          counts: { matched: 6 },
+          steps: [
+            { key: 'matched_gap', label: 'Emparejadas vs hoja', value: -32, count: 6 },
+            { key: 'missing_execution', label: 'No ejecutadas', value: 0, count: 0 },
+            { key: 'fees', label: 'Comisiones', value: -6.5, count: null },
+            { key: 'funding', label: 'Funding', value: -0.5, count: null }
+          ]
+        },
+        matchedGapAttribution: {
+          replicaPnl: 55,
+          bingxGross: 23,
+          gap: -32,
+          residual: 0,
+          reconciled: true,
+          counts: { matched: 6, decomposable: 6 },
+          steps: [
+            { key: 'entry_execution', label: 'Diferencia de entrada', value: -12, count: 6 },
+            { key: 'exit_execution', label: 'Diferencia de salida', value: -20, count: 6 },
+            { key: 'size_and_fills', label: 'Cantidad y fills', value: 0, count: 6 }
+          ],
+          bySymbol: [],
+          byCloseKind: []
+        },
+        executionPriceChain: {
+          replicaPnl: 55,
+          bingxGross: 23,
+          residual: 0,
+          reconciled: true,
+          counts: { matched: 6, decomposable: 6, fullExitPath: 6 },
+          steps: [
+            { key: 'entry_reference', label: 'Referencia de entrada', value: -3, count: 6 },
+            { key: 'entry_quote_move', label: 'Señal a cotización', value: -4, count: 6 },
+            { key: 'entry_fill', label: 'Cotización a fill de entrada', value: -5, count: 6 },
+            { key: 'entry_missing_evidence', label: 'Entrada sin traza', value: 0, count: 0 },
+            { key: 'exit_target', label: 'Objetivo de salida', value: -4, count: 6 },
+            { key: 'exit_quote_move', label: 'Objetivo a cotización', value: -5, count: 6 },
+            { key: 'exit_fill', label: 'Cotización a fill de salida', value: -11, count: 6 },
+            { key: 'exit_missing_evidence', label: 'Salida sin traza', value: 0, count: 0 },
+            { key: 'size_and_fills', label: 'Cantidad y fills', value: 0, count: 6 }
+          ],
+          mainDrags: [
+            { key: 'exit_fill', label: 'Cotización a fill de salida', value: -11, count: 6 },
+            { key: 'entry_fill', label: 'Cotización a fill de entrada', value: -5, count: 6 }
+          ]
+        },
+        executionRouteAnalysis: {
+          families: [
+            { key: 'historical_defect', label: 'Incidencia histórica corregida', rows: 1, gap: -2 }
+          ],
+          groups: []
+        },
+        orderHistoryEvidence: {
+          available: true,
+          closedRows: 6,
+          exactCloseRows: 6,
+          exactCloseCoveragePercent: 100
         },
         signAnalysis: { marketMismatch: 2, costFlip: 1, netMismatch: 3, pairedRows: 6 },
         fillQuality: {},

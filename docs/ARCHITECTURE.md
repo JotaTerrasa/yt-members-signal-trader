@@ -423,6 +423,8 @@ GET /api/price-feed
 
 `GET /api/replica-audit` devuelve, además del detalle por operación, `summary.gapBridge`. Este bloque forma una identidad contable desde la réplica teórica hasta el neto BingX y conserva por separado las operaciones posteriores a la cobertura de la hoja. `summary.matchedGapAttribution` abre a su vez el tramo de operaciones emparejadas en contabilidad de referencia, diferencia de entrada, diferencia de salida, cantidad/fills y evidencia incompleta.
 
+El frontend deriva de esas identidades una banda `Diagnóstico económico` sin introducir una contabilidad paralela. La brecha total se calcula como `bingxNet - replicaPnl`; ejecución y costes proceden de los pasos reconciliados, y cobertura/ausencias es el residual algebraico restante. Los porcentajes visuales usan solo magnitudes negativas para no atribuir como pérdida un tramo que compensa el resultado. El componente es analítico, adaptable a móvil y no participa en ninguna decisión de ejecución.
+
 La respuesta incorpora asimismo `cohortComparison`. El servidor selecciona la cohorte archivada que terminó inmediatamente antes del inicio de la cohorte activa y delega el cálculo en `src/cohortComparison.js`. El módulo trabaja con dos niveles de evidencia:
 
 - métricas observadas sobre todos los cierres de cada periodo, como incidencias técnicas, costes, PnL y cobertura del histórico firmado;
