@@ -23,7 +23,10 @@ try {
   }
 } finally {
   if ($wasRunning) {
-    & $pm2 start ecosystem.config.cjs --only $processName | Out-Null
+    & $pm2 startOrReload ecosystem.config.cjs --only $processName --update-env | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "No se pudo restaurar PM2 con el entorno saneado."
+    }
     & $pm2 save --force | Out-Null
   }
 }

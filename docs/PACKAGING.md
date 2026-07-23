@@ -60,7 +60,7 @@ Es la opción recomendada para dejarlo corriendo en tu ordenador o en un servido
 npm install
 npm run install:browsers
 npm run package:check
-pm2 start ecosystem.config.cjs
+pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 ```
 

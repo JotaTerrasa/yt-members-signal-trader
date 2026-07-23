@@ -35,12 +35,14 @@ Audita los permisos sin modificarlos:
 npm run security:check
 ```
 
+La comprobación revisa dos superficies: las ACL de `.data`, `.yt-profile` y `.env`, y los nombres de variables guardados por PM2 tanto en el proceso como en `~/.pm2/dump.pm2`. Nunca imprime valores. El resultado debe indicar listas privadas vacías.
+
 Aplica ACL privadas a `.data`, `.yt-profile` y `.env` durante una ventana de mantenimiento:
 
 ```powershell
 pm2 stop yt-members-signal-trader
 npm run security:harden
-pm2 start ecosystem.config.cjs --only yt-members-signal-trader
+pm2 startOrReload ecosystem.config.cjs --only yt-members-signal-trader --update-env
 pm2 save --force
 ```
 

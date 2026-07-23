@@ -163,7 +163,7 @@ En Windows usa el script incluido y regístralo como tarea al iniciar sesión:
 npm run windows:tasks
 ```
 
-El registro crea tres tareas: restauración de PM2 al iniciar sesión, backup cifrado diario a las 03:15 y backup semanal del perfil Chromium los domingos a las 04:00. El arranque ejecuta `pm2 resurrect`, inicia `ecosystem.config.cjs` si el proceso no existe y guarda de nuevo el estado. `FuturesMagicianPM2Startup` debe ser la única vía de autoarranque en Windows; el registro elimina el acceso directo heredado `yt-members-signal-trader-pm2-resurrect.lnk` y el script serializa invocaciones simultáneas para evitar carreras y errores `EADDRINUSE`.
+El registro crea tres tareas: restauración de PM2 al iniciar sesión, backup cifrado diario a las 03:15 y backup semanal del perfil Chromium los domingos a las 04:00. El arranque ejecuta `pm2 resurrect`, reaplica siempre `ecosystem.config.cjs` con `startOrReload --update-env` y guarda de nuevo el estado. El ecosistema descarta el entorno heredado y repone solo rutas del sistema y variables explícitas de la app, evitando que credenciales de otras herramientas queden en el proceso o en `dump.pm2`. `FuturesMagicianPM2Startup` debe ser la única vía de autoarranque en Windows; el registro elimina el acceso directo heredado `yt-members-signal-trader-pm2-resurrect.lnk` y el script serializa invocaciones simultáneas para evitar carreras y errores `EADDRINUSE`.
 
 ## 7. Verificación
 

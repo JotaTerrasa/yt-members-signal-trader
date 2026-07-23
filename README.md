@@ -251,6 +251,8 @@ npm run windows:tasks
 
 Ese comando registra el arranque de PM2, el backup cifrado diario a las 03:15 y el backup semanal del perfil los domingos a las 04:00. La tarea `FuturesMagicianPM2Startup` es la única vía de autoarranque en Windows: el registro elimina el antiguo acceso directo `yt-members-signal-trader-pm2-resurrect.lnk` si existe y el script usa un bloqueo de instancia única para impedir carreras o listeners duplicados en el puerto `5178`.
 
+El ecosistema PM2 elimina el entorno completo del shell y repone únicamente rutas del sistema y las cuatro variables de ejecución de la app. Así, una credencial de otra herramienta abierta en la misma sesión no termina dentro del proceso ni de `~/.pm2/dump.pm2`. `npm run security:check` valida las ACL y audita ambos lugares mostrando solo nombres de variables, nunca valores.
+
 Ver logs:
 
 ```bash
