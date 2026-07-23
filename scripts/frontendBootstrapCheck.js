@@ -129,6 +129,48 @@ try {
     throw new Error(`La agrupación visual de eventos ocultó o mezcló incidencias: ${JSON.stringify(logGrouping)}.`);
   }
 
+  const incidentLifecycleState = await page.evaluate(() => {
+    const healthy = {
+      health: { level: 'ok', running: true, phase: 'live', stale: false, noVisiblePosts: false, visiblePosts: 10 },
+      exchangeSafety: { level: 'ok', stale: false },
+      pnlBackoff: { active: false }
+    };
+    const degraded = {
+      health: { level: 'warn', running: true, phase: 'live', stale: true, noVisiblePosts: true, visiblePosts: 0 },
+      exchangeSafety: { level: 'warn', stale: true },
+      pnlBackoff: { active: true }
+    };
+    const recovered = incidentLifecycle({ type: 'bingx_sync', level: 'warn' }, healthy);
+    const active = incidentLifecycle({ type: 'bingx_sync', level: 'warn' }, degraded);
+    const sheetRecovered = incidentLifecycle({ type: 'youtube_empty', level: 'warn' }, healthy);
+    const rateLimitActive = incidentLifecycle({ type: 'bingx_pnl_rate_limit', level: 'warn' }, degraded);
+    const info = incidentLifecycle({ type: 'backup', level: 'info' }, healthy);
+    return {
+      recovered,
+      active,
+      sheetRecovered,
+      rateLimitActive,
+      info,
+      recoveredMarkup: renderIncidentItem({
+        at: '2026-07-23T00:11:02.024Z',
+        type: 'bingx_sync',
+        title: 'Reconciliación BingX',
+        message: 'BingX sync: timestamp is invalid',
+        level: 'warn',
+        lifecycle: recovered
+      })
+    };
+  });
+  if (incidentLifecycleState.recovered.key !== 'recovered'
+    || incidentLifecycleState.active.key !== 'active'
+    || incidentLifecycleState.sheetRecovered.key !== 'recovered'
+    || incidentLifecycleState.rateLimitActive.key !== 'active'
+    || incidentLifecycleState.info.key !== 'info'
+    || !incidentLifecycleState.recoveredMarkup.includes('Recuperada')
+    || !incidentLifecycleState.recoveredMarkup.includes('incident-item warn recovered')) {
+    throw new Error(`La UI no distingue incidencias activas, recuperadas e informativas: ${JSON.stringify(incidentLifecycleState)}.`);
+  }
+
   const versionPage = await browser.newPage();
   const versionPageErrors = [];
   let frontendVersionTag = 'v1';
@@ -165,6 +207,31 @@ try {
       && !document.querySelector('#frontend-update')?.classList.contains('hidden')
       && document.querySelector('#frontend-update-action')?.textContent.includes('Actualizar interfaz')
   ), null, { timeout: 10_000 });
+  await versionPage.setViewportSize({ width: 390, height: 844 });
+  const updateBannerGeometry = await versionPage.evaluate(() => {
+    const banner = document.querySelector('#frontend-update');
+    const button = document.querySelector('#frontend-update-action');
+    const rect = banner?.getBoundingClientRect();
+    const buttonRect = button?.getBoundingClientRect();
+    return {
+      position: banner ? getComputedStyle(banner).position : '',
+      rect: rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } : null,
+      buttonRect: buttonRect ? { left: buttonRect.left, right: buttonRect.right } : null,
+      viewport: { width: innerWidth, height: innerHeight },
+      pageOverflow: document.documentElement.scrollWidth > innerWidth + 1
+    };
+  });
+  if (updateBannerGeometry.position !== 'fixed'
+    || !updateBannerGeometry.rect
+    || updateBannerGeometry.rect.left < 0
+    || updateBannerGeometry.rect.right > updateBannerGeometry.viewport.width + 1
+    || updateBannerGeometry.rect.top < 0
+    || updateBannerGeometry.rect.bottom > updateBannerGeometry.viewport.height + 1
+    || updateBannerGeometry.buttonRect?.left < updateBannerGeometry.rect.left
+    || updateBannerGeometry.buttonRect?.right > updateBannerGeometry.rect.right
+    || updateBannerGeometry.pageOverflow) {
+    throw new Error(`El aviso de actualización no cabe en móvil: ${JSON.stringify(updateBannerGeometry)}.`);
+  }
   await versionPage.locator('#frontend-update-action').click();
   await versionPage.waitForFunction(() => (
     document.documentElement.dataset.uiVersionStatus === 'current'
@@ -872,6 +939,7 @@ try {
     frontendVersionUpdatePassed: true,
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
+    incidentLifecyclePassed: true,
     historicalFailures,
     pnlIsolationPassed: true,
     externalSheetNativePassed: true,

@@ -4309,8 +4309,14 @@ function renderGuardDashboard() {
   const source = appState.telegramSource || {};
   const backup = status.backup || {};
   const incidents = status.incidents?.items || buildClientIncidents();
-  const critical = incidents.filter((incident) => incident.level === 'error').length;
-  const warns = incidents.filter((incident) => incident.level === 'warn').length;
+  const incidentViews = incidents.map((incident) => ({
+    ...incident,
+    lifecycle: incidentLifecycle(incident, status)
+  }));
+  const activeIncidents = incidentViews.filter((incident) => incident.lifecycle.key === 'active');
+  const recoveredIncidents = incidentViews.filter((incident) => incident.lifecycle.key === 'recovered');
+  const critical = activeIncidents.filter((incident) => incident.level === 'error').length;
+  const warns = activeIncidents.filter((incident) => incident.level === 'warn').length;
   const liveReady = Boolean(appState.state?.running && appState.state?.phase === 'live' && health.level === 'ok' && !health.stale);
   const exchangeReady = safety.level === 'ok' && !safety.stale;
   const telegramReady = Boolean(source.enabled && source.url && source.executeSignals && source.liveConfirmed);
@@ -4333,23 +4339,54 @@ function renderGuardDashboard() {
     ['Ultimo evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
-  elements.incidentStatus.textContent = incidents.length
-    ? `${incidents.length} incidencias (${warns} avisos)`
-    : '0 incidencias';
+  elements.incidentStatus.textContent = activeIncidents.length
+    ? `${activeIncidents.length} activas · ${recoveredIncidents.length} recuperadas`
+    : recoveredIncidents.length
+      ? `Sin activas · ${recoveredIncidents.length} recuperadas`
+      : 'Sin incidencias activas';
   elements.incidentStatus.className = critical ? 'amount negative' : warns ? 'amount warn' : 'amount positive';
-  elements.incidentList.innerHTML = incidents.length
-    ? incidents.slice(0, 8).map(renderIncidentItem).join('')
+  elements.incidentList.innerHTML = incidentViews.length
+    ? incidentViews.slice(0, 8).map(renderIncidentItem).join('')
     : '<div class="empty-state compact">Sin incidencias relevantes en las ultimas 24h.</div>';
 }
 
 function renderIncidentItem(incident = {}) {
+  const lifecycle = incident.lifecycle || { key: 'active', label: 'Activa' };
   return `
-    <div class="incident-item ${escapeAttribute(incident.level || 'info')}">
+    <div class="incident-item ${escapeAttribute(incident.level || 'info')} ${escapeAttribute(lifecycle.key)}">
       <span>${escapeHtml(formatShortDateTime(incident.at))}</span>
-      <strong>${escapeHtml(incident.title || incident.type || 'Incidencia')}</strong>
+      <div class="incident-heading">
+        <strong>${escapeHtml(incident.title || incident.type || 'Incidencia')}</strong>
+        <em class="incident-state">${escapeHtml(lifecycle.label)}</em>
+      </div>
       <small>${escapeHtml(truncateText(incident.message || '', 140))}</small>
     </div>
   `;
+}
+
+function incidentLifecycle(incident = {}, status = {}) {
+  const type = String(incident.type || '');
+  const level = String(incident.level || 'info');
+  if (level === 'info') {
+    return { key: 'info', label: type === 'backup' ? 'Registro' : 'Informativo' };
+  }
+
+  const health = status.health || appState.state?.health || {};
+  const safety = status.exchangeSafety || appState.exchangeSafety || {};
+  const recoveredByType = {
+    bingx_sync: safety.level === 'ok' && !safety.stale,
+    bingx_pnl_rate_limit: status.pnlBackoff?.active === false,
+    youtube_empty: health.level === 'ok'
+      && !health.stale
+      && !health.noVisiblePosts
+      && Number(health.visiblePosts || 0) > 0,
+    monitor_health: health.level === 'ok' && !health.stale,
+    auto_resume: Boolean(health.running && health.phase === 'live')
+  };
+
+  return recoveredByType[type] === true
+    ? { key: 'recovered', label: 'Recuperada' }
+    : { key: 'active', label: 'Activa' };
 }
 
 function buildClientIncidents() {
