@@ -378,7 +378,7 @@ export async function mirrorBackupIfConfigured(inputValue, {
       lastError: safeStatusError(error)
     };
   } finally {
-    await rm(partialOutput, { force: true });
+    await rm(partialOutput, { force: true }).catch(() => {});
   }
 }
 
