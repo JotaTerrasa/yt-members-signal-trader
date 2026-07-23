@@ -4357,6 +4357,7 @@ function renderGuardDashboard() {
   const real = safety.real || {};
   const source = appState.telegramSource || {};
   const backup = status.backup || {};
+  const secureBackup = status.secureBackup || {};
   const incidents = status.incidents?.items || buildClientIncidents();
   const incidentViews = incidents.map((incident) => ({
     ...incident,
@@ -4384,7 +4385,9 @@ function renderGuardDashboard() {
     ['Abiertas real', `${real.openPositions || 0}`, real.missingStopLoss ? 'negative' : 'positive'],
     ['Flotante', formatMoney(real.floatingPnl || 0, real.asset || 'USDT'), amountClass(real.floatingPnl || 0)],
     ['PnL historico', cooldown ? cooldown.replace('BingX PnL en cooldown hasta ', 'cooldown ') : 'ok', cooldown ? 'warn' : 'positive'],
-    ['Backup auto', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
+    ['Backup redactado', backupStatusText(backup), backup.lastError ? 'negative' : backup.lastRunAt ? 'positive' : 'warn'],
+    ['Backup cifrado', secureBackupStatusText(secureBackup), secureBackupTone(secureBackup)],
+    ['Perfil Chromium', secureProfileBackupStatusText(secureBackup.profile), secureBackup.profile?.stale ? 'warn' : secureBackup.profile?.available ? 'positive' : 'warn'],
     ['Ultimo evento', lastTrade ? tradeStatusLabel(lastTrade.status) : '-', lastTrade && eventTone(lastTrade) === 'negative' ? 'negative' : '']
   ].map(renderOpsMetric).join('');
 
@@ -4479,6 +4482,33 @@ function backupStatusText(backup = {}) {
     return 'programado';
   }
   return 'pendiente';
+}
+
+function secureBackupStatusText(backup = {}) {
+  if (backup.lastError) {
+    return 'error';
+  }
+  if (backup.restoreDrill?.ok && backup.restoreDrill?.checkedAt) {
+    return `restaurado ${humanLogAge(backup.restoreDrill.checkedAt)}`;
+  }
+  if (backup.lastSuccessAt) {
+    return `verificado ${humanLogAge(backup.lastSuccessAt)}`;
+  }
+  return 'pendiente';
+}
+
+function secureBackupTone(backup = {}) {
+  if (backup.lastError || backup.stale || backup.restoreDrill?.stale) {
+    return backup.available ? 'negative' : 'warn';
+  }
+  return backup.available ? 'positive' : 'warn';
+}
+
+function secureProfileBackupStatusText(profile = {}) {
+  if (!profile.available || !profile.lastSuccessAt) {
+    return 'pendiente';
+  }
+  return `${profile.stale ? 'caducado' : 'guardado'} ${humanLogAge(profile.lastSuccessAt)}`;
 }
 
 function renderTelegramWatchPanel() {

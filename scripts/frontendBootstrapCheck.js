@@ -171,6 +171,34 @@ try {
     throw new Error(`La UI no distingue incidencias activas, recuperadas e informativas: ${JSON.stringify(incidentLifecycleState)}.`);
   }
 
+  const backupContinuityPanel = await page.evaluate(() => {
+    const previousStatus = appState.operationalStatus;
+    appState.operationalStatus = {
+      ...(previousStatus || {}),
+      backup: { lastRunAt: new Date().toISOString(), lastError: null },
+      secureBackup: {
+        available: true,
+        stale: false,
+        lastSuccessAt: new Date().toISOString(),
+        lastError: null,
+        restoreDrill: { ok: true, stale: false, checkedAt: new Date().toISOString() },
+        profile: { available: true, stale: false, lastSuccessAt: new Date().toISOString() }
+      }
+    };
+    renderGuardDashboard();
+    const text = document.querySelector('#guard-metrics')?.textContent.replace(/\s+/g, ' ').trim() || '';
+    appState.operationalStatus = previousStatus;
+    renderGuardDashboard();
+    return text;
+  });
+  if (!backupContinuityPanel.includes('Backup redactado')
+    || !backupContinuityPanel.includes('Backup cifrado')
+    || !backupContinuityPanel.includes('restaurado')
+    || !backupContinuityPanel.includes('Perfil Chromium')
+    || !backupContinuityPanel.includes('guardado')) {
+    throw new Error(`El panel no distingue las copias restaurables: ${backupContinuityPanel}.`);
+  }
+
   const exchangeSafetyPanels = await page.evaluate(() => {
     const previousSafety = appState.exchangeSafety;
     appState.exchangeSafety = {
@@ -1096,6 +1124,7 @@ try {
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     incidentLifecyclePassed: true,
+    backupContinuityPanelPassed: true,
     exchangeSafetyPanelsPassed: true,
     historicalFailures,
     pnlIsolationPassed: true,

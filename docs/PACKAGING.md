@@ -64,7 +64,7 @@ pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 ```
 
-En Windows, `npm run windows:tasks` registra el arranque de PM2 y los backups periódicos. `scripts/startPm2.ps1` restaura el volcado de PM2 y arranca el ecosistema si fuese necesario.
+En Windows, `npm run windows:tasks` registra el arranque de PM2 y los backups periódicos. Cada backup programado incluye un simulacro de extracción temporal y deja su estado visible en la app. `scripts/startPm2.ps1` restaura el volcado de PM2 y arranca el ecosistema si fuese necesario.
 
 Comandos útiles:
 

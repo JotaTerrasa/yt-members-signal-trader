@@ -133,10 +133,15 @@ Reglas:
 - al inicializarla, el script limita sus permisos al usuario actual en Windows y a modo `0600` en Linux/macOS;
 - guarda una copia de la clave separada del backup;
 - la creación descifra y valida automáticamente cada archivo parcial antes de publicarlo como `.fmbak`;
+- las tareas programadas extraen después el backup en un directorio temporal, comprueban sus raíces y lo eliminan al terminar;
+- cualquier ruta absoluta, transversal o ajena a `.data` y `.yt-profile` se rechaza antes de extraer;
 - vuelve a ejecutar `verify` después de copiar el backup a otro soporte;
+- usa `drill` para demostrar que una copia transportada se puede extraer realmente;
 - restaura primero en `.data/restore-tests/`;
 - para respaldar `.yt-profile/`, detén Chromium/PM2 mediante `scripts/profileBackup.ps1` para que Cookies no quede bloqueado;
 - no excluyas Cookies del backup del perfil: contiene la sesión que permite recuperar el acceso web.
+
+La app lee únicamente el estado saneado de `.data/backups/secure/status.json`: nombre de archivo, tamaño, fechas, resultado del simulacro y raíces permitidas. No publica la clave, la contraseña derivada ni el contenido del backup.
 
 ## UI expuesta
 

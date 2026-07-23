@@ -38,7 +38,7 @@ Register-ScheduledTask `
   -Description 'Restaura Futures Magician con PM2 al iniciar sesion.' `
   -Force | Out-Null
 
-$backupArguments = '"' + $backupScript + '" create'
+$backupArguments = '"' + $backupScript + '" create --drill'
 $backupAction = New-ScheduledTaskAction -Execute $node -Argument $backupArguments -WorkingDirectory $repo
 $backupTrigger = New-ScheduledTaskTrigger -Daily -At 3:15am
 Register-ScheduledTask `
@@ -47,7 +47,7 @@ Register-ScheduledTask `
   -Trigger $backupTrigger `
   -Settings $settings `
   -Principal $principal `
-  -Description 'Backup cifrado diario de los datos locales.' `
+  -Description 'Backup cifrado diario con simulacro de restauracion.' `
   -Force | Out-Null
 
 $profileArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $profileScript + '"'

@@ -17,7 +17,7 @@ try {
     Start-Sleep -Seconds 3
   }
 
-  & $node $backupScript create --include-profile
+  & $node $backupScript create --include-profile --drill
   if ($LASTEXITCODE -ne 0) {
     throw "El backup cifrado del perfil terminó con código $LASTEXITCODE."
   }

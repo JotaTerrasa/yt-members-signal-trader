@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createBackup, verifyBackup } from '../scripts/secureBackup.js';
+import { createBackup, drillBackup, validateBackupEntries, verifyBackup } from '../scripts/secureBackup.js';
 
 async function backupFixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'futures-magician-backup-test-'));
@@ -71,6 +71,30 @@ test('incluye y verifica el perfil cuando se solicita', async (t) => {
   assert.deepEqual(created.roots, ['.data', '.yt-profile']);
   const verified = await verifyBackup({ input: output, keyFile: fixture.keyFile }, { silent: true });
   assert.deepEqual(verified.roots, ['.data', '.yt-profile']);
+});
+
+test('demuestra una restauración real en un directorio temporal', async (t) => {
+  const fixture = await backupFixture(t);
+  const output = join(fixture.backupDir, 'restore-drill.fmbak');
+  await createBackup({ output, keyFile: fixture.keyFile }, {
+    root: fixture.root,
+    silent: true
+  });
+
+  const drilled = await drillBackup({ input: output, keyFile: fixture.keyFile }, { silent: true });
+
+  assert.equal(drilled.ok, true);
+  assert.equal(drilled.extracted, true);
+  assert.equal(drilled.cleaned, true);
+  assert.deepEqual(drilled.roots, ['.data']);
+  assert.ok(drilled.entries >= 3);
+});
+
+test('rechaza rutas que podrían salir del destino de restauración', () => {
+  assert.equal(validateBackupEntries(['.data/', '.data/config.json'], ['.data']), true);
+  assert.throws(() => validateBackupEntries(['../secreto.txt', '.data/config.json'], ['.data']), /ruta no permitida/);
+  assert.throws(() => validateBackupEntries(['/tmp/secreto.txt'], ['.data']), /ruta no permitida/);
+  assert.throws(() => validateBackupEntries(['.yt-profile/Cookies'], ['.data']), /ruta no permitida/);
 });
 
 test('no sustituye una copia que ya existe', async (t) => {

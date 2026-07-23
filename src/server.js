@@ -13,6 +13,7 @@ import { coverageRecoveryCandidates } from './coverageRecovery.js';
 import { BingXClient } from './bingxClient.js';
 import { estimateBingXClockSample } from './bingxClock.js';
 import { BingXPriceWebSocket } from './bingxPriceWebSocket.js';
+import { buildSecureBackupStatus } from './backupContinuity.js';
 import { isOpeningExecutionStatus, isRetryableOpeningEvent } from './executionReliability.js';
 import { ExecutionRetryStore } from './executionRetryStore.js';
 import { exchangeProtectionGaps, hasStopLossProtection } from './exchangeProtection.js';
@@ -46,6 +47,7 @@ const vendorAssets = new Map([
 ]);
 const dataDir = join(rootDir, '.data');
 const backupDir = join(dataDir, 'backups');
+const secureBackupStatusFile = join(backupDir, 'secure', 'status.json');
 const profileDir = join(rootDir, '.yt-profile');
 const port = Number(process.env.PORT || 5178);
 const httpSecurity = buildHttpSecurity();
@@ -1991,6 +1993,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === '/api/operational-status' && request.method === 'GET') {
+      const secureBackup = await loadSecureBackupStatus();
       return sendJson(response, {
         ok: true,
         generatedAt: new Date().toISOString(),
@@ -1998,6 +2001,7 @@ const server = createServer(async (request, response) => {
         exchangeSafety: buildExchangeSafety(),
         incidents: buildIncidentSnapshot(),
         backup: lastBackupStatus,
+        secureBackup,
         pnlBackoff: pnlBackoffInfo(),
         priceFeed: priceFeedState(),
         signalCoverage: state.signalCoverage,
@@ -2891,6 +2895,13 @@ async function writeAutomaticRedactedBackup(reason = 'scheduled') {
     at: new Date().toISOString()
   });
   return lastBackupStatus;
+}
+
+async function loadSecureBackupStatus() {
+  const record = await readFile(secureBackupStatusFile, 'utf8')
+    .then((value) => JSON.parse(value))
+    .catch(() => ({}));
+  return buildSecureBackupStatus(record);
 }
 
 function syncPriceSubscriptions(exchangePositionsOrSymbols) {

@@ -468,14 +468,17 @@ Inicializa una clave fuera del repositorio una sola vez:
 npm run backup:secure:init
 ```
 
-Crea y verifica un backup de `.data/`:
+Crea, verifica y somete a un simulacro de restauración un backup de `.data/`:
 
 ```bash
 npm run backup:secure
 node scripts/secureBackup.js verify --input ".data/backups/secure/ARCHIVO.fmbak"
+node scripts/secureBackup.js drill --input ".data/backups/secure/ARCHIVO.fmbak"
 ```
 
-`npm run backup:secure` cifra primero en un archivo parcial, lo descifra de nuevo, valida el contenedor y sus raíces y solo entonces lo publica con extensión `.fmbak`. Si falla el archivado, el cifrado o la verificación, no queda una copia final ni un archivo parcial. El comando `verify` permite volver a comprobar una copia antigua o transportada.
+`npm run backup:secure` cifra primero en un archivo parcial, lo descifra, valida el contenedor y sus rutas, lo publica con extensión `.fmbak` y realiza una extracción completa en un directorio temporal que elimina al terminar. Si falla el archivado, el cifrado, la validación o el simulacro, la tarea queda marcada como fallida. El comando `verify` vuelve a comprobar una copia sin extraerla; `drill` demuestra que una copia antigua o transportada se puede restaurar.
+
+El resultado se guarda sin secretos en `.data/backups/secure/status.json`. La guardia nocturna distingue en pantalla el backup redactado, el backup cifrado restaurado y la antigüedad de la última copia del perfil Chromium. La tarea diaria de las 03:15 y la semanal del perfil ejecutan el simulacro automáticamente. No se elimina ninguna copia histórica.
 
 La restauración, por defecto, se extrae en `.data/restore-tests/` y nunca pisa los datos activos:
 
@@ -557,7 +560,7 @@ Endpoints:
 | `GET /api/health` | Salud del monitor. |
 | `GET /api/state` | Estado completo de app y monitor. |
 | `GET /api/audit` | Snapshot auditable. |
-| `GET /api/operational-status` | Guardia, incidencias, backup y cooldown PnL. |
+| `GET /api/operational-status` | Guardia, incidencias, backups redactado/cifrado y cooldown PnL. |
 | `GET /api/price-feed` | Estado WebSocket, cotizaciones y diagnóstico pasivo del reloj de BingX. |
 | `GET /api/execution-packages` | Paquetes detectados, reintentos persistentes y estado de promoción. |
 | `GET /api/promotion-gate` | Criterios objetivos de muestra, cobertura, seguridad y resultado neto. |

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -15,7 +15,12 @@ const modulePath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 if (process.argv[1] && resolve(process.argv[1]) === modulePath) {
-  await main(process.argv.slice(2));
+  try {
+    await main(process.argv.slice(2));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
 
 async function main(values) {
@@ -24,13 +29,98 @@ async function main(values) {
   if (command === 'init-key') {
     await initializeKey(args.keyFile);
   } else if (command === 'create') {
-    await createBackup(args);
+    await createBackupCommand(args);
   } else if (command === 'verify') {
     await verifyBackup(args);
+  } else if (command === 'drill') {
+    await drillBackupCommand(args);
   } else if (command === 'restore') {
     await restoreBackup(args);
   } else {
-    fail('Uso: secureBackup.js init-key|create|verify|restore [opciones]');
+    fail('Uso: secureBackup.js init-key|create|verify|drill|restore [opciones]');
+  }
+}
+
+async function createBackupCommand(options) {
+  const attemptedAt = new Date().toISOString();
+  let created = null;
+  try {
+    created = await createBackup(options, { silent: true });
+    const restoreDrill = options.drill
+      ? await drillBackup({ input: created.output, keyFile: options.keyFile }, { silent: true })
+      : null;
+    const successAt = validBackupTimestamp(restoreDrill?.metadata?.createdAt) || new Date().toISOString();
+    await updateSecureBackupStatus({
+      lastAttemptAt: attemptedAt,
+      lastSuccessAt: successAt,
+      lastFailureAt: null,
+      lastError: null,
+      lastFile: basename(created.output),
+      bytes: created.bytes,
+      includeProfile: created.includeProfile,
+      verified: created.verified,
+      restoreDrill: statusDrillResult(restoreDrill),
+      ...(created.includeProfile ? {
+        lastProfileSuccessAt: successAt,
+        lastProfileFile: basename(created.output),
+        profileBytes: created.bytes,
+        profileRestoreDrill: statusDrillResult(restoreDrill)
+      } : {})
+    });
+    console.log(JSON.stringify({ ...created, restoreDrill }, null, 2));
+  } catch (error) {
+    await updateSecureBackupStatus({
+      lastAttemptAt: attemptedAt,
+      lastFailureAt: new Date().toISOString(),
+      lastError: safeStatusError(error),
+      ...(created ? {
+        lastFile: basename(created.output),
+        bytes: created.bytes,
+        includeProfile: created.includeProfile,
+        verified: created.verified
+      } : {})
+    }).catch(() => {});
+    throw error;
+  }
+}
+
+async function drillBackupCommand(options) {
+  const attemptedAt = new Date().toISOString();
+  try {
+    const result = await drillBackup(options, { silent: true });
+    const inputInfo = await stat(result.input);
+    const current = await readSecureBackupStatusRecord();
+    const backupCreatedAt = validBackupTimestamp(result.metadata.createdAt) || result.checkedAt;
+    const updatesLatestData = isAtLeastAsRecent(backupCreatedAt, current.lastSuccessAt);
+    const updatesLatestProfile = result.metadata.includeProfile
+      && isAtLeastAsRecent(backupCreatedAt, current.lastProfileSuccessAt);
+    await updateSecureBackupStatus({
+      lastAttemptAt: attemptedAt,
+      lastFailureAt: null,
+      lastError: null,
+      ...(updatesLatestData ? {
+        lastSuccessAt: backupCreatedAt,
+        lastFile: basename(result.input),
+        bytes: inputInfo.size,
+        includeProfile: result.metadata.includeProfile,
+        verified: true,
+        restoreDrill: statusDrillResult(result)
+      } : {}),
+      ...(updatesLatestProfile ? {
+        lastProfileSuccessAt: backupCreatedAt,
+        lastProfileFile: basename(result.input),
+        profileBytes: inputInfo.size,
+        profileRestoreDrill: statusDrillResult(result)
+      } : {})
+    });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    await updateSecureBackupStatus({
+      lastAttemptAt: attemptedAt,
+      lastFailureAt: new Date().toISOString(),
+      lastError: safeStatusError(error)
+    }).catch(() => {});
+    throw error;
   }
 }
 
@@ -131,6 +221,9 @@ export async function verifyBackup(options, { silent = false } = {}) {
   const keyFile = resolveKeyFile(options.keyFile);
   const passphrase = await readPassphrase(keyFile);
   const verification = await inspectBackup({ input, passphrase });
+  const inputs = backupInputs(verification.metadata);
+  assertBackupContents(verification, inputs);
+  validateBackupEntries(verification.files, inputs);
   const result = {
     ok: true,
     input,
@@ -144,13 +237,54 @@ export async function verifyBackup(options, { silent = false } = {}) {
   return result;
 }
 
+export async function drillBackup(options, { silent = false } = {}) {
+  const input = requiredFile(options.input || options._?.[0], 'Indica el backup con --input.');
+  const keyFile = resolveKeyFile(options.keyFile);
+  const passphrase = await readPassphrase(keyFile);
+  const temporaryArchive = join(tmpdir(), `futures-magician-drill-${process.pid}-${Date.now()}.tar.gz`);
+  const temporaryTarget = await mkdtemp(join(tmpdir(), 'futures-magician-restore-drill-'));
+  try {
+    const metadata = await decryptArchive({ input, output: temporaryArchive, passphrase });
+    const listing = await run('tar', ['-tzf', temporaryArchive], { capture: true });
+    const files = listing.split(/\r?\n/).filter(Boolean);
+    const roots = backupRoots(files);
+    const inputs = backupInputs(metadata);
+    assertBackupContents({ metadata, files, roots }, inputs);
+    validateBackupEntries(files, inputs);
+    await run('tar', ['-xzf', temporaryArchive, '-C', temporaryTarget]);
+    for (const root of inputs) {
+      const rootInfo = await stat(join(temporaryTarget, root)).catch(() => null);
+      if (!rootInfo?.isDirectory()) {
+        fail(`El simulacro no pudo restaurar el directorio ${root}.`);
+      }
+    }
+    const result = {
+      ok: true,
+      input,
+      checkedAt: new Date().toISOString(),
+      metadata,
+      entries: files.length,
+      roots,
+      extracted: true,
+      cleaned: true
+    };
+    if (!silent) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    return result;
+  } finally {
+    await rm(temporaryArchive, { force: true });
+    await rm(temporaryTarget, { recursive: true, force: true });
+  }
+}
+
 async function inspectBackup({ input, passphrase }) {
   const temporaryArchive = join(tmpdir(), `futures-magician-verify-${process.pid}-${Date.now()}.tar.gz`);
   try {
     const metadata = await decryptArchive({ input, output: temporaryArchive, passphrase });
     const listing = await run('tar', ['-tzf', temporaryArchive], { capture: true });
     const files = listing.split(/\r?\n/).filter(Boolean);
-    const roots = [...new Set(files.map((entry) => entry.replace(/^\.\//, '').split('/')[0]).filter(Boolean))];
+    const roots = backupRoots(files);
     return { metadata, files, roots };
   } finally {
     await rm(temporaryArchive, { force: true });
@@ -170,6 +304,36 @@ function assertBackupContents({ metadata, files, roots }, inputs) {
   }
 }
 
+function backupInputs(metadata = {}) {
+  const inputs = Array.isArray(metadata.inputs) ? metadata.inputs.map(String) : [];
+  if (!inputs.length || inputs.some((input) => !['.data', '.yt-profile'].includes(input))) {
+    fail('La lista de directorios del backup no es válida.');
+  }
+  return [...new Set(inputs)];
+}
+
+function backupRoots(files = []) {
+  return [...new Set(files.map((entry) => entry.replace(/^\.\//, '').split('/')[0]).filter(Boolean))];
+}
+
+export function validateBackupEntries(files = [], inputs = []) {
+  const allowedRoots = new Set(inputs);
+  for (const entry of files) {
+    const normalized = String(entry || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+    const parts = normalized.split('/').filter(Boolean);
+    const unsafe = !normalized
+      || normalized.startsWith('/')
+      || /^[a-z]:/i.test(normalized)
+      || parts.includes('..')
+      || parts.includes('.')
+      || !allowedRoots.has(parts[0]);
+    if (unsafe) {
+      fail(`El backup contiene una ruta no permitida: ${entry}.`);
+    }
+  }
+  return true;
+}
+
 async function restoreBackup(options) {
   const input = requiredFile(options.input || options._[0], 'Indica el backup con --input.');
   const keyFile = resolveKeyFile(options.keyFile);
@@ -183,6 +347,12 @@ async function restoreBackup(options) {
   await mkdir(target, { recursive: true });
   try {
     const metadata = await decryptArchive({ input, output: temporaryArchive, passphrase });
+    const listing = await run('tar', ['-tzf', temporaryArchive], { capture: true });
+    const files = listing.split(/\r?\n/).filter(Boolean);
+    const roots = backupRoots(files);
+    const inputs = backupInputs(metadata);
+    assertBackupContents({ metadata, files, roots }, inputs);
+    validateBackupEntries(files, inputs);
     await run('tar', ['-xzf', temporaryArchive, '-C', target]);
     console.log(JSON.stringify({ ok: true, input, target, metadata }, null, 2));
   } finally {
@@ -288,7 +458,7 @@ function parseArgs(values) {
       continue;
     }
     const key = value.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-    if (key === 'includeProfile') {
+    if (key === 'includeProfile' || key === 'drill') {
       result[key] = true;
       continue;
     }
@@ -296,6 +466,66 @@ function parseArgs(values) {
     index += 1;
   }
   return result;
+}
+
+async function updateSecureBackupStatus(patch, { root = projectRoot } = {}) {
+  const statusPath = join(root, '.data', 'backups', 'secure', 'status.json');
+  const partialPath = `${statusPath}.${process.pid}-${Date.now()}.partial`;
+  await mkdir(dirname(statusPath), { recursive: true });
+  const current = await readFile(statusPath, 'utf8')
+    .then((value) => JSON.parse(value))
+    .catch(() => ({}));
+  const next = {
+    version: 1,
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString()
+  };
+  try {
+    await writeFile(partialPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+    await rename(partialPath, statusPath);
+  } finally {
+    await rm(partialPath, { force: true });
+  }
+  return next;
+}
+
+async function readSecureBackupStatusRecord({ root = projectRoot } = {}) {
+  const statusPath = join(root, '.data', 'backups', 'secure', 'status.json');
+  return readFile(statusPath, 'utf8')
+    .then((value) => JSON.parse(value))
+    .catch(() => ({}));
+}
+
+function validBackupTimestamp(value) {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function isAtLeastAsRecent(candidate, current) {
+  const candidateTime = Date.parse(String(candidate || ''));
+  const currentTime = Date.parse(String(current || ''));
+  return Number.isFinite(candidateTime) && (!Number.isFinite(currentTime) || candidateTime >= currentTime);
+}
+
+function statusDrillResult(result) {
+  if (!result) {
+    return null;
+  }
+  return {
+    ok: Boolean(result.ok),
+    checkedAt: validBackupTimestamp(result.checkedAt),
+    entries: Number(result.entries) || 0,
+    roots: Array.isArray(result.roots) ? result.roots.filter((root) => root === '.data' || root === '.yt-profile') : [],
+    extracted: Boolean(result.extracted),
+    cleaned: Boolean(result.cleaned)
+  };
+}
+
+function safeStatusError(error) {
+  return String(error instanceof Error ? error.message : error)
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 300);
 }
 
 function run(commandName, commandArgs, { cwd = projectRoot, capture = false } = {}) {
