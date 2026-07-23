@@ -289,11 +289,19 @@ const REFERENCE_REFRESH_CHECK_MS = 30 * 1000;
 const REFERENCE_REFRESH_MAX_BACKOFF_MS = 30 * 60 * 1000;
 const REFERENCE_REFRESH_TIMEOUT_MS = 60 * 1000;
 const PNL_REQUEST_TIMEOUT_MS = 30 * 1000;
+const PNL_HASH_LAYOUT_MIN_WATCH_MS = 1800;
+const PNL_HASH_LAYOUT_QUIET_MS = 900;
+const PNL_HASH_LAYOUT_MAX_WATCH_MS = 6000;
 const CLIENT_ERROR_PRIORITIES = Object.freeze({ bootstrap: 1, realtime: 2, action: 3 });
 let referenceRefreshTimer = null;
 let pnlRealtimeRenderTimer = null;
 let pnlRealtimeRenderFrame = null;
 let pnlDeferredFullRenderTimer = null;
+let pnlHashLayoutObserver = null;
+let pnlHashLayoutQuietTimer = null;
+let pnlHashLayoutDeadlineTimer = null;
+let pnlHashLayoutTargetId = '';
+let pnlHashLayoutStartedAt = 0;
 let realtimeEventSource = null;
 let realtimeWatchdogTimer = null;
 let realtimeReconnectTimer = null;
@@ -6042,12 +6050,14 @@ function renderReplicaGapWaterfall(chartId, bridge, labels = {}) {
     return;
   }
   if (!window.Plotly?.react) {
+    chart.dataset.plotlyLayoutStable = 'false';
     chart.innerHTML = '<div class="pnl-chart-empty">Cargando puente contable...</div>';
     loadPlotlyLibrary()
       .then(() => renderReplicaGapWaterfall(chartId, bridge, labels))
       .catch(() => {
         const current = document.getElementById(chartId);
         if (current) {
+          current.dataset.plotlyLayoutStable = 'error';
           current.innerHTML = '<div class="pnl-chart-empty">Plotly no está disponible.</div>';
         }
       });
@@ -6113,12 +6123,26 @@ function renderReplicaGapWaterfall(chartId, bridge, labels = {}) {
       })
     }
   };
-  window.Plotly.react(chart, [trace], layout, {
+  chart.dataset.plotlyLayoutStable = 'false';
+  const renderResult = window.Plotly.react(chart, [trace], layout, {
     responsive: true,
     displaylogo: false,
     displayModeBar: false,
     scrollZoom: false
   });
+  Promise.resolve(renderResult)
+    .then(() => {
+      if (!chart.isConnected) {
+        return;
+      }
+      chart.dataset.plotlyLayoutStable = 'true';
+      chart.dispatchEvent(new CustomEvent('plotly-layout-stable', { bubbles: true }));
+    })
+    .catch(() => {
+      if (chart.isConnected) {
+        chart.dataset.plotlyLayoutStable = 'error';
+      }
+    });
 }
 
 function renderReplicaAudit(audit = appState.replicaAudit) {
@@ -10575,6 +10599,7 @@ function viewIsVisible(element) {
 function applyHashNavigation() {
   const target = pnlHashTarget();
   if (!target) {
+    stopPnlHashLayoutObserver();
     appState.pnlHashAnchorRequested = '';
     appState.pnlHashAnchorSettled = '';
     return;
@@ -10628,6 +10653,62 @@ function scrollPnlHashAnchorNow(targetId) {
   }
   currentTarget.scrollIntoView({ block: 'start' });
   appState.pnlHashAnchorSettled = targetId;
+  const pendingChart = currentTarget.querySelector('.replica-gap-chart[data-plotly-layout-stable="false"]');
+  if (pendingChart && pendingChart.dataset.anchorResettleFor !== targetId) {
+    pendingChart.dataset.anchorResettleFor = targetId;
+    pendingChart.addEventListener('plotly-layout-stable', () => {
+      delete pendingChart.dataset.anchorResettleFor;
+      if (window.location.hash === `#${targetId}` && appState.pnlHashAnchorRequested === targetId) {
+        scrollPnlHashAnchorNow(targetId);
+      }
+    }, { once: true });
+  }
+  startPnlHashLayoutObserver(targetId);
+}
+
+function startPnlHashLayoutObserver(targetId) {
+  if (typeof ResizeObserver !== 'function'
+    || (pnlHashLayoutObserver && pnlHashLayoutTargetId === targetId)) {
+    return;
+  }
+  stopPnlHashLayoutObserver();
+  pnlHashLayoutTargetId = targetId;
+  pnlHashLayoutStartedAt = performance.now();
+  pnlHashLayoutObserver = new ResizeObserver(() => {
+    if (window.location.hash !== `#${targetId}` || appState.pnlHashAnchorRequested !== targetId) {
+      stopPnlHashLayoutObserver();
+      return;
+    }
+    requestAnimationFrame(() => {
+      const currentTarget = pnlHashTarget();
+      if (currentTarget?.id === targetId) {
+        currentTarget.scrollIntoView({ block: 'start' });
+        appState.pnlHashAnchorSettled = targetId;
+      }
+    });
+    window.clearTimeout(pnlHashLayoutQuietTimer);
+    const elapsed = performance.now() - pnlHashLayoutStartedAt;
+    pnlHashLayoutQuietTimer = window.setTimeout(
+      stopPnlHashLayoutObserver,
+      Math.max(PNL_HASH_LAYOUT_QUIET_MS, PNL_HASH_LAYOUT_MIN_WATCH_MS - elapsed)
+    );
+  });
+  pnlHashLayoutObserver.observe(elements.pnlView);
+  pnlHashLayoutDeadlineTimer = window.setTimeout(
+    stopPnlHashLayoutObserver,
+    PNL_HASH_LAYOUT_MAX_WATCH_MS
+  );
+}
+
+function stopPnlHashLayoutObserver() {
+  pnlHashLayoutObserver?.disconnect();
+  pnlHashLayoutObserver = null;
+  window.clearTimeout(pnlHashLayoutQuietTimer);
+  window.clearTimeout(pnlHashLayoutDeadlineTimer);
+  pnlHashLayoutQuietTimer = null;
+  pnlHashLayoutDeadlineTimer = null;
+  pnlHashLayoutTargetId = '';
+  pnlHashLayoutStartedAt = 0;
 }
 
 function pnlHashTarget() {

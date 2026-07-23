@@ -946,7 +946,13 @@ try {
   const outcomeImpactPage = await browser.newPage({ viewport: { width: 760, height: 900 } });
   const outcomeImpactErrors = [];
   const outcomeImpactFixture = economicImpactAuditFixture(fixtureMonth);
+  let delayedPlotlyRequests = 0;
   outcomeImpactPage.on('pageerror', (error) => outcomeImpactErrors.push(error.message));
+  await outcomeImpactPage.route('**/vendor/plotly.min.js*', async (route) => {
+    delayedPlotlyRequests += 1;
+    await delay(1200);
+    await route.continue();
+  });
   await outcomeImpactPage.route('**/api/bingx', async (route) => {
     await route.fulfill({
       status: 200,
@@ -1002,7 +1008,6 @@ try {
     document.querySelectorAll('.replica-audit-table tbody tr').length === 3
       && document.querySelector('#economic-diagnosis')
       && document.querySelector('[data-economic-diagnosis-scope="cohort"]')?.getAttribute('aria-pressed') === 'true'
-      && document.querySelector('#replica-matched-gap-waterfall.js-plotly-plot')
   ), null, { timeout: 20_000 });
 
   const cohortScopeState = await outcomeImpactPage.evaluate(() => {
@@ -1017,6 +1022,7 @@ try {
       metricText: document.querySelector('.replica-audit-grid')?.textContent.replace(/\s+/g, ' ').trim() || '',
       bridgeText: document.querySelector('#replica-gap-bridge')?.textContent.replace(/\s+/g, ' ').trim() || '',
       attributionText: document.querySelector('#replica-matched-gap-panel')?.textContent.replace(/\s+/g, ' ').trim() || '',
+      plotlyPending: document.querySelector('#replica-matched-gap-waterfall')?.dataset.plotlyLayoutStable === 'false',
       drilldowns: [...document.querySelectorAll('[data-economic-drilldown]')].map((link) => ({
         key: link.dataset.economicDrilldown,
         href: link.getAttribute('href'),
@@ -1032,6 +1038,7 @@ try {
     || !cohortScopeState.bridgeText.includes('Emparejadas vs hoja -9,00 VST')
     || !cohortScopeState.attributionText.includes('Diferencia de entrada -10,00 VST')
     || !cohortScopeState.attributionText.includes('Diferencia de salida 1,00 VST')
+    || !cohortScopeState.plotlyPending
     || !cohortScopeState.economicDiagnosis.includes('Muestra preliminar desde')
     || !cohortScopeState.economicDiagnosis.includes('Réplica teórica 20,00 VST')
     || !cohortScopeState.economicDiagnosis.includes('BingX neto 5,00 VST')
@@ -1056,20 +1063,89 @@ try {
   await outcomeImpactPage.click('[data-economic-drilldown="execution"]');
   await outcomeImpactPage.waitForFunction(() => {
     const top = document.querySelector('#replica-matched-gap-panel')?.getBoundingClientRect().top;
-    return Number.isFinite(top) && top >= 80 && top <= 130;
-  }, null, { timeout: 3_000 });
+    const chart = document.querySelector('#replica-matched-gap-waterfall');
+    return Number.isFinite(top)
+      && top >= 80
+      && top <= 130
+      && chart?.dataset.plotlyLayoutStable === 'true';
+  }, null, { timeout: 6_000 });
   const executionDrilldownState = await outcomeImpactPage.evaluate(() => ({
     hash: window.location.hash,
     top: document.querySelector('#replica-matched-gap-panel')?.getBoundingClientRect().top,
+    layoutStable: document.querySelector('#replica-matched-gap-waterfall')?.dataset.plotlyLayoutStable || '',
     text: document.querySelector('#replica-matched-gap-panel')?.textContent.replace(/\s+/g, ' ').trim() || ''
   }));
   if (executionDrilldownState.hash !== '#replica-matched-gap-panel'
     || !Number.isFinite(executionDrilldownState.top)
     || executionDrilldownState.top < 80
     || executionDrilldownState.top > 130
+    || executionDrilldownState.layoutStable !== 'true'
+    || delayedPlotlyRequests !== 1
     || !executionDrilldownState.text.includes('-10,00 VST')) {
     throw new Error(`El acceso a la evidencia de ejecución no quedó alineado: ${JSON.stringify(executionDrilldownState)}.`);
   }
+
+  const economicDrilldownTargets = [
+    ['costs', 'cost-control-panel', 'Coste operativo'],
+    ['coverage', 'replica-gap-bridge', 'Puente contable']
+  ];
+  for (const [key, targetId, expectedText] of economicDrilldownTargets) {
+    await outcomeImpactPage.click(`[data-economic-drilldown="${key}"]`);
+    await outcomeImpactPage.waitForFunction((id) => {
+      const top = document.getElementById(id)?.getBoundingClientRect().top;
+      return window.location.hash === `#${id}` && Number.isFinite(top) && top >= 80 && top <= 130;
+    }, targetId, { timeout: 3_000 });
+    const state = await outcomeImpactPage.evaluate((id) => ({
+      hash: window.location.hash,
+      top: document.getElementById(id)?.getBoundingClientRect().top,
+      text: document.getElementById(id)?.textContent.replace(/\s+/g, ' ').trim() || ''
+    }), targetId);
+    if (state.hash !== `#${targetId}`
+      || !Number.isFinite(state.top)
+      || state.top < 80
+      || state.top > 130
+      || !state.text.includes(expectedText)) {
+      throw new Error(`El acceso ${key} no alcanzó su evidencia: ${JSON.stringify(state)}.`);
+    }
+  }
+
+  await outcomeImpactPage.evaluate(() => {
+    window.location.hash = '#sheet-vst-alignment';
+  });
+  await outcomeImpactPage.waitForFunction(() => {
+    const top = document.querySelector('#sheet-vst-alignment')?.getBoundingClientRect().top;
+    return Number.isFinite(top) && top >= 80 && top <= 130;
+  }, null, { timeout: 3_000 });
+  await outcomeImpactPage.evaluate(() => {
+    const panel = document.querySelector('#sheet-vst-alignment');
+    const spacer = document.createElement('div');
+    spacer.id = 'qa-pnl-layout-shift';
+    spacer.style.height = '900px';
+    panel?.parentElement?.insertBefore(spacer, panel);
+  });
+  await outcomeImpactPage.waitForFunction(() => {
+    const top = document.querySelector('#sheet-vst-alignment')?.getBoundingClientRect().top;
+    return Number.isFinite(top) && top >= 80 && top <= 130;
+  }, null, { timeout: 3_000 });
+  const shiftedAnchorState = await outcomeImpactPage.evaluate(() => ({
+    hash: window.location.hash,
+    top: document.querySelector('#sheet-vst-alignment')?.getBoundingClientRect().top,
+    spacerHeight: document.querySelector('#qa-pnl-layout-shift')?.getBoundingClientRect().height || 0
+  }));
+  if (shiftedAnchorState.hash !== '#sheet-vst-alignment'
+    || !Number.isFinite(shiftedAnchorState.top)
+    || shiftedAnchorState.top < 80
+    || shiftedAnchorState.top > 130
+    || shiftedAnchorState.spacerHeight !== 900) {
+    throw new Error(`El ancla PnL se perdió tras cambiar el layout: ${JSON.stringify(shiftedAnchorState)}.`);
+  }
+  await outcomeImpactPage.evaluate(() => {
+    document.querySelector('#qa-pnl-layout-shift')?.remove();
+  });
+  await outcomeImpactPage.waitForFunction(() => {
+    const top = document.querySelector('#sheet-vst-alignment')?.getBoundingClientRect().top;
+    return Number.isFinite(top) && top >= 80 && top <= 130;
+  }, null, { timeout: 3_000 });
 
   await outcomeImpactPage.click('[data-economic-diagnosis-scope="month"]');
   await outcomeImpactPage.waitForFunction(() => (
