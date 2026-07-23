@@ -57,6 +57,49 @@ try {
     throw new Error(`Errores JavaScript en el arranque: ${pageErrors.join(' | ')}`);
   }
 
+  await page.focus('#posts-tab');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => (
+    document.activeElement?.id === 'logs-tab'
+      && document.querySelector('#logs-tab')?.getAttribute('aria-selected') === 'true'
+      && !document.querySelector('#logs-view')?.classList.contains('hidden')
+  ), null, { timeout: 5_000 });
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForFunction(() => document.activeElement?.id === 'posts-tab', null, { timeout: 5_000 });
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => (
+    document.activeElement?.id === 'pnl-tab'
+      && document.querySelector('#pnl-tab')?.getAttribute('aria-selected') === 'true'
+      && !document.querySelector('#pnl-view')?.classList.contains('hidden')
+  ), null, { timeout: 5_000 });
+  await page.keyboard.press('Home');
+  await page.waitForFunction(() => document.activeElement?.id === 'posts-tab', null, { timeout: 5_000 });
+  const viewTabSemantics = await page.evaluate(() => ({
+    selected: [...document.querySelectorAll('[role="tab"]')]
+      .filter((tab) => tab.getAttribute('aria-selected') === 'true')
+      .map((tab) => tab.id),
+    orientation: document.querySelector('[role="tablist"]')?.getAttribute('aria-orientation') || '',
+    panels: ['posts-view', 'logs-view', 'pnl-view'].map((id) => {
+      const panel = document.getElementById(id);
+      return {
+        id,
+        role: panel?.getAttribute('role') || '',
+        labelledBy: panel?.getAttribute('aria-labelledby') || '',
+        tabIndex: panel?.tabIndex
+      };
+    })
+  }));
+  if (viewTabSemantics.orientation !== 'horizontal'
+    || viewTabSemantics.selected.length !== 1
+    || viewTabSemantics.selected[0] !== 'posts-tab'
+    || viewTabSemantics.panels.some((panel) => (
+      panel.role !== 'tabpanel'
+        || panel.labelledBy !== panel.id.replace('-view', '-tab')
+        || panel.tabIndex !== 0
+    ))) {
+    throw new Error(`Las vistas principales no conservan semántica y teclado ARIA: ${JSON.stringify(viewTabSemantics)}.`);
+  }
+
   const logGrouping = await page.evaluate(() => {
     const refreshMessage = 'Telegram Web refrescado automaticamente cada 30 segundos.';
     const groups = groupLogsForDisplay([
@@ -781,6 +824,7 @@ try {
     realtimeRecovered: true,
     timeoutInjectedFailures,
     timeoutRecovered: true,
+    viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     historicalFailures,
     pnlIsolationPassed: true,

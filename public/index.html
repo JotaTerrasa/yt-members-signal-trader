@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=50">
-    <link rel="stylesheet" href="/polish.css?v=4">
+    <link rel="stylesheet" href="/polish.css?v=5">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=104" defer></script>
+    <script src="/app.js?v=105" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -511,7 +511,7 @@
           </div>
 
           <div class="content-toolbar">
-            <div class="tabs" role="tablist" aria-label="Vistas">
+            <div class="tabs" role="tablist" aria-label="Vistas" aria-orientation="horizontal">
               <button class="tab active" id="posts-tab" type="button" role="tab" aria-selected="true" aria-controls="posts-view">
                 <i data-lucide="messages-square"></i>
                 <span>Posts</span>
@@ -544,7 +544,7 @@
             </div>
           </div>
 
-          <div id="posts-view" class="view">
+          <div id="posts-view" class="view" role="tabpanel" aria-labelledby="posts-tab" tabindex="0">
             <div id="empty-posts" class="empty-state">
               Pega la URL del canal, abre sesion y lanza el scrapeo.
             </div>
@@ -558,7 +558,7 @@
             </div>
           </div>
 
-          <div id="logs-view" class="view hidden">
+          <div id="logs-view" class="view hidden" role="tabpanel" aria-labelledby="logs-tab" tabindex="0">
             <div id="logs-list" class="logs-list"></div>
             <div id="logs-pagination" class="list-pagination hidden">
               <span id="logs-pagination-status">0 eventos</span>
@@ -569,7 +569,7 @@
             </div>
           </div>
 
-	          <div id="pnl-view" class="view hidden">
+	          <div id="pnl-view" class="view hidden" role="tabpanel" aria-labelledby="pnl-tab" tabindex="0">
             <div class="pnl-header">
               <div>
                 <h2>Operativa</h2>

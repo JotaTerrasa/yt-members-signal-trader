@@ -522,6 +522,11 @@ h1 {
   background: #f8fafb;
 }
 
+.view[role='tabpanel']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .empty-state {
   border: 1px dashed #b8c5c8;
   border-radius: 7px;

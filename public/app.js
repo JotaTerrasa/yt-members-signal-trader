@@ -594,6 +594,7 @@ function bindEvents() {
       renderPnl();
     });
   });
+  elements.postsTab.closest('[role="tablist"]')?.addEventListener('keydown', handleViewTabsKeydown);
   elements.refreshPnl.addEventListener('click', async () => {
     await runAction(async () => {
       await loadPnl({ force: true });
@@ -9932,6 +9933,28 @@ function switchView(view) {
   } else if (pnl) {
     renderPnl();
   }
+}
+
+function handleViewTabsKeydown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+    return;
+  }
+  const tabs = [elements.postsTab, elements.logsTab, elements.pnlTab];
+  const currentTab = event.target.closest?.('[role="tab"]');
+  const currentIndex = tabs.indexOf(currentTab);
+  if (currentIndex < 0) {
+    return;
+  }
+  event.preventDefault();
+  const nextIndex = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? tabs.length - 1
+      : event.key === 'ArrowRight'
+        ? (currentIndex + 1) % tabs.length
+        : (currentIndex - 1 + tabs.length) % tabs.length;
+  tabs[nextIndex].focus();
+  tabs[nextIndex].click();
 }
 
 function viewIsVisible(element) {

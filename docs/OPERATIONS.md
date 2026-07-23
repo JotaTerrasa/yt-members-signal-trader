@@ -413,6 +413,8 @@ El informe estratégico se genera a las 09:00 y el mantenimiento de auditoría, 
 
 La pestaña `Eventos` conserva todos los registros del backend, pero agrupa visualmente las recargas automáticas consecutivas de Telegram Web. Cada grupo muestra el número de eventos y su intervalo temporal. Los errores, avisos, órdenes y mensajes intercalados permanecen siempre como entradas independientes; la agrupación no modifica archivos, exportaciones ni decisiones operativas.
 
+Las vistas `Posts`, `Eventos` y `PnL` implementan el patrón ARIA de pestañas horizontales. Con el foco en una pestaña, `Flecha izquierda`, `Flecha derecha`, `Inicio` y `Fin` cambian de vista y mantienen sincronizados foco, selección y panel asociado. La tecla `Tab` entra después en el contenido con un foco visible.
+
 - `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.
 - `GET /api/execution-packages` añade la cola persistente y el estado de promoción.
 - `GET /api/promotion-gate` devuelve cada criterio de forma auditable, un diagnóstico breve y cinco dominios separados: muestra, fiabilidad, rentabilidad, colas y seguridad. `No apta para revisión` no implica por sí solo un fallo del bot: el detalle permite distinguir una muestra aún corta, un hueco técnico, una cola transitoria, una protección ausente o un neto negativo tras costes.
