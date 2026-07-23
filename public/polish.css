@@ -435,6 +435,7 @@ h1 {
 
 .content-panel {
   border: 1px solid #d6dee0;
+  overflow: clip;
   background: #f8fafb;
   box-shadow: var(--shadow-tight);
 }
@@ -718,6 +719,79 @@ h1 {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.pnl-section-nav {
+  position: sticky;
+  top: 160px;
+  z-index: 34;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 -15px 12px;
+  padding: 7px 15px;
+  overflow-x: auto;
+  border-top: 1px solid rgba(210, 219, 222, 0.92);
+  border-bottom: 1px solid rgba(210, 219, 222, 0.96);
+  background: rgba(248, 250, 251, 0.97);
+  box-shadow: 0 5px 12px rgba(18, 33, 36, 0.035);
+  backdrop-filter: blur(14px);
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.pnl-section-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #526268;
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pnl-section-link svg {
+  width: 15px;
+  height: 15px;
+}
+
+.pnl-section-link:hover {
+  border-color: #c8d8d6;
+  color: var(--accent-strong);
+  background: #edf6f4;
+}
+
+.pnl-section-link.active,
+.pnl-section-link[aria-current='location'] {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+
+.pnl-section-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.pnl-section-target,
+.cost-control-panel,
+.alignment-panel,
+.economic-diagnosis,
+.replica-gap-panel {
+  scroll-margin-top: 216px;
+}
+
+#workspace:focus-visible,
+.pnl-section-target:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
 }
 
 .pnl-actions {
@@ -1590,6 +1664,18 @@ summary:focus-visible,
   .content-toolbar {
     top: 0;
   }
+
+  .pnl-section-nav {
+    top: 62px;
+  }
+
+  .pnl-section-target,
+  .cost-control-panel,
+  .alignment-panel,
+  .economic-diagnosis,
+  .replica-gap-panel {
+    scroll-margin-top: 120px;
+  }
 }
 
 @media (max-width: 680px) {
@@ -1695,6 +1781,13 @@ summary:focus-visible,
 
   .view {
     padding: 9px;
+  }
+
+  .pnl-section-nav {
+    margin-right: -9px;
+    margin-left: -9px;
+    padding-right: 9px;
+    padding-left: 9px;
   }
 
   .pnl-header,

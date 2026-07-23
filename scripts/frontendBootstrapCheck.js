@@ -57,6 +57,15 @@ try {
     throw new Error(`Errores JavaScript en el arranque: ${pageErrors.join(' | ')}`);
   }
 
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('skip-link'), null, { timeout: 3_000 });
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => (
+    window.location.hash === '#workspace'
+      && document.activeElement?.id === 'workspace'
+      && document.querySelector('#workspace')?.getBoundingClientRect().top >= 80
+  ), null, { timeout: 3_000 });
+
   await page.focus('#posts-tab');
   await page.keyboard.press('ArrowRight');
   await page.waitForFunction(() => (
@@ -1060,6 +1069,67 @@ try {
     throw new Error(`La cohorte no gobernó toda la auditoría visible: ${JSON.stringify(cohortScopeState)}.`);
   }
 
+  await waitForPnlAnchor(outcomeImpactPage, 'sheet-vst-alignment', { focus: false });
+  const sectionNavigationState = await outcomeImpactPage.evaluate(() => {
+    const nav = document.querySelector('#pnl-section-nav');
+    const links = [...(nav?.querySelectorAll('[data-pnl-section-link]') || [])];
+    return {
+      position: nav ? getComputedStyle(nav).position : '',
+      active: nav?.querySelector('[aria-current="location"]')?.dataset.pnlSectionLink || '',
+      links: links.map((link) => ({
+        target: link.dataset.pnlSectionLink,
+        href: link.getAttribute('href'),
+        targetExists: Boolean(document.getElementById(link.dataset.pnlSectionLink)),
+        targetTabIndex: document.getElementById(link.dataset.pnlSectionLink)?.tabIndex
+      })),
+      contentOverflow: getComputedStyle(document.querySelector('.content-panel')).overflow
+    };
+  });
+  if (sectionNavigationState.position !== 'sticky'
+    || sectionNavigationState.active !== 'sheet-vst-alignment'
+    || sectionNavigationState.links.length !== 7
+    || sectionNavigationState.links.some((link) => (
+      !link.targetExists
+        || link.targetTabIndex !== -1
+        || link.href !== `#${link.target}`
+    ))
+    || sectionNavigationState.contentOverflow !== 'clip') {
+    throw new Error(`La navegación de Rendimiento no quedó completa: ${JSON.stringify(sectionNavigationState)}.`);
+  }
+
+  await outcomeImpactPage.focus('[data-pnl-section-link="my-ledger-section"]');
+  await outcomeImpactPage.keyboard.press('Enter');
+  await waitForPnlAnchor(outcomeImpactPage, 'my-ledger-section');
+  const ledgerAnchorState = await readPnlAnchorState(outcomeImpactPage, 'my-ledger-section');
+  if (ledgerAnchorState.activeSection !== 'my-ledger-section') {
+    throw new Error(`Mi hoja no quedó seleccionada en la navegación: ${JSON.stringify(ledgerAnchorState)}.`);
+  }
+
+  await outcomeImpactPage.focus('[data-pnl-section-link="sheet-vst-alignment"]');
+  await outcomeImpactPage.keyboard.press('Enter');
+  await waitForPnlAnchor(outcomeImpactPage, 'sheet-vst-alignment');
+
+  await outcomeImpactPage.setViewportSize({ width: 1280, height: 900 });
+  await outcomeImpactPage.focus('[data-pnl-section-link="sheet-vst-alignment"]');
+  await outcomeImpactPage.keyboard.press('Enter');
+  await waitForPnlAnchor(outcomeImpactPage, 'sheet-vst-alignment');
+  const desktopAnchorState = await readPnlAnchorState(outcomeImpactPage, 'sheet-vst-alignment');
+  const desktopToolbar = desktopAnchorState.sticky.find((item) => item.selector === '.content-toolbar');
+  const desktopSectionNav = desktopAnchorState.sticky.find((item) => item.selector === '#pnl-section-nav');
+  if (desktopToolbar?.position !== 'sticky'
+    || desktopToolbar.top < 90
+    || desktopSectionNav?.position !== 'sticky'
+    || desktopSectionNav.top < desktopToolbar.bottom
+    || desktopAnchorState.top < desktopAnchorState.stickyBottom + 4
+    || desktopAnchorState.activeSection !== 'sheet-vst-alignment') {
+    throw new Error(`Las barras fijas se solapan en escritorio: ${JSON.stringify(desktopAnchorState)}.`);
+  }
+
+  await outcomeImpactPage.setViewportSize({ width: 760, height: 900 });
+  await outcomeImpactPage.focus('[data-pnl-section-link="sheet-vst-alignment"]');
+  await outcomeImpactPage.keyboard.press('Enter');
+  await waitForPnlAnchor(outcomeImpactPage, 'sheet-vst-alignment');
+
   await outcomeImpactPage.focus('[data-economic-drilldown="execution"]');
   await outcomeImpactPage.keyboard.press('Enter');
   await outcomeImpactPage.waitForFunction(() => {
@@ -1184,6 +1254,7 @@ try {
       && document.querySelectorAll('.replica-impact-table.symbol tbody tr').length === 4
       && document.querySelectorAll('.replica-audit-table tbody tr').length === 6
       && document.querySelector('#economic-diagnosis')?.textContent.includes('55,00 VST')
+      && document.activeElement?.dataset?.economicDiagnosisScope === 'month'
   ));
 
   const outcomeImpactState = await outcomeImpactPage.evaluate(() => {
@@ -1278,11 +1349,18 @@ try {
       && document.querySelector('.replica-audit > .replica-box-title span')?.textContent.includes('Cohorte vigente')
   ));
   await outcomeImpactPage.setViewportSize({ width: 390, height: 844 });
+  await outcomeImpactPage.focus('[data-pnl-section-link="sheet-vst-alignment"]');
+  await outcomeImpactPage.keyboard.press('Enter');
+  await waitForPnlAnchor(outcomeImpactPage, 'sheet-vst-alignment');
   const economicDiagnosisMobile = await outcomeImpactPage.evaluate(() => {
     const flow = document.querySelector('.economic-diagnosis-flow');
     const causes = document.querySelector('.economic-diagnosis-causes');
     const scope = document.querySelector('.economic-diagnosis-scope');
     const drilldowns = [...document.querySelectorAll('.economic-diagnosis-link')];
+    const sectionNav = document.querySelector('#pnl-section-nav');
+    const activeSectionLink = sectionNav?.querySelector('[aria-current="location"]');
+    const sectionNavRect = sectionNav?.getBoundingClientRect();
+    const activeSectionRect = activeSectionLink?.getBoundingClientRect();
     return {
       viewportWidth: innerWidth,
       documentScrollWidth: document.documentElement.scrollWidth,
@@ -1294,7 +1372,20 @@ try {
       rowCount: document.querySelectorAll('.replica-audit-table tbody tr').length,
       drilldownsFit: drilldowns.every((link) => (
         link.getBoundingClientRect().width <= link.closest('.economic-diagnosis-cause').getBoundingClientRect().width
-      ))
+      )),
+      sectionNavPosition: sectionNav ? getComputedStyle(sectionNav).position : '',
+      sectionNavTop: sectionNavRect?.top ?? null,
+      sectionNavLeft: sectionNavRect?.left ?? null,
+      sectionNavRight: sectionNavRect?.right ?? null,
+      sectionNavClientWidth: sectionNav?.clientWidth || 0,
+      sectionNavScrollWidth: sectionNav?.scrollWidth || 0,
+      activeSection: activeSectionLink?.dataset.pnlSectionLink || '',
+      activeSectionVisible: Boolean(
+        sectionNavRect
+          && activeSectionRect
+          && activeSectionRect.left >= sectionNavRect.left - 1
+          && activeSectionRect.right <= sectionNavRect.right + 1
+      )
     };
   });
   if (economicDiagnosisMobile.documentScrollWidth > economicDiagnosisMobile.viewportWidth
@@ -1306,7 +1397,17 @@ try {
     || economicDiagnosisMobile.scopeWidth > economicDiagnosisMobile.diagnosisWidth
     || economicDiagnosisMobile.scopeButtonCount !== 2
     || economicDiagnosisMobile.rowCount !== 3
-    || !economicDiagnosisMobile.drilldownsFit) {
+    || !economicDiagnosisMobile.drilldownsFit
+    || economicDiagnosisMobile.sectionNavPosition !== 'sticky'
+    || economicDiagnosisMobile.sectionNavTop == null
+    || economicDiagnosisMobile.sectionNavTop < 60
+    || economicDiagnosisMobile.sectionNavTop > 66
+    || economicDiagnosisMobile.sectionNavLeft == null
+    || economicDiagnosisMobile.sectionNavLeft < -1
+    || economicDiagnosisMobile.sectionNavRight > economicDiagnosisMobile.viewportWidth + 1
+    || economicDiagnosisMobile.sectionNavScrollWidth <= economicDiagnosisMobile.sectionNavClientWidth
+    || economicDiagnosisMobile.activeSection !== 'sheet-vst-alignment'
+    || !economicDiagnosisMobile.activeSectionVisible) {
     throw new Error(`El diagnóstico económico no respondió bien en móvil: ${JSON.stringify(economicDiagnosisMobile)}.`);
   }
   if (outcomeImpactErrors.length) {
@@ -1412,6 +1513,7 @@ try {
     timeoutRecovered: true,
     frontendVersionUpdatePassed: true,
     frontendAutoReloadPassed: true,
+    skipLinkPassed: true,
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     incidentLifecyclePassed: true,
@@ -1430,6 +1532,8 @@ try {
     tabletReliabilityResponsivePassed: true,
     economicDiagnosisPanelPassed: true,
     economicDiagnosisScopeTogglePassed: true,
+    pnlSectionNavigationPassed: true,
+    pnlSectionNavigationResponsivePassed: true,
     outcomeImpactPanelPassed: true,
     manualPnlRefreshPassed: true
   }));
@@ -1444,6 +1548,74 @@ function optionValue(name) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForPnlAnchor(page, targetId, { focus = true, timeout = 6_000 } = {}) {
+  await page.waitForFunction(({ id, requireFocus }) => {
+    const target = document.getElementById(id);
+    if (!target) {
+      return false;
+    }
+    const stickyBottom = ['.topbar', '.content-toolbar', '#pnl-section-nav']
+      .reduce((maximum, selector) => {
+        const node = document.querySelector(selector);
+        if (!node) {
+          return maximum;
+        }
+        const position = getComputedStyle(node).position;
+        const rect = node.getBoundingClientRect();
+        return ['fixed', 'sticky'].includes(position)
+          && rect.bottom > 0
+          && rect.top < innerHeight
+          ? Math.max(maximum, rect.bottom)
+          : maximum;
+      }, 0);
+    const top = target.getBoundingClientRect().top;
+    const sectionLink = document.querySelector(`[data-pnl-section-link="${CSS.escape(id)}"]`);
+    return window.location.hash === `#${id}`
+      && Number.isFinite(top)
+      && top >= stickyBottom + 4
+      && top <= stickyBottom + 52
+      && (!sectionLink || sectionLink.getAttribute('aria-current') === 'location')
+      && (!requireFocus || document.activeElement?.id === id);
+  }, { id: targetId, requireFocus: focus }, { timeout });
+}
+
+async function readPnlAnchorState(page, targetId) {
+  return page.evaluate((id) => {
+    const target = document.getElementById(id);
+    const sticky = ['.topbar', '.content-toolbar', '#pnl-section-nav']
+      .map((selector) => {
+        const node = document.querySelector(selector);
+        if (!node) {
+          return null;
+        }
+        const rect = node.getBoundingClientRect();
+        return {
+          selector,
+          position: getComputedStyle(node).position,
+          top: rect.top,
+          bottom: rect.bottom
+        };
+      })
+      .filter(Boolean);
+    const stickyBottom = sticky.reduce((maximum, item) => (
+      ['fixed', 'sticky'].includes(item.position)
+        && item.bottom > 0
+        && item.top < innerHeight
+        ? Math.max(maximum, item.bottom)
+        : maximum
+    ), 0);
+    return {
+      hash: window.location.hash,
+      top: target?.getBoundingClientRect().top,
+      focusedId: document.activeElement?.id || '',
+      stickyBottom,
+      sticky,
+      activeSection: document.querySelector('#pnl-section-nav [aria-current="location"]')
+        ?.dataset.pnlSectionLink || ''
+    };
+  }, targetId);
 }
 
 function nativeSheetFixturePayload(fixtureMonth, fixtureAt, fixtureOpenAt) {

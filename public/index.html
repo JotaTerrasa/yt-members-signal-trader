@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=51">
-    <link rel="stylesheet" href="/polish.css?v=8">
+    <link rel="stylesheet" href="/polish.css?v=9">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=111" defer></script>
+    <script src="/app.js?v=112" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -60,7 +60,7 @@
         </button>
       </div>
 
-      <main class="layout" id="workspace">
+      <main class="layout" id="workspace" tabindex="-1">
         <section class="tool-panel" id="tool-panel" aria-label="Configuracion de scrapeo">
           <div class="field">
             <label for="channel-url">Canal o pestana de publicaciones</label>
@@ -582,7 +582,7 @@
           </div>
 
 	          <div id="pnl-view" class="view hidden" role="tabpanel" aria-labelledby="pnl-tab" tabindex="0">
-            <div class="pnl-header">
+            <div class="pnl-header pnl-section-target" id="pnl-overview" tabindex="-1">
               <div>
                 <h2>Operativa</h2>
                 <p id="pnl-status">Leyendo BingX...</p>
@@ -600,9 +600,40 @@
               </div>
             </div>
 
+            <nav class="pnl-section-nav" id="pnl-section-nav" aria-label="Secciones de operativa">
+              <a class="pnl-section-link active" href="#pnl-overview" data-pnl-anchor data-pnl-section-link="pnl-overview" aria-current="location">
+                <i data-lucide="layout-dashboard" aria-hidden="true"></i>
+                <span>Resumen</span>
+              </a>
+              <a class="pnl-section-link" href="#reliability-panel" data-pnl-anchor data-pnl-section-link="reliability-panel">
+                <i data-lucide="shield-check" aria-hidden="true"></i>
+                <span>Fiabilidad</span>
+              </a>
+              <a class="pnl-section-link" href="#guard-dashboard" data-pnl-anchor data-pnl-section-link="guard-dashboard">
+                <i data-lucide="activity" aria-hidden="true"></i>
+                <span>Guardia</span>
+              </a>
+              <a class="pnl-section-link" href="#positions-section" data-pnl-anchor data-pnl-section-link="positions-section">
+                <i data-lucide="candlestick-chart" aria-hidden="true"></i>
+                <span>Posiciones</span>
+              </a>
+              <a class="pnl-section-link" href="#my-ledger-section" data-pnl-anchor data-pnl-section-link="my-ledger-section">
+                <i data-lucide="table" aria-hidden="true"></i>
+                <span>Mi hoja</span>
+              </a>
+              <a class="pnl-section-link" href="#performance-section" data-pnl-anchor data-pnl-section-link="performance-section">
+                <i data-lucide="line-chart" aria-hidden="true"></i>
+                <span>Rendimiento</span>
+              </a>
+              <a class="pnl-section-link" href="#sheet-vst-alignment" data-pnl-anchor data-pnl-section-link="sheet-vst-alignment">
+                <i data-lucide="scan-search" aria-hidden="true"></i>
+                <span>Auditoría</span>
+              </a>
+            </nav>
+
             <div id="pnl-source-grid" class="pnl-source-grid" aria-label="Fuentes de PnL"></div>
             <section class="replica-health-panel hidden" id="replica-health-panel" aria-label="Estado de alineación entre Google Sheet y Futuros VST"></section>
-            <section class="reliability-panel" id="reliability-panel" aria-label="Fiabilidad de ejecución">
+            <section class="reliability-panel pnl-section-target" id="reliability-panel" tabindex="-1" aria-label="Fiabilidad de ejecución">
               <div class="trade-section-header">
                 <div>
                   <h3>Fiabilidad de ejecución</h3>
@@ -708,7 +739,7 @@
 
             <div class="real-mode-banner" id="real-mode-banner"></div>
 
-            <div class="guard-dashboard" id="guard-dashboard">
+            <div class="guard-dashboard pnl-section-target" id="guard-dashboard" tabindex="-1">
               <div class="trade-section-header">
                 <h3>Guardia nocturna</h3>
                 <span id="guard-status">Sin datos</span>
@@ -809,7 +840,7 @@
               </div>
             </div>
 
-            <div class="dashboard-section">
+            <div class="dashboard-section pnl-section-target" id="positions-section" tabindex="-1">
               <div class="dashboard-section-title">
                 <span>Señales y posiciones</span>
               </div>
@@ -851,7 +882,7 @@
                 <div class="real-lifecycle-list" id="real-lifecycle-list"></div>
               </div>
 
-              <div class="trade-section my-ledger-section">
+              <div class="trade-section my-ledger-section pnl-section-target" id="my-ledger-section" tabindex="-1">
                 <div class="trade-section-header">
                   <h3>Mi hoja operativa</h3>
                   <span id="my-ledger-status">0 filas</span>
@@ -1013,7 +1044,7 @@
               </div>
             </div>
 
-            <details class="dashboard-section compact-fold performance-fold" open>
+            <details class="dashboard-section compact-fold performance-fold pnl-section-target" id="performance-section" tabindex="-1" open>
               <summary class="dashboard-section-title">
                 <span>Rendimiento</span>
               </summary>
@@ -1172,7 +1203,7 @@
               </div>
             </div>
 
-            <div class="alignment-panel" id="sheet-vst-alignment" tabindex="-1">
+            <div class="alignment-panel pnl-section-target" id="sheet-vst-alignment" tabindex="-1">
               <div class="trade-section-header">
                 <h3>Alineación Google Sheet vs VST</h3>
                 <span id="alignment-status">Sin comparar</span>

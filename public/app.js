@@ -1,4 +1,6 @@
 const elements = {
+  skipLink: document.querySelector('.skip-link'),
+  workspace: document.querySelector('#workspace'),
   toolPanel: document.querySelector('#tool-panel'),
   toggleControls: document.querySelector('#toggle-controls'),
   headerSourceStatus: document.querySelector('#header-source-status'),
@@ -25,6 +27,7 @@ const elements = {
   postsView: document.querySelector('#posts-view'),
   logsView: document.querySelector('#logs-view'),
   pnlView: document.querySelector('#pnl-view'),
+  pnlSectionNav: document.querySelector('#pnl-section-nav'),
   postsList: document.querySelector('#posts-list'),
   emptyPosts: document.querySelector('#empty-posts'),
   postsPagination: document.querySelector('#posts-pagination'),
@@ -292,6 +295,15 @@ const PNL_REQUEST_TIMEOUT_MS = 30 * 1000;
 const PNL_HASH_LAYOUT_MIN_WATCH_MS = 1800;
 const PNL_HASH_LAYOUT_QUIET_MS = 900;
 const PNL_HASH_LAYOUT_MAX_WATCH_MS = 6000;
+const PNL_SECTION_TARGET_IDS = Object.freeze([
+  'pnl-overview',
+  'reliability-panel',
+  'guard-dashboard',
+  'positions-section',
+  'my-ledger-section',
+  'performance-section',
+  'sheet-vst-alignment'
+]);
 const CLIENT_ERROR_PRIORITIES = Object.freeze({ bootstrap: 1, realtime: 2, action: 3 });
 let referenceRefreshTimer = null;
 let pnlRealtimeRenderTimer = null;
@@ -303,6 +315,7 @@ let pnlHashLayoutQuietTimer = null;
 let pnlHashLayoutDeadlineTimer = null;
 let pnlHashLayoutTargetId = '';
 let pnlHashLayoutStartedAt = 0;
+let pnlSectionNavigationFrame = null;
 let realtimeEventSource = null;
 let realtimeWatchdogTimer = null;
 let realtimeReconnectTimer = null;
@@ -452,6 +465,10 @@ function scheduleBootstrapRetry(tasks, attempt = 0) {
 
 function bindEvents() {
   document.addEventListener('focusin', handlePnlHashFocusChange);
+  window.addEventListener('scroll', schedulePnlSectionNavigationUpdate, { passive: true });
+  window.addEventListener('resize', schedulePnlSectionNavigationUpdate);
+  elements.skipLink?.addEventListener('click', handleSkipLinkClick);
+  elements.pnlView?.addEventListener('click', handlePnlAnchorClick);
 
   elements.frontendUpdateAction?.addEventListener('click', () => {
     reloadFrontendDocument();
@@ -556,24 +573,6 @@ function bindEvents() {
   });
   const alignmentPanel = document.querySelector('#sheet-vst-alignment');
   alignmentPanel?.addEventListener('click', async (event) => {
-    const drilldownLink = event.target.closest('[data-economic-drilldown]');
-    if (drilldownLink) {
-      const targetId = String(drilldownLink.getAttribute('href') || '').replace(/^#/, '');
-      const target = document.getElementById(targetId);
-      if (target && elements.pnlView?.contains(target)) {
-        event.preventDefault();
-        const nextHash = `#${targetId}`;
-        if (window.location.hash !== nextHash) {
-          window.history.pushState(null, '', nextHash);
-        }
-        appState.pnlHashAnchorRequested = targetId;
-        appState.pnlHashAnchorSettled = '';
-        appState.pnlHashAnchorFocusRequested = targetId;
-        scrollPnlHashAnchorNow(targetId);
-        focusPnlHashTarget(targetId, { force: true });
-      }
-      return;
-    }
     const economicScopeButton = event.target.closest('[data-economic-diagnosis-scope]');
     if (economicScopeButton) {
       const scope = economicScopeButton.dataset.economicDiagnosisScope;
@@ -2022,6 +2021,7 @@ function renderPnl() {
   elements.pnlNote.classList.toggle('warn', !usesLiveMode(appState.bingx?.mode));
   window.lucide?.createIcons();
   settlePnlHashAnchor();
+  schedulePnlSectionNavigationUpdate();
 }
 
 function schedulePnlPriceRender() {
@@ -2425,7 +2425,7 @@ function renderReplicaHealthPanel(reference = currentReferenceLedger()) {
       </div>
       <div class="replica-health-actions">
         <span class="replica-health-status ${escapeAttribute(tone)}" role="status" aria-live="polite">${escapeHtml(status)}</span>
-        <a class="button secondary" href="#sheet-vst-alignment">
+        <a class="button secondary" href="#sheet-vst-alignment" data-pnl-anchor>
           <i data-lucide="scan-search"></i>
           <span>Ver auditoría</span>
         </a>
@@ -6436,7 +6436,7 @@ function renderEconomicDiagnosis(audit = {}) {
       <span class="${escapeAttribute(cause.key)}">${escapeHtml(cause.label)}</span>
       <strong class="${amountClass(cause.value)}">${escapeHtml(formatMoney(cause.value, 'VST'))}</strong>
       <small>${escapeHtml(`${formatPercent(cause.share)} del arrastre · ${cause.detail}`)}</small>
-      <a class="economic-diagnosis-link" href="#${escapeAttribute(cause.target)}" data-economic-drilldown="${escapeAttribute(cause.key)}">
+      <a class="economic-diagnosis-link" href="#${escapeAttribute(cause.target)}" data-pnl-anchor data-economic-drilldown="${escapeAttribute(cause.key)}">
         <span>${escapeHtml(cause.action)}</span>
         <i data-lucide="arrow-down"></i>
       </a>
@@ -10600,6 +10600,122 @@ function handleViewTabsKeydown(event) {
 
 function viewIsVisible(element) {
   return Boolean(element && !element.classList.contains('hidden'));
+}
+
+function handleSkipLinkClick(event) {
+  if (!elements.workspace) {
+    return;
+  }
+  event.preventDefault();
+  const nextHash = '#workspace';
+  if (window.location.hash !== nextHash) {
+    window.history.pushState(null, '', nextHash);
+  }
+  stopPnlHashLayoutObserver();
+  appState.pnlHashAnchorRequested = '';
+  appState.pnlHashAnchorSettled = '';
+  appState.pnlHashAnchorFocusRequested = '';
+  elements.workspace.scrollIntoView({ block: 'start' });
+  window.requestAnimationFrame(() => {
+    elements.workspace.focus({ preventScroll: true });
+  });
+}
+
+function handlePnlAnchorClick(event) {
+  const link = event.target.closest?.('a[data-pnl-anchor]');
+  if (!link || !elements.pnlView?.contains(link)) {
+    return;
+  }
+  const rawTargetId = String(link.getAttribute('href') || '').replace(/^#/, '');
+  let targetId = rawTargetId;
+  try {
+    targetId = decodeURIComponent(rawTargetId);
+  } catch {
+    // Conserva el identificador literal si la URL contiene una secuencia incompleta.
+  }
+  const target = document.getElementById(targetId);
+  if (!target || !elements.pnlView.contains(target)) {
+    return;
+  }
+  event.preventDefault();
+  activatePnlHashTarget(targetId);
+}
+
+function activatePnlHashTarget(targetId) {
+  const nextHash = `#${targetId}`;
+  if (window.location.hash !== nextHash) {
+    window.history.pushState(null, '', nextHash);
+  }
+  appState.pnlHashAnchorRequested = targetId;
+  appState.pnlHashAnchorSettled = '';
+  appState.pnlHashAnchorFocusRequested = targetId;
+  scrollPnlHashAnchorNow(targetId);
+  focusPnlHashTarget(targetId, { force: true });
+  schedulePnlSectionNavigationUpdate();
+}
+
+function schedulePnlSectionNavigationUpdate() {
+  if (pnlSectionNavigationFrame !== null) {
+    return;
+  }
+  pnlSectionNavigationFrame = window.requestAnimationFrame(() => {
+    pnlSectionNavigationFrame = null;
+    updatePnlSectionNavigation();
+  });
+}
+
+function updatePnlSectionNavigation() {
+  const nav = elements.pnlSectionNav;
+  if (!nav) {
+    return;
+  }
+  const links = [...nav.querySelectorAll('[data-pnl-section-link]')];
+  if (!viewIsVisible(elements.pnlView)) {
+    links.forEach((link) => {
+      link.classList.remove('active');
+      link.removeAttribute('aria-current');
+    });
+    return;
+  }
+
+  const navBottom = nav.getBoundingClientRect().bottom;
+  const activationLine = Math.min(window.innerHeight - 1, Math.max(0, navBottom) + 24);
+  let activeId = PNL_SECTION_TARGET_IDS[0];
+  for (const targetId of PNL_SECTION_TARGET_IDS) {
+    const target = document.getElementById(targetId);
+    if (target && target.getBoundingClientRect().top <= activationLine) {
+      activeId = targetId;
+    } else {
+      break;
+    }
+  }
+  if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4) {
+    activeId = PNL_SECTION_TARGET_IDS.at(-1);
+  }
+
+  let activeLink = null;
+  links.forEach((link) => {
+    const active = link.dataset.pnlSectionLink === activeId;
+    link.classList.toggle('active', active);
+    if (active) {
+      link.setAttribute('aria-current', 'location');
+      activeLink = link;
+    } else {
+      link.removeAttribute('aria-current');
+    }
+  });
+  nav.dataset.activeSection = activeId;
+
+  if (!activeLink) {
+    return;
+  }
+  const navRect = nav.getBoundingClientRect();
+  const linkRect = activeLink.getBoundingClientRect();
+  if (linkRect.left < navRect.left) {
+    nav.scrollLeft -= navRect.left - linkRect.left + 8;
+  } else if (linkRect.right > navRect.right) {
+    nav.scrollLeft += linkRect.right - navRect.right + 8;
+  }
 }
 
 function applyHashNavigation() {
