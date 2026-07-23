@@ -49,6 +49,7 @@ La aplicación está pensada para ejecutarse en tu propia máquina. Las sesiones
 - Empareja las entradas marcadas en sombra con sus cierres y muestra su PnL neto estimado. También avisa cuando un umbral marcaría por construcción todas las señales con el apalancamiento observado.
 - Rechaza aperturas antiguas, entradas perseguidas y stops anormalmente lejanos.
 - Autorrecupera la pestaña de YouTube tras tres lecturas vacías consecutivas y agrupa los avisos repetidos para evitar ruido en Telegram.
+- El centro de incidentes agrupa avisos repetidos del mismo tipo y muestra su frecuencia. Una lectura vacía de Telegram Web pasa a `Recuperada` cuando vuelven a encontrarse mensajes y conserva una gracia breve durante las recargas normales, evitando presentar como activas interrupciones transitorias ya resueltas.
 - Limita el trabajo visual de Posts, Eventos y las tablas extensas de Rendimiento mediante paginación progresiva. Los totales y diagnósticos siguen usando la muestra completa, mientras el canal SSE se mantiene compacto durante el monitor continuo.
 - Supervisa el canal SSE con heartbeat cada 15 segundos. Si el panel queda 45 segundos sin actividad, muestra la reconexión y crea un canal nuevo con espera exponencial, sin detener el monitor del backend.
 - Descarta de forma aislada cualquier evento SSE truncado o con JSON inválido. La interfaz avisa, conserva la conexión y se recupera con el siguiente evento válido o heartbeat; la operativa del backend no se interrumpe.

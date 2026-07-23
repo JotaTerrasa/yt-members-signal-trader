@@ -344,6 +344,7 @@ const appState = {
   eventsReconnectAttempts: 0,
   telegram: null,
   telegramSource: null,
+  telegramLastVisibleAt: null,
   bingx: null,
   pnl: null,
   pnlSources: null,
@@ -934,6 +935,7 @@ async function loadState(options = {}) {
   if (syncRuntimeInstance(state)) {
     return;
   }
+  trackTelegramVisibility(state);
   appState.state = state;
   appState.logs = state.logs || appState.logs;
   appState.portfolio = state.portfolio || appState.portfolio;
@@ -1347,6 +1349,7 @@ function connectEvents() {
     if (syncRuntimeInstance(nextState)) {
       return;
     }
+    trackTelegramVisibility(nextState);
     appState.state = nextState;
     appState.logs = appState.state.logs || appState.logs;
     appState.trades = appState.state.trades || appState.trades;
@@ -4410,10 +4413,10 @@ function renderGuardDashboard() {
   const backup = status.backup || {};
   const secureBackup = status.secureBackup || {};
   const incidents = status.incidents?.items || buildClientIncidents();
-  const incidentViews = incidents.map((incident) => ({
+  const incidentViews = groupIncidentViews(incidents.map((incident) => ({
     ...incident,
     lifecycle: incidentLifecycle(incident, status)
-  }));
+  })));
   const activeIncidents = incidentViews.filter((incident) => incident.lifecycle.key === 'active');
   const recoveredIncidents = incidentViews.filter((incident) => incident.lifecycle.key === 'recovered');
   const critical = activeIncidents.filter((incident) => incident.level === 'error').length;
@@ -4459,12 +4462,16 @@ function renderGuardDashboard() {
 
 function renderIncidentItem(incident = {}) {
   const lifecycle = incident.lifecycle || { key: 'active', label: 'Activa' };
+  const occurrences = Math.max(1, Number(incident.occurrences || 1));
+  const lifecycleLabel = occurrences > 1
+    ? `${lifecycle.label} · ${occurrences} veces`
+    : lifecycle.label;
   return `
     <div class="incident-item ${escapeAttribute(incident.level || 'info')} ${escapeAttribute(lifecycle.key)}">
       <span>${escapeHtml(formatShortDateTime(incident.at))}</span>
       <div class="incident-heading">
         <strong>${escapeHtml(incident.title || incident.type || 'Incidencia')}</strong>
-        <em class="incident-state">${escapeHtml(lifecycle.label)}</em>
+        <em class="incident-state">${escapeHtml(lifecycleLabel)}</em>
       </div>
       <small>${escapeHtml(truncateText(incident.message || '', 140))}</small>
     </div>
@@ -4480,9 +4487,25 @@ function incidentLifecycle(incident = {}, status = {}) {
 
   const health = status.health || appState.state?.health || {};
   const safety = status.exchangeSafety || appState.exchangeSafety || {};
+  const incidentAt = Date.parse(incident.at || '');
+  const telegramReadAt = Date.parse(appState.state?.lastTelegramRunAt || '');
+  const telegramLastVisibleAt = Date.parse(appState.telegramLastVisibleAt || '');
+  const telegramGraceMs = Math.max(
+    90 * unitMs.second,
+    Number(appState.telegramSource?.refreshSeconds || 30) * 3 * unitMs.second
+  );
+  const telegramVisibleNow = Number(appState.state?.visibleTelegramMessages || 0) > 0;
+  const telegramRecentlyVisible = Number.isFinite(telegramLastVisibleAt)
+    && Date.now() - telegramLastVisibleAt <= telegramGraceMs;
+  const telegramRecovered = (telegramVisibleNow
+    && (!Number.isFinite(incidentAt)
+      || !Number.isFinite(telegramReadAt)
+      || telegramReadAt >= incidentAt))
+    || telegramRecentlyVisible;
   const recoveredByType = {
     bingx_sync: safety.level === 'ok' && !safety.stale,
     bingx_pnl_rate_limit: status.pnlBackoff?.active === false,
+    telegram_web_empty: telegramRecovered,
     youtube_empty: health.level === 'ok'
       && !health.stale
       && !health.noVisiblePosts
@@ -4495,6 +4518,51 @@ function incidentLifecycle(incident = {}, status = {}) {
   return recoveredByType[type] === true
     ? { key: 'recovered', label: 'Recuperada' }
     : { key: 'active', label: 'Activa' };
+}
+
+function trackTelegramVisibility(nextState = {}) {
+  if (Number(nextState.visibleTelegramMessages || 0) <= 0) {
+    return;
+  }
+  const readAt = Date.parse(nextState.lastTelegramRunAt || '');
+  appState.telegramLastVisibleAt = Number.isFinite(readAt)
+    ? new Date(readAt).toISOString()
+    : new Date().toISOString();
+}
+
+function groupIncidentViews(incidents = []) {
+  const groups = new Map();
+  for (const incident of incidents) {
+    const lifecycle = incident.lifecycle || { key: 'active', label: 'Activa' };
+    const type = String(incident.type || 'error');
+    const identity = type === 'error'
+      ? `${type}:${incident.title || ''}:${incident.message || ''}`
+      : type;
+    const key = `${identity}:${lifecycle.key}`;
+    const occurrences = Math.max(1, Number(incident.occurrences || 1));
+    const current = groups.get(key);
+    if (!current) {
+      groups.set(key, {
+        ...incident,
+        lifecycle,
+        occurrences
+      });
+      continue;
+    }
+
+    current.occurrences += occurrences;
+    if (Date.parse(incident.at || '') > Date.parse(current.at || '')) {
+      groups.set(key, {
+        ...incident,
+        lifecycle,
+        occurrences: current.occurrences
+      });
+    }
+  }
+
+  return [...groups.values()].sort((left, right) => (
+    Date.parse(right.at || '') - Date.parse(left.at || '')
+  ));
 }
 
 function buildClientIncidents() {

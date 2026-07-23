@@ -424,6 +424,8 @@ El informe estratégico se genera a las 09:00 y el mantenimiento de auditoría, 
 
 La pestaña `Eventos` conserva todos los registros del backend, pero agrupa visualmente las recargas automáticas consecutivas de Telegram Web. Cada grupo muestra el número de eventos y su intervalo temporal. Los errores, avisos, órdenes y mensajes intercalados permanecen siempre como entradas independientes; la agrupación no modifica archivos, exportaciones ni decisiones operativas.
 
+El centro de incidentes consolida por tipo y estado los avisos repetidos durante las últimas 24 horas. Conserva la hora del aviso más reciente y muestra cuántas veces ocurrió. Cuando Telegram Web vuelve a detectar mensajes, el frontend recuerda esa lectura durante el mayor valor entre 90 segundos y tres intervalos de recarga; así un cero transitorio durante `page.reload()` no reactiva la incidencia. Una ausencia sostenida más allá de esa gracia vuelve a mostrarse como activa. Esta clasificación es informativa: no modifica el scraping, el parser ni la ejecución.
+
 Las vistas `Posts`, `Eventos` y `PnL` implementan el patrón ARIA de pestañas horizontales. Con el foco en una pestaña, `Flecha izquierda`, `Flecha derecha`, `Inicio` y `Fin` cambian de vista y mantienen sincronizados foco, selección y panel asociado. La tecla `Tab` entra después en el contenido con un foco visible.
 
 - `GET /api/signal-coverage` resume paquetes completos, pendientes e incompletos.

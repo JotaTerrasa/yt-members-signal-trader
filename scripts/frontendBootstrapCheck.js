@@ -199,6 +199,23 @@ try {
   }
 
   const incidentLifecycleState = await page.evaluate(() => {
+    const previousState = appState.state;
+    const previousTelegramSource = appState.telegramSource;
+    const previousTelegramLastVisibleAt = appState.telegramLastVisibleAt;
+    const currentTelegramReadAt = new Date().toISOString();
+    appState.state = {
+      ...(previousState || {}),
+      visibleTelegramMessages: 0,
+      lastTelegramRunAt: currentTelegramReadAt
+    };
+    appState.telegramSource = {
+      ...(previousTelegramSource || {}),
+      refreshSeconds: 30
+    };
+    trackTelegramVisibility({
+      visibleTelegramMessages: 2,
+      lastTelegramRunAt: currentTelegramReadAt
+    });
     const healthy = {
       health: { level: 'ok', running: true, phase: 'live', stale: false, noVisiblePosts: false, visiblePosts: 10 },
       exchangeSafety: { level: 'ok', stale: false },
@@ -212,14 +229,78 @@ try {
     const recovered = incidentLifecycle({ type: 'bingx_sync', level: 'warn' }, healthy);
     const active = incidentLifecycle({ type: 'bingx_sync', level: 'warn' }, degraded);
     const sheetRecovered = incidentLifecycle({ type: 'youtube_empty', level: 'warn' }, healthy);
+    const telegramRecovered = incidentLifecycle({
+      type: 'telegram_web_empty',
+      level: 'warn',
+      at: '2026-07-23T10:02:00.000Z'
+    }, healthy);
+    appState.telegramLastVisibleAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const telegramActive = incidentLifecycle({
+      type: 'telegram_web_empty',
+      level: 'warn',
+      at: new Date().toISOString()
+    }, healthy);
+    appState.telegramLastVisibleAt = currentTelegramReadAt;
     const rateLimitActive = incidentLifecycle({ type: 'bingx_pnl_rate_limit', level: 'warn' }, degraded);
     const info = incidentLifecycle({ type: 'backup', level: 'info' }, healthy);
+    const grouped = groupIncidentViews([
+      {
+        type: 'telegram_web_empty',
+        level: 'warn',
+        at: '2026-07-23T10:02:00.000Z',
+        title: 'Telegram Web sin mensajes visibles',
+        message: 'Primera lectura vacía',
+        lifecycle: telegramRecovered
+      },
+      {
+        type: 'telegram_web_empty',
+        level: 'warn',
+        at: '2026-07-23T10:01:00.000Z',
+        title: 'Telegram Web sin mensajes visibles',
+        message: 'Segunda lectura vacía',
+        lifecycle: telegramRecovered
+      },
+      {
+        type: 'bingx_sync',
+        level: 'warn',
+        at: '2026-07-23T10:00:00.000Z',
+        title: 'Reconciliación BingX',
+        message: 'BingX sync: timestamp is invalid',
+        lifecycle: recovered
+      },
+      {
+        type: 'error',
+        level: 'error',
+        at: '2026-07-23T09:59:00.000Z',
+        title: 'Error',
+        message: 'Fallo A',
+        lifecycle: { key: 'active', label: 'Activa' }
+      },
+      {
+        type: 'error',
+        level: 'error',
+        at: '2026-07-23T09:58:00.000Z',
+        title: 'Error',
+        message: 'Fallo B',
+        lifecycle: { key: 'active', label: 'Activa' }
+      }
+    ]);
+    appState.state = previousState;
+    appState.telegramSource = previousTelegramSource;
+    appState.telegramLastVisibleAt = previousTelegramLastVisibleAt;
     return {
       recovered,
       active,
       sheetRecovered,
+      telegramRecovered,
+      telegramActive,
       rateLimitActive,
       info,
+      grouped: grouped.map((incident) => ({
+        type: incident.type,
+        occurrences: incident.occurrences,
+        lifecycle: incident.lifecycle
+      })),
       recoveredMarkup: renderIncidentItem({
         at: '2026-07-23T00:11:02.024Z',
         type: 'bingx_sync',
@@ -227,16 +308,25 @@ try {
         message: 'BingX sync: timestamp is invalid',
         level: 'warn',
         lifecycle: recovered
-      })
+      }),
+      groupedMarkup: renderIncidentItem(grouped[0])
     };
   });
   if (incidentLifecycleState.recovered.key !== 'recovered'
     || incidentLifecycleState.active.key !== 'active'
     || incidentLifecycleState.sheetRecovered.key !== 'recovered'
+    || incidentLifecycleState.telegramRecovered.key !== 'recovered'
+    || incidentLifecycleState.telegramActive.key !== 'active'
     || incidentLifecycleState.rateLimitActive.key !== 'active'
     || incidentLifecycleState.info.key !== 'info'
+    || incidentLifecycleState.grouped.length !== 4
+    || incidentLifecycleState.grouped[0]?.type !== 'telegram_web_empty'
+    || incidentLifecycleState.grouped[0]?.occurrences !== 2
+    || incidentLifecycleState.grouped[0]?.lifecycle?.key !== 'recovered'
+    || incidentLifecycleState.grouped.filter((incident) => incident.type === 'error').length !== 2
     || !incidentLifecycleState.recoveredMarkup.includes('Recuperada')
-    || !incidentLifecycleState.recoveredMarkup.includes('incident-item warn recovered')) {
+    || !incidentLifecycleState.recoveredMarkup.includes('incident-item warn recovered')
+    || !incidentLifecycleState.groupedMarkup.includes('Recuperada · 2 veces')) {
     throw new Error(`La UI no distingue incidencias activas, recuperadas e informativas: ${JSON.stringify(incidentLifecycleState)}.`);
   }
 
