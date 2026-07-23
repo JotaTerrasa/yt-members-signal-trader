@@ -516,6 +516,8 @@ El perfil Chromium se respalda durante una ventana de mantenimiento para evitar 
 npm run backup:secure:profile:maintenance
 ```
 
+El script comprueba que PM2 haya detenido realmente el proceso antes de capturar el perfil. En su bloque de recuperación reutiliza `startPm2.ps1`, por lo que no termina correctamente hasta que la aplicación vuelve a responder en `/api/health`; esta recuperación también se ejecuta cuando el backup falla.
+
 La clave predeterminada está en `~/.futures-magician/backup.key`. El archivo `.fmbak`, la configuración de réplica y su clave quedan fuera de Git. La clave debe conservarse separada de todas las copias: sin ella no se puede restaurar el contenedor.
 
 ### Auditoría

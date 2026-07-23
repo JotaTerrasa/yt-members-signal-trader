@@ -397,6 +397,8 @@ Backup de datos y perfil Chromium, deteniendo PM2 durante la captura:
 npm run backup:secure:profile:maintenance
 ```
 
+La ventana de mantenimiento verifica que el proceso se haya detenido antes de copiar `.yt-profile/`. Al finalizar, incluso si la copia falla, reutiliza el arranque endurecido de PM2 y exige que `/api/health` confirme la nueva instancia antes de cerrar la tarea.
+
 Verificación y restauración aislada:
 
 ```bash
