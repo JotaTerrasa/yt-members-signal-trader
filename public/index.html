@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=50">
-    <link rel="stylesheet" href="/polish.css?v=5">
+    <link rel="stylesheet" href="/polish.css?v=6">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=105" defer></script>
+    <script src="/app.js?v=106" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -47,6 +47,18 @@
           </div>
         </div>
       </header>
+
+      <div class="frontend-update hidden" id="frontend-update" role="status" aria-live="polite">
+        <i data-lucide="refresh-cw" aria-hidden="true"></i>
+        <div>
+          <strong>Nueva versión disponible</strong>
+          <span>Actualiza la interfaz para cargar los últimos cambios. El monitor seguirá funcionando.</span>
+        </div>
+        <button class="button secondary" id="frontend-update-action" type="button">
+          <i data-lucide="rotate-cw" aria-hidden="true"></i>
+          <span>Actualizar interfaz</span>
+        </button>
+      </div>
 
       <main class="layout" id="workspace">
         <section class="tool-panel" id="tool-panel" aria-label="Configuracion de scrapeo">

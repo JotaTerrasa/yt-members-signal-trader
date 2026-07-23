@@ -129,6 +129,51 @@ try {
     throw new Error(`La agrupación visual de eventos ocultó o mezcló incidencias: ${JSON.stringify(logGrouping)}.`);
   }
 
+  const versionPage = await browser.newPage();
+  const versionPageErrors = [];
+  let frontendVersionTag = 'v1';
+  let versionDocumentRequests = 0;
+  versionPage.on('pageerror', (error) => versionPageErrors.push(error.message));
+  versionPage.on('request', (request) => {
+    if (request.resourceType() === 'document') {
+      versionDocumentRequests += 1;
+    }
+  });
+  await versionPage.route('**/*?ui-version-check=1', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        etag: `"${frontendVersionTag}"`,
+        'last-modified': 'Thu, 23 Jul 2026 00:00:00 GMT',
+        'content-length': '0'
+      },
+      body: ''
+    });
+  });
+  await versionPage.goto(`${baseUrl}/?frontend-version-check=${Date.now()}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  });
+  await versionPage.waitForFunction(() => (
+    document.documentElement.dataset.uiVersionStatus === 'current'
+  ), null, { timeout: 10_000 });
+
+  frontendVersionTag = 'v2';
+  await versionPage.evaluate(() => checkFrontendVersion());
+  await versionPage.waitForFunction(() => (
+    document.documentElement.dataset.uiVersionStatus === 'outdated'
+      && !document.querySelector('#frontend-update')?.classList.contains('hidden')
+      && document.querySelector('#frontend-update-action')?.textContent.includes('Actualizar interfaz')
+  ), null, { timeout: 10_000 });
+  await versionPage.locator('#frontend-update-action').click();
+  await versionPage.waitForFunction(() => (
+    document.documentElement.dataset.uiVersionStatus === 'current'
+      && document.querySelector('#frontend-update')?.classList.contains('hidden')
+  ), null, { timeout: 15_000 });
+  if (versionDocumentRequests < 2 || versionPageErrors.length) {
+    throw new Error(`La actualización del frontend no completó su recarga: ${versionDocumentRequests} documentos · ${versionPageErrors.join(' | ')}`);
+  }
+
   const realtimePage = await browser.newPage();
   const realtimePageErrors = [];
   let realtimeInjectedFailures = 0;
@@ -824,6 +869,7 @@ try {
     realtimeRecovered: true,
     timeoutInjectedFailures,
     timeoutRecovered: true,
+    frontendVersionUpdatePassed: true,
     viewTabsKeyboardPassed: true,
     logGroupingPassed: true,
     historicalFailures,

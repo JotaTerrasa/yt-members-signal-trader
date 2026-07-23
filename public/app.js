@@ -251,6 +251,8 @@ const elements = {
   bingxProbeTp: document.querySelector('#bingx-probe-tp'),
   bingxParserText: document.querySelector('#bingx-parser-text'),
   bingxStatus: document.querySelector('#bingx-status'),
+  frontendUpdate: document.querySelector('#frontend-update'),
+  frontendUpdateAction: document.querySelector('#frontend-update-action'),
   clientError: document.querySelector('#client-error')
 };
 
@@ -272,6 +274,8 @@ const REALTIME_WATCHDOG_INTERVAL_MS = 5 * 1000;
 const REALTIME_RECONNECT_BASE_MS = 1000;
 const REALTIME_RECONNECT_MAX_MS = 15 * 1000;
 const RUNTIME_STORAGE_KEY = 'futures-magician-runtime-id';
+const FRONTEND_VERSION_ASSETS = ['/index.html', '/app.js', '/styles.css', '/polish.css'];
+const FRONTEND_VERSION_CHECK_MS = 60 * 1000;
 const BOOTSTRAP_RETRY_DELAYS_MS = [2000, 5000, 15_000, 30_000];
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8000;
 const REFERENCE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -291,6 +295,9 @@ let realtimeReconnectAttempts = 0;
 let realtimeLastActivityAt = 0;
 let realtimePayloadFailures = 0;
 let bootstrapRetryTimer = null;
+let frontendVersionTimer = null;
+let frontendVersionFingerprint = '';
+let frontendVersionChecking = false;
 document.documentElement.dataset.uiLoadedAt = new Date().toISOString();
 
 const appState = {
@@ -356,6 +363,7 @@ async function init() {
   bindEvents();
   initializeResponsiveControls();
   connectEvents();
+  startFrontendVersionWatch();
   window.addEventListener('hashchange', () => {
     applyHashNavigation();
   });
@@ -425,6 +433,16 @@ function scheduleBootstrapRetry(tasks, attempt = 0) {
 }
 
 function bindEvents() {
+  elements.frontendUpdateAction?.addEventListener('click', () => {
+    elements.frontendUpdateAction.disabled = true;
+    elements.frontendUpdateAction.setAttribute('aria-busy', 'true');
+    const label = elements.frontendUpdateAction.querySelector('span');
+    if (label) {
+      label.textContent = 'Actualizando...';
+    }
+    window.location.reload();
+  });
+
   elements.toggleControls?.addEventListener('click', () => {
     setControlsCollapsed(!elements.toolPanel.classList.contains('mobile-collapsed'));
   });
@@ -1478,6 +1496,69 @@ function syncRuntimeInstance(nextState) {
     // La sincronizacion SSE sigue funcionando aunque el navegador bloquee sessionStorage.
   }
   return false;
+}
+
+function startFrontendVersionWatch() {
+  if (frontendVersionTimer !== null) {
+    return;
+  }
+
+  const check = () => {
+    checkFrontendVersion().catch(() => {});
+  };
+  frontendVersionTimer = window.setInterval(check, FRONTEND_VERSION_CHECK_MS);
+  window.addEventListener('focus', check);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      check();
+    }
+  });
+  check();
+}
+
+async function checkFrontendVersion() {
+  if (frontendVersionChecking || document.documentElement.dataset.uiVersionStatus === 'outdated') {
+    return;
+  }
+
+  frontendVersionChecking = true;
+  try {
+    const fingerprint = await readFrontendVersionFingerprint();
+    if (!frontendVersionFingerprint) {
+      frontendVersionFingerprint = fingerprint;
+      document.documentElement.dataset.uiVersionStatus = 'current';
+      return;
+    }
+    if (fingerprint === frontendVersionFingerprint) {
+      return;
+    }
+
+    document.documentElement.dataset.uiVersionStatus = 'outdated';
+    elements.frontendUpdate?.classList.remove('hidden');
+    window.lucide?.createIcons();
+  } finally {
+    frontendVersionChecking = false;
+  }
+}
+
+async function readFrontendVersionFingerprint() {
+  const signatures = await Promise.all(FRONTEND_VERSION_ASSETS.map(async (asset) => {
+    const response = await fetch(`${asset}?ui-version-check=1`, {
+      method: 'HEAD',
+      cache: 'no-store'
+    });
+    if (!response.ok) {
+      throw new Error(`No se pudo comprobar ${asset}: HTTP ${response.status}`);
+    }
+    const signature = response.headers.get('etag')
+      || response.headers.get('last-modified')
+      || response.headers.get('content-length');
+    if (!signature) {
+      throw new Error(`El recurso ${asset} no publicó una versión verificable.`);
+    }
+    return `${asset}:${signature}`;
+  }));
+  return signatures.join('|');
 }
 
 function markRealtimeDisconnected() {
