@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#242b2e">
     <title>Futures Magician</title>
     <link rel="stylesheet" href="/styles.css?v=51">
-    <link rel="stylesheet" href="/polish.css?v=9">
+    <link rel="stylesheet" href="/polish.css?v=10">
     <script src="/vendor/lucide.min.js?v=1.25.0" defer></script>
-    <script src="/app.js?v=113" defer></script>
+    <script src="/app.js?v=114" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Saltar al contenido</a>
@@ -959,7 +959,18 @@
                 <div class="external-sheet-panel pnl-section-target" id="external-sheet-panel" tabindex="-1" aria-busy="false">
                   <div class="trade-section-header">
                     <h3>Hoja externa en vivo</h3>
-                    <span id="external-sheet-status" role="status" aria-live="polite">Sin hoja</span>
+                    <div class="external-sheet-header-actions">
+                      <span id="external-sheet-status" role="status" aria-live="polite">Sin hoja</span>
+                      <button
+                        class="button secondary icon-button external-sheet-retry hidden"
+                        id="external-sheet-retry"
+                        type="button"
+                        title="Actualizar hoja externa"
+                        aria-label="Actualizar hoja externa"
+                      >
+                        <i data-lucide="rotate-cw" aria-hidden="true"></i>
+                      </button>
+                    </div>
                   </div>
                   <div id="external-sheet-native" class="external-sheet-native hidden">
                     <div id="external-sheet-summary" class="external-sheet-summary"></div>

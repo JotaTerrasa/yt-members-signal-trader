@@ -1432,6 +1432,7 @@ try {
     audit: [],
     pnl: []
   };
+  let manualRefreshDelayMs = 0;
   manualRefreshPage.on('pageerror', (error) => manualRefreshErrors.push(error.message));
   await manualRefreshPage.route('**/api/bingx', async (route) => {
     await route.fulfill({
@@ -1454,10 +1455,25 @@ try {
   });
   await manualRefreshPage.route('**/api/historical-pnl?**', async (route) => {
     manualRefreshRequests.historical.push(route.request().url());
+    if (manualRefreshDelayMs > 0) {
+      await delay(manualRefreshDelayMs);
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({ historical: { source: {}, months: [], positions: [] } })
+      body: JSON.stringify({
+        historical: {
+          source: {
+            alignedMonth: fixtureMonth,
+            referenceLedger: {
+              label: 'HOJA REFRESCO QA',
+              url: 'https://docs.google.com/spreadsheets/d/qa-refresh/edit'
+            }
+          },
+          months: [],
+          positions: []
+        }
+      })
     });
   });
   await manualRefreshPage.route('**/api/bingx/pnl-sources**', async (route) => {
@@ -1490,8 +1506,13 @@ try {
     timeout: 30_000
   });
   await manualRefreshPage.waitForFunction(() => {
-    const button = document.querySelector('#refresh-pnl');
-    return button && !button.disabled;
+    const globalButton = document.querySelector('#refresh-pnl');
+    const localButton = document.querySelector('#external-sheet-retry');
+    return globalButton
+      && !globalButton.disabled
+      && localButton
+      && !localButton.disabled
+      && !localButton.classList.contains('hidden');
   }, null, { timeout: 20_000 });
 
   Object.values(manualRefreshRequests).forEach((requests) => requests.splice(0));
@@ -1506,6 +1527,29 @@ try {
     .map(([key]) => key);
   if (missingForcedRefresh.length) {
     throw new Error(`El boton Actualizar no forzo estas fuentes: ${missingForcedRefresh.join(', ')}.`);
+  }
+
+  Object.values(manualRefreshRequests).forEach((requests) => requests.splice(0));
+  manualRefreshDelayMs = 350;
+  await manualRefreshPage.locator('#external-sheet-retry').click();
+  await manualRefreshPage.waitForFunction(() => {
+    const button = document.querySelector('#external-sheet-retry');
+    return button?.disabled
+      && button.getAttribute('aria-label') === 'Actualizando hoja externa'
+      && document.querySelector('#external-sheet-panel')?.getAttribute('aria-busy') === 'true';
+  }, null, { timeout: 2_000 });
+  await manualRefreshPage.waitForFunction(() => {
+    const button = document.querySelector('#external-sheet-retry');
+    return button
+      && !button.disabled
+      && button.getAttribute('aria-label') === 'Actualizar hoja externa'
+      && document.querySelector('#external-sheet-panel')?.getAttribute('aria-busy') === 'false';
+  }, null, { timeout: 20_000 });
+  const missingLocalForcedRefresh = Object.entries(manualRefreshRequests)
+    .filter(([, requests]) => !requests.some((url) => new URL(url).searchParams.get('refresh') === '1'))
+    .map(([key]) => key);
+  if (missingLocalForcedRefresh.length) {
+    throw new Error(`El refresco local de la hoja no forzo estas fuentes: ${missingLocalForcedRefresh.join(', ')}.`);
   }
   if (manualRefreshErrors.length) {
     throw new Error(`Errores JavaScript en el refresco manual: ${manualRefreshErrors.join(' | ')}`);
@@ -1545,7 +1589,8 @@ try {
     pnlSectionNavigationPassed: true,
     pnlSectionNavigationResponsivePassed: true,
     outcomeImpactPanelPassed: true,
-    manualPnlRefreshPassed: true
+    manualPnlRefreshPassed: true,
+    externalSheetLocalRefreshPassed: true
   }));
 } finally {
   await browser?.close().catch(() => {});

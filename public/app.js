@@ -168,6 +168,7 @@ const elements = {
   myLedgerLoadMore: document.querySelector('#my-ledger-load-more'),
   externalSheetPanel: document.querySelector('#external-sheet-panel'),
   externalSheetStatus: document.querySelector('#external-sheet-status'),
+  externalSheetRetry: document.querySelector('#external-sheet-retry'),
   externalSheetNative: document.querySelector('#external-sheet-native'),
   externalSheetSummary: document.querySelector('#external-sheet-summary'),
   externalSheetBody: document.querySelector('#external-sheet-body'),
@@ -660,11 +661,8 @@ function bindEvents() {
     });
   });
   elements.postsTab.closest('[role="tablist"]')?.addEventListener('keydown', handleViewTabsKeydown);
-  elements.refreshPnl.addEventListener('click', async () => {
-    await runAction(async () => {
-      await loadPnl({ force: true });
-    });
-  });
+  elements.refreshPnl.addEventListener('click', refreshPnlNow);
+  elements.externalSheetRetry?.addEventListener('click', refreshPnlNow);
   elements.monthReset.addEventListener('click', async () => {
     await runAction(async () => {
       const confirmed = confirm('Resetear el mes de rendimiento VST y real desde este momento? No toca ordenes abiertas ni la logica de senales.');
@@ -1153,6 +1151,12 @@ async function loadPnl({ force = false } = {}) {
     appState.externalSheetLoading = false;
     renderPnl();
   }
+}
+
+async function refreshPnlNow() {
+  await runAction(async () => {
+    await loadPnl({ force: true });
+  });
 }
 
 function readRefreshUrl(url, force = false) {
@@ -9001,6 +9005,14 @@ function renderExternalSheetEmbed() {
     : '';
   elements.externalSheetPanel.dataset.sheetState = loadState;
   elements.externalSheetPanel.setAttribute('aria-busy', appState.externalSheetLoading ? 'true' : 'false');
+  if (elements.externalSheetRetry) {
+    const canRetry = Boolean(source.href);
+    elements.externalSheetRetry.classList.toggle('hidden', !canRetry);
+    elements.externalSheetRetry.disabled = !canRetry || appState.externalSheetLoading || appState.pnlLoading;
+    const retryLabel = appState.externalSheetLoading ? 'Actualizando hoja externa' : 'Actualizar hoja externa';
+    elements.externalSheetRetry.title = retryLabel;
+    elements.externalSheetRetry.setAttribute('aria-label', retryLabel);
+  }
   elements.externalSheetStatus.title = [
     appState.referenceRefreshWarning ? friendlyBingxError(appState.referenceRefreshWarning) : '',
     freshness.latestAt ? `Última operación de la hoja: ${formatDateTime(freshness.latestAt)}` : '',
