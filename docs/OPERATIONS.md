@@ -311,6 +311,30 @@ Lectura rápida:
 - Tras reiniciar, la app restaura ese snapshot antes de consultar BingX. Si una fuente responde `system busy`, rate limit o error transitorio, solo esa fuente usa el último dato bueno y el panel la marca como obsoleta con su hora de lectura.
 - Un reset mensual, un cambio de credenciales o una recarga de reserva VST invalidan el snapshot; los cambios ordinarios de filtros no borran el histórico de respaldo.
 
+### Cambio automático de mes
+
+El backend comprueba el mes al arrancar y mantiene un temporizador adaptativo. Durante el mes revisa como máximo cada hora; cuando falta menos de una hora para el día 1, programa la siguiente comprobación exactamente para la medianoche local.
+
+Al comenzar el mes:
+
+1. Lee, sin enviar órdenes, los saldos y el PnL flotante de Demo VST y real.
+2. Descuenta de la equity VST las aportaciones registradas como reserva técnica.
+3. Guarda en `.data/config.json` un snapshot de frontera con equity estratégica, PnL flotante, hora de captura y calidad.
+4. Fija `vstPnlResetAt` y `livePnlResetAt` en el inicio local del mes.
+5. Invalida únicamente las cachés de PnL y vuelve a calcular el panel.
+
+Una posición abierta que atraviese medianoche no aporta al mes nuevo todo su PnL histórico. La cuenta mensual usa:
+
+```text
+PnL mes = ingresos posteriores al corte + flotante actual - flotante en la frontera
+```
+
+Si la posición se cierra después, el PnL realizado completo de BingX sigue quedando corregido por el flotante que ya pertenecía al mes anterior. El panel muestra esa partida como `Variación flotante mes` y permite distinguir el flotante vivo del valor capturado en el corte.
+
+El reset no cierra posiciones, no cancela órdenes, no modifica SL/TP, no borra operaciones y no cambia el tamaño por señal. Los capitales mensuales configurados y el porcentaje fijo continúan determinando el nominal.
+
+Si el proceso estuvo apagado y vuelve más de dos minutos después de medianoche, crea un snapshot marcado como tardío pero no lo aplica retroactivamente: no existe una cotización fiable de la frontera y la aplicación evita inventarla. El estado junto a `Reset mes` muestra si la frontera fue aplicada para VST y real, quedó tardía o no pudo leerse. El botón manual realiza el mismo corte en el instante de confirmación.
+
 Endpoint:
 
 ```text

@@ -242,6 +242,20 @@ Gestiona ejecución:
 - ejecuta cierres explícitos inmediatamente y conserva, sin condicionar la orden, la cotización y los tiempos de la solicitud como telemetría.
 - descuenta aportaciones técnicas VST de la equity estratégica y del ROI demo.
 
+### `src/monthlyAccounting.js`
+
+Implementa el corte contable de mes sin depender del servidor HTTP ni de la ejecución de señales. Sus funciones puras:
+
+- detectan de forma idempotente si falta aplicar el mes local;
+- calculan la próxima comprobación para alcanzar la medianoche con precisión;
+- normalizan y validan el snapshot persistente de frontera;
+- separan el flotante acumulado antes del día 1 de su variación posterior;
+- calculan el delta de equity desde la frontera cuando el histórico de ingresos no está disponible.
+
+`server.js` captura en paralelo los balances Demo VST y real mediante lecturas firmadas, persiste el resultado con `ConfigStore` y limpia solo las cachés de PnL. Una captura realizada hasta dos minutos después de la frontera puede aplicarse; una recuperación posterior queda registrada como tardía y se expone para diagnóstico, pero no corrige cifras con un precio que no corresponde a medianoche.
+
+La identidad contable para una posición que cruza de mes es `ingresos posteriores + flotante actual - flotante de apertura del mes`. Funciona tanto mientras la posición sigue abierta como cuando se realiza después del corte. La reserva técnica VST se resta antes de guardar la equity estratégica. Ninguna función de este módulo analiza señales ni llama a endpoints de creación, modificación o cierre de órdenes.
+
 ### `src/replicaAuditMatcher.js`
 
 Reconstruye el ciclo operativo completo:

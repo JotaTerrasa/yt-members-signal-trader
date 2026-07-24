@@ -2258,9 +2258,13 @@ function exchangeSourceWithPositions(source, positions, fallback) {
   });
   const open = positions.filter((position) => position.status === 'open');
   const closed = positions.filter((position) => position.status === 'closed');
-  const floating = roundPnl(open.reduce((sum, position) => (
+  const rawFloating = roundPnl(open.reduce((sum, position) => (
     sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
   ), 0));
+  const openingFloating = base.monthlyBoundary?.applied
+    ? finiteNumber(base.monthlyBoundary.openingUnrealized, 0)
+    : 0;
+  const floating = roundPnl(rawFloating - openingFloating);
   const exposure = roundPnl(open.reduce((sum, position) => (
     sum + Number(position.exposure || position.notional || 0)
   ), 0));
@@ -2285,6 +2289,8 @@ function exchangeSourceWithPositions(source, positions, fallback) {
     winRate: base.winRate ?? calculateWinRate(closed),
     realized,
     total: roundPnl(realized + floating),
+    rawFloating,
+    openingFloating,
     roiBaseline: positiveFiniteNumber(base.roiBaseline || base.baseline)
   };
 }
@@ -3230,10 +3236,12 @@ function renderPerformanceOverview(source = selectedPerformanceSource(), referen
       detail: `${closedCount} cierres`
     },
     {
-      label: 'Flotante',
+      label: source.monthlyBoundary?.applied ? 'Variación flotante mes' : 'Flotante',
       value: formatOptionalMoney(source.floating, asset),
       className: optionalAmountClass(source.floating),
-      detail: `${open.length} posiciones abiertas`
+      detail: source.monthlyBoundary?.applied
+        ? `Actual ${formatOptionalMoney(source.rawFloating, asset)} / corte ${formatOptionalMoney(source.openingFloating, asset)}`
+        : `${open.length} posiciones abiertas`
     },
     {
       label: 'Costes',
@@ -3593,7 +3601,16 @@ function monthResetStatusText(bingx = {}) {
   const month = bingx.monthlyResetMonth ? formatMonth(bingx.monthlyResetMonth) : 'mes actual';
   const vst = bingx.vstPnlResetAt ? formatDateTime(bingx.vstPnlResetAt) : 'sin corte';
   const live = bingx.livePnlResetAt ? formatDateTime(bingx.livePnlResetAt) : 'sin corte';
-  return `${month}: VST ${vst} - Real ${live}`;
+  const boundary = bingx.monthlyPnlBoundary;
+  if (!boundary || boundary.month !== bingx.monthlyResetMonth) {
+    return `${month}: VST ${vst} - Real ${live} · Sin snapshot de frontera`;
+  }
+  if (boundary.quality === 'late') {
+    return `${month}: VST ${vst} - Real ${live} · Snapshot tardío no aplicado`;
+  }
+  const vstBoundary = boundary.demo?.applied ? 'VST aplicado' : 'VST no disponible';
+  const liveBoundary = boundary.live?.applied ? 'real aplicado' : 'real no disponible';
+  return `${month}: VST ${vst} - Real ${live} · Frontera ${vstBoundary}, ${liveBoundary}`;
 }
 
 function renderSheetCapitalSimulator(source = {}, roi = sourceMonthlyRoi(source)) {
@@ -3697,7 +3714,8 @@ function sourceHeroDetail(source) {
       equityBaselineText
     ].filter(Boolean).join(' · ');
   }
-  return `${formatSourceMoney(source.realized, source)} realizado · ${formatSourceMoney(source.floating, source)} flotante`;
+  const floatingLabel = source.monthlyBoundary?.applied ? 'variación flotante mes' : 'flotante';
+  return `${formatSourceMoney(source.realized, source)} realizado · ${formatSourceMoney(source.floating, source)} ${floatingLabel}`;
 }
 
 function sourceSecondaryLines(source) {
@@ -3712,7 +3730,7 @@ function sourceSecondaryLines(source) {
   }
   return [
     `${formatSourceMoney(source.realized, source)} realizado`,
-    `${formatSourceMoney(source.floating, source)} flotante`
+    `${formatSourceMoney(source.floating, source)} ${source.monthlyBoundary?.applied ? 'variación flotante mes' : 'flotante'}`
   ];
 }
 
@@ -4127,7 +4145,11 @@ function renderAccountWaterfall(source) {
       { key: 'fees', label: 'Comisiones', value: fees },
       { key: 'funding', label: 'Financiación', value: funding }
     ] : []),
-    { key: 'floating', label: 'Flotante vivo', value: floating }
+    {
+      key: 'floating',
+      label: source.monthlyBoundary?.applied ? 'Variación flotante mes' : 'Flotante vivo',
+      value: floating
+    }
   ];
   const bars = waterfallBars(steps, total);
   const complete = !source.error;

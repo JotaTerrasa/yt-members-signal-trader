@@ -30,6 +30,13 @@ import { buildPromotionGate } from './promotionGate.js';
 import { alignReplicaAuditRecords } from './replicaAuditMatcher.js';
 import { annotateReplicaReferenceCoverage, buildCloseExecutionAnalysis, buildCloseFailureAttempts, buildEntryExecutionAnalysis, buildExecutionPriceChainAttribution, buildExecutionRouteAnalysis, buildMatchedGapAttribution, buildNetEntryShadowAudit, buildOpeningFailureAttempts, buildReplicaGapBridge, buildUnprocessedCloseSignals, classifyPairedOutcome, cohortAuditRowHasOrigin, cohortSampleStatus, cohortWindowBounds, commissionEvidence, estimateReplicaEconomics, isRetryableCloseError, observedCloseKind, referenceCoverageEndTime, replicaStopAlignment, scopeReplicaCohortInputs, summarizeExecutionLatency, summarizePairedOutcomeImpact, summarizePairedOutcomes, summarizeReplicaStops } from './operationalAudit.js';
 import { groupOperationalIncidents, summarizeOperationalIncidents } from './operationalIncidents.js';
+import {
+  buildMonthlyPnlBoundary,
+  monthlyEquityDelta,
+  monthlyPnlAdjustment,
+  monthlyResetPlan,
+  nextMonthlyResetCheckDelay
+} from './monthlyAccounting.js';
 import { buildSignalCoverage } from './signalCoverage.js';
 import { formatSseEvent, formatSseRetry } from './sseTransport.js';
 import { applyReferenceLedger, clearReferenceLedgerCache, loadReferenceLedger, resolvePortfolioSource } from './referenceLedger.js';
@@ -68,7 +75,7 @@ const EXCHANGE_STOP_CLOSE_TOLERANCE_PERCENT = 0.15;
 const DUPLICATE_SIGNAL_WINDOW_MS = 12 * 60 * 60 * 1000;
 const HEALTH_ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 const NO_VISIBLE_POSTS_ALERT_GRACE_MS = 15 * 60 * 1000;
-const MONTHLY_RESET_CHECK_MS = 60 * 60 * 1000;
+const MONTHLY_RESET_CHECK_MAX_MS = 60 * 60 * 1000;
 const PNL_CACHE_TTL_MS = 45_000;
 const ORDER_HISTORY_OVERLAP_MS = 10 * 60 * 1000;
 const ORDER_HISTORY_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1000;
@@ -173,6 +180,8 @@ let backupStorageLastAlertAt = 0;
 let backupStorageLastAlertLevel = null;
 let signalCoverageTimer = null;
 let bingxClockTimer = null;
+let monthlyResetTimer = null;
+let monthlyResetInFlight = null;
 let bingxClockInFlight = null;
 let bingxClockStatus = {
   available: false,
@@ -2114,9 +2123,11 @@ server.listen(port, host, () => {
   hydrateExecutionRetryQueuesFromStore();
   hydrateStopLossRetryQueueFromEvents();
   hydrateCloseGuardRetryQueueFromEvents();
-  checkAutomaticMonthlyReset({ reason: 'startup' }).catch((error) => {
-    pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
-  });
+  checkAutomaticMonthlyReset({ reason: 'startup' })
+    .catch((error) => {
+      pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
+    })
+    .finally(() => scheduleMonthlyResetCheck());
   syncExchangePositions({ reason: 'startup' }).catch((error) => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
     syncPriceSubscriptions();
@@ -2145,12 +2156,6 @@ setInterval(() => {
     pushLog({ level: 'warn', message: `BingX sync: ${error.message}`, at: new Date().toISOString() });
   });
 }, EXCHANGE_SYNC_POLL_MS).unref();
-
-setInterval(() => {
-  checkAutomaticMonthlyReset({ reason: 'timer' }).catch((error) => {
-    pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
-  });
-}, MONTHLY_RESET_CHECK_MS).unref();
 
 bingxClockTimer = setInterval(() => {
   measureBingXClock({ reason: 'poll' }).catch(() => {});
@@ -2493,17 +2498,44 @@ async function rememberPnlSourcesSnapshot(snapshot) {
 }
 
 async function resetMonthlyAccounting({ resetAt = new Date(), reason = 'manual' } = {}) {
+  if (monthlyResetInFlight) {
+    return monthlyResetInFlight;
+  }
+  monthlyResetInFlight = performMonthlyAccountingReset({ resetAt, reason });
+  try {
+    return await monthlyResetInFlight;
+  } finally {
+    monthlyResetInFlight = null;
+  }
+}
+
+async function performMonthlyAccountingReset({ resetAt = new Date(), reason = 'manual' } = {}) {
   const date = resetAt instanceof Date ? resetAt : new Date(resetAt);
   const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+  const month = currentMonthKeyForDate(safeDate);
+  const boundary = await captureMonthlyPnlBoundary({
+    resetAt: safeDate,
+    month,
+    reason
+  });
   const bingx = await configStore.resetMonthlyAccounting({
     resetAt: safeDate,
-    month: currentMonthKeyForDate(safeDate)
+    month,
+    boundary
   });
   await clearPnlCaches({ clearSnapshots: true });
   broadcast('bingx', { bingx });
+  const appliedModes = ['demo', 'live']
+    .filter((mode) => boundary?.[mode]?.applied)
+    .map((mode) => mode === 'demo' ? 'VST' : 'real');
+  const boundaryStatus = boundary?.quality === 'late'
+    ? 'snapshot tardío no aplicado'
+    : appliedModes.length
+      ? `snapshot aplicado a ${appliedModes.join(' y ')}`
+      : 'snapshot no disponible';
   pushLog({
     level: reason.startsWith('auto') ? 'warn' : 'info',
-    message: `Reset mensual aplicado (${reason}): VST ${bingx.vstPnlResetAt}, real ${bingx.livePnlResetAt}.`,
+    message: `Reset mensual aplicado (${reason}): VST ${bingx.vstPnlResetAt}, real ${bingx.livePnlResetAt}; ${boundaryStatus}.`,
     at: new Date().toISOString()
   });
   return bingx;
@@ -2511,30 +2543,65 @@ async function resetMonthlyAccounting({ resetAt = new Date(), reason = 'manual' 
 
 async function checkAutomaticMonthlyReset({ reason = 'timer' } = {}) {
   const now = new Date();
-  const month = currentMonthKeyForDate(now);
   const bingx = configStore.getBingX();
-  const vstResetMonth = monthKeyFromIso(bingx.vstPnlResetAt);
-  const liveResetMonth = monthKeyFromIso(bingx.livePnlResetAt);
-  if (bingx.monthlyResetMonth === month && vstResetMonth === month && liveResetMonth === month) {
+  const plan = monthlyResetPlan({ bingx, now });
+  if (!plan.required) {
     return null;
   }
 
   return resetMonthlyAccounting({
-    resetAt: resetDateForMonthlyCatchUp({ bingx, month, now }),
+    resetAt: plan.resetAt,
     reason: reason === 'startup' ? 'auto-startup' : 'auto'
   });
 }
 
-function resetDateForMonthlyCatchUp({ bingx = {}, month, now = new Date() } = {}) {
-  if (bingx.monthlyResetMonth === month) {
-    const existing = [bingx.livePnlResetAt, bingx.vstPnlResetAt]
-      .map((value) => new Date(value || 0))
-      .find((date) => Number.isFinite(date.getTime()) && currentMonthKeyForDate(date) === month);
-    if (existing) {
-      return existing;
+async function captureMonthlyPnlBoundary({ resetAt, month, reason }) {
+  const config = configStore.getBingX();
+  const results = await Promise.allSettled([
+    futuresTrader.getExchangeBalance({ mode: 'demo' }),
+    futuresTrader.getExchangeBalance({ mode: 'live' })
+  ]);
+  const capturedAt = new Date();
+  const accountResult = (result) => {
+    if (result.status === 'fulfilled' && result.value) {
+      return { balance: result.value };
     }
+    const message = result.status === 'rejected'
+      ? safePublicMessage(result.reason?.message || String(result.reason))
+      : 'Saldo no disponible';
+    return { error: message };
+  };
+
+  return buildMonthlyPnlBoundary({
+    month,
+    resetAt,
+    capturedAt,
+    reason,
+    vstExternalFunding: config.vstTechnicalExternalFundingVST,
+    accounts: {
+      demo: accountResult(results[0]),
+      live: accountResult(results[1])
+    }
+  });
+}
+
+function scheduleMonthlyResetCheck() {
+  if (monthlyResetTimer) {
+    clearTimeout(monthlyResetTimer);
   }
-  return monthStartDate(now);
+  const delay = nextMonthlyResetCheckDelay({
+    now: new Date(),
+    maxDelayMs: MONTHLY_RESET_CHECK_MAX_MS
+  });
+  monthlyResetTimer = setTimeout(() => {
+    monthlyResetTimer = null;
+    checkAutomaticMonthlyReset({ reason: 'timer' })
+      .catch((error) => {
+        pushLog({ level: 'warn', message: `Reset mensual: ${error.message}`, at: new Date().toISOString() });
+      })
+      .finally(() => scheduleMonthlyResetCheck());
+  }, delay);
+  monthlyResetTimer.unref();
 }
 
 async function clearPnlCaches({ clearSnapshots = false } = {}) {
@@ -4531,10 +4598,11 @@ async function exchangePnlSource({ key, mode, label, modeLabel, asset }) {
 
 function summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, positions = [], balance = null, commissionRate = null, error = '' }) {
   const month = currentMonthKey();
+  const config = configStore.getBingX();
   const rows = (pnl?.months || []).filter((row) => row.month === month);
   const income = summarizePnlRows(rows);
   const open = positions.filter((position) => position.status === 'open');
-  const floating = roundMoney(open.reduce((sum, position) => (
+  const rawFloating = roundMoney(open.reduce((sum, position) => (
     sum + Number(position.unrealizedPnl ?? position.paperPnl ?? 0)
   ), 0));
   const exposure = roundMoney(open.reduce((sum, position) => (
@@ -4549,6 +4617,14 @@ function summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, p
     commissionRate
   });
   const technicalReserve = mode === 'demo' ? demoTechnicalReserveAccounting() : null;
+  const adjustment = monthlyPnlAdjustment({
+    realized: realizedNet,
+    rawFloating,
+    boundary: config.monthlyPnlBoundary,
+    mode,
+    month,
+    resetAt: mode === 'demo' ? config.vstPnlResetAt : config.livePnlResetAt
+  });
 
   return {
     key,
@@ -4559,10 +4635,13 @@ function summarizeExchangePnlSource({ key, mode, label, modeLabel, asset, pnl, p
     available: true,
     status: sourceStatusText({ open, realizedTrades, error }),
     error: error ? sourceErrorStatus(error) : '',
-    total: roundMoney(realizedNet + floating),
-    realized: roundMoney(realizedNet),
+    total: adjustment.total,
+    realized: adjustment.realized,
     grossRealized: roundMoney(income.realized || 0),
-    floating,
+    floating: adjustment.floating,
+    rawFloating: adjustment.rawFloating,
+    openingFloating: adjustment.openingUnrealized,
+    monthlyBoundary: adjustment.monthlyBoundary,
     fees: roundMoney(income.fees || 0),
     funding: roundMoney(income.funding || 0),
     adjustments: roundMoney(income.adjustments || 0),
@@ -4585,21 +4664,42 @@ function fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, bala
   }
 
   const baseline = mode === 'demo' ? demoBaseline() : null;
+  const config = configStore.getBingX();
+  const month = currentMonthKey();
   const technicalReserve = mode === 'demo' ? demoTechnicalReserveAccounting() : null;
   const effectiveEquity = mode === 'demo'
     ? Number(balance.equity || 0) - Number(technicalReserve.externalFunding || 0)
     : Number(balance.equity || 0);
-  const floating = roundMoney(Number(balance.unrealizedProfit || 0));
-  const total = Number.isFinite(baseline)
-    ? roundMoney(effectiveEquity - baseline)
-    : floating;
+  const rawFloating = roundMoney(Number(balance.unrealizedProfit || 0));
+  const resetAt = mode === 'demo' ? config.vstPnlResetAt : config.livePnlResetAt;
+  const floatingAdjustment = monthlyPnlAdjustment({
+    realized: 0,
+    rawFloating,
+    boundary: config.monthlyPnlBoundary,
+    mode,
+    month,
+    resetAt
+  });
+  const equityDelta = monthlyEquityDelta({
+    strategyEquity: effectiveEquity,
+    boundary: config.monthlyPnlBoundary,
+    mode,
+    month,
+    resetAt
+  });
+  const total = equityDelta.total !== null
+    ? equityDelta.total
+    : Number.isFinite(baseline)
+      ? roundMoney(effectiveEquity - baseline)
+      : rawFloating;
+  const floating = floatingAdjustment.floating;
   const realized = roundMoney(total - floating);
 
   return {
     key,
     label,
     modeLabel,
-    month: currentMonthKey(),
+    month,
     asset: balance.asset || asset,
     available: true,
     status: sourceErrorStatus(error) === 'No disponible'
@@ -4610,6 +4710,9 @@ function fallbackPnlSourceFromBalance({ key, mode, label, modeLabel, asset, bala
     realized,
     grossRealized: realized,
     floating,
+    rawFloating,
+    openingFloating: floatingAdjustment.openingUnrealized,
+    monthlyBoundary: equityDelta.monthlyBoundary || floatingAdjustment.monthlyBoundary,
     fees: 0,
     funding: 0,
     exposure: roundMoney(Number(balance.usedMargin || 0)),
@@ -6027,6 +6130,10 @@ async function performShutdown() {
     clearInterval(bingxClockTimer);
     bingxClockTimer = null;
   }
+  if (monthlyResetTimer) {
+    clearTimeout(monthlyResetTimer);
+    monthlyResetTimer = null;
+  }
   for (const item of pendingStopLossRetries.values()) {
     if (item.timer) {
       clearTimeout(item.timer);
@@ -6102,8 +6209,4 @@ function currentMonthKeyForDate(date = new Date()) {
 function monthKeyFromIso(value) {
   const date = new Date(value || 0);
   return Number.isFinite(date.getTime()) ? currentMonthKeyForDate(date) : '';
-}
-
-function monthStartDate(date = new Date()) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
 }

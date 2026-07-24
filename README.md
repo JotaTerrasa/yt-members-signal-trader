@@ -392,6 +392,7 @@ Incluye:
 - hoja de Google de referencia.
 - ROI mensual.
 - Equity frente al capital inicial en Demo VST y live real.
+- Corte automático el día 1 con snapshot de equity y flotante para que las posiciones abiertas solo aporten al mes nuevo su variación posterior a medianoche.
 - Simulador de capital inicial para Google Sheet.
 - Hoja de Google en vista nativa, con resumen, cabecera fija y scroll; el enlace original permanece disponible. El estado indica hasta qué operación llegan los datos y avisa cuando la referencia supera 24 horas de retraso, en lugar de confundir la hora de lectura local con la frescura de la hoja. Las filas sin PnL final se conservan como abiertas: su segundo precio se presenta como SL, no como salida, y no entran en el win rate, la curva ni el simulador hasta que la hoja publique el resultado.
 - Refresco pasivo de la hoja y su auditoría cada cinco minutos mientras PnL está visible. Conserva el último dato válido y aplica una espera exponencial de hasta treinta minutos si Google falla.

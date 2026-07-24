@@ -1,5 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { normalizeMonthlyPnlBoundary } from './monthlyAccounting.js';
 import { QueuedJsonWriter } from './queuedJsonWriter.js';
 
 const defaultConfig = {
@@ -90,7 +91,8 @@ const defaultConfig = {
     vstPnlResetAt: null,
     livePnlResetAt: null,
     monthlyResetAt: null,
-    monthlyResetMonth: null
+    monthlyResetMonth: null,
+    monthlyPnlBoundary: null
   }
 };
 
@@ -280,6 +282,7 @@ export class ConfigStore {
       livePnlResetAt: bingx.livePnlResetAt || null,
       monthlyResetAt: bingx.monthlyResetAt || null,
       monthlyResetMonth: bingx.monthlyResetMonth || null,
+      monthlyPnlBoundary: normalizeMonthlyPnlBoundary(bingx.monthlyPnlBoundary),
       apiKeyConfigured: Boolean(bingx.apiKey),
       apiSecretConfigured: Boolean(bingx.apiSecret),
       apiKeyPreview: tokenPreview(bingx.apiKey),
@@ -405,7 +408,8 @@ export class ConfigStore {
         ? null
         : isoDateOrCurrent(input.livePnlResetAt, current.livePnlResetAt || defaultConfig.bingx.livePnlResetAt),
       monthlyResetAt: current.monthlyResetAt || null,
-      monthlyResetMonth: current.monthlyResetMonth || null
+      monthlyResetMonth: current.monthlyResetMonth || null,
+      monthlyPnlBoundary: normalizeMonthlyPnlBoundary(current.monthlyPnlBoundary)
     };
 
     if (input.clearApiKey) {
@@ -486,13 +490,14 @@ export class ConfigStore {
     return this.getBingX();
   }
 
-  async resetMonthlyAccounting({ resetAt = new Date(), month = null } = {}) {
+  async resetMonthlyAccounting({ resetAt = new Date(), month = null, boundary = null } = {}) {
     const date = resetAt instanceof Date ? resetAt : new Date(resetAt);
     const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
     this.data.bingx.vstPnlResetAt = safeDate.toISOString();
     this.data.bingx.livePnlResetAt = safeDate.toISOString();
     this.data.bingx.monthlyResetAt = new Date().toISOString();
     this.data.bingx.monthlyResetMonth = clean(month) || monthKey(safeDate);
+    this.data.bingx.monthlyPnlBoundary = normalizeMonthlyPnlBoundary(boundary);
     await this.save();
     return this.getBingX();
   }
@@ -674,7 +679,8 @@ function normalizeBingXConfig(input = {}) {
     vstTechnicalLastTopUpAt: isoDateOrCurrent(input.vstTechnicalLastTopUpAt, null),
     improvementCohortHistory: normalizeCohortHistory(input.improvementCohortHistory),
     vstBaseCapital: monthlyInitialCapitalVST,
-    vstCapitalPercent: monthlyOrderPercent
+    vstCapitalPercent: monthlyOrderPercent,
+    monthlyPnlBoundary: normalizeMonthlyPnlBoundary(input.monthlyPnlBoundary)
   };
 }
 

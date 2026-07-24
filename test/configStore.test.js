@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigStore } from '../src/configStore.js';
+import { buildMonthlyPnlBoundary } from '../src/monthlyAccounting.js';
 
 test('la reserva VST y sus aportaciones sobreviven a guardados y reinicios', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'futures-magician-config-'));
@@ -92,6 +93,61 @@ test('iniciar una cohorte nueva archiva la frontera anterior', async () => {
         endedAt: '2026-07-15T08:00:00.000Z'
       }
     ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('el corte mensual persiste el snapshot de frontera tras reiniciar', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'futures-magician-monthly-boundary-'));
+  const filePath = join(directory, 'config.json');
+
+  try {
+    const resetAt = new Date(2026, 7, 1, 0, 0, 0);
+    const boundary = buildMonthlyPnlBoundary({
+      month: '2026-08',
+      resetAt,
+      capturedAt: new Date(resetAt.getTime() + 10_000),
+      vstExternalFunding: 555,
+      accounts: {
+        demo: {
+          balance: {
+            asset: 'VST',
+            balance: 850,
+            equity: 855,
+            unrealizedProfit: 5
+          }
+        },
+        live: {
+          error: 'Saldo no disponible'
+        }
+      }
+    });
+    const store = new ConfigStore(filePath);
+    await store.init();
+    await store.resetMonthlyAccounting({
+      resetAt,
+      month: '2026-08',
+      boundary
+    });
+    await store.updateBingX({
+      ...store.getBingX(),
+      enabled: true,
+      mode: 'demo'
+    });
+
+    const restored = new ConfigStore(filePath);
+    await restored.init();
+    const bingx = restored.getBingX();
+
+    assert.equal(bingx.monthlyResetMonth, '2026-08');
+    assert.equal(bingx.vstPnlResetAt, resetAt.toISOString());
+    assert.equal(bingx.livePnlResetAt, resetAt.toISOString());
+    assert.equal(bingx.monthlyPnlBoundary.month, '2026-08');
+    assert.equal(bingx.monthlyPnlBoundary.demo.applied, true);
+    assert.equal(bingx.monthlyPnlBoundary.demo.strategyEquity, 300);
+    assert.equal(bingx.monthlyPnlBoundary.live.applied, false);
+    assert.equal(bingx.monthlyPnlBoundary.live.error, 'Saldo no disponible');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
